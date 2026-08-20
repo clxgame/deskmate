@@ -35,8 +35,36 @@ The public updater repository is `clxgame/deskmate`. The app checks GitHub Relea
 Release prerequisites:
 
 - `TAURI_SIGNING_PRIVATE_KEY`
-- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, if the private key is encrypted
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
 
 Keep signing keys in the local environment or GitHub Actions secrets only. Never commit or publish the private signing key, password, tokens, or `.env` files.
 
-For a public release, bump the app version, build signed artifacts, publish a GitHub Release with the installer, signature, and `latest.json`, then verify a real installed older build can update to the new release from `clxgame/deskmate`.
+Before tagging, keep these versions identical:
+
+- `package.json`
+- `src-tauri/Cargo.toml`
+- `src-tauri/tauri.conf.json`
+
+Check the release version locally:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\check-version.ps1 -TagName v0.1.1
+```
+
+Local signed build:
+
+```powershell
+$env:TAURI_SIGNING_PRIVATE_KEY = "<private key>"
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = "<password>"
+powershell -ExecutionPolicy Bypass -File scripts\release.ps1 -Tag v0.1.1
+```
+
+Local draft publish for already-built artifacts:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\publish.ps1 -Tag v0.1.1
+```
+
+The GitHub Actions release workflow runs on `v*` tags. It checks the tag against the app version, builds the signed Windows NSIS installer, uploads updater signatures and `latest.json`, and creates a draft GitHub Release first. Inspect the draft assets before publishing the release.
+
+For a public release, bump the app version, push a matching tag, publish the draft GitHub Release with the installer, signature, and `latest.json`, then verify a real installed older build can update to the new release from `clxgame/deskmate`.

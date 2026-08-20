@@ -44,6 +44,17 @@ $cargoVersion = Read-CargoVersion (Join-Path $root "src-tauri\Cargo.toml")
 $version = [string]$tauri.version
 Assert-SemVer $version "src-tauri\tauri.conf.json version"
 
+if ($null -eq $tauri.app.security.csp) {
+  throw "Production CSP must be configured in src-tauri\tauri.conf.json"
+}
+
+$debugWindows = @($tauri.app.windows | Where-Object {
+  [string]$_.additionalBrowserArgs -match '(?i)(^|\s)--remote-debugging-(port|pipe)(=|\s|$)'
+})
+if ($debugWindows.Count -gt 0) {
+  throw "Production windows must not enable WebView remote debugging"
+}
+
 if ([string]$package.version -ne $version) {
   throw "Version mismatch: package.json=$($package.version), tauri.conf.json=$version"
 }

@@ -2,7 +2,7 @@
 # Requires `gh` to be authenticated (run `gh auth login` once first).
 #
 # Usage:
-#   powershell -File scripts\publish.ps1 [-Repo "clxgame/deskmate"] [-Tag "v0.1.0"]
+#   powershell -File scripts\publish.ps1 [-Repo "clxgame/deskmate"] [-Tag "v0.1.2"]
 
 param(
   [string]$Repo = "clxgame/deskmate",
@@ -51,6 +51,30 @@ foreach ($artifact in $artifacts) {
   }
   if ((Get-Item -LiteralPath $artifact).Length -le 0) {
     throw "Release artifact is empty: $artifact"
+  }
+}
+
+$manifestPath = Join-Path $nsisDir "latest.json"
+$signaturePath = Join-Path $nsisDir "$installer.sig"
+$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+$expectedUrl = "https://github.com/$Repo/releases/download/$tag/$installer"
+$signature = (Get-Content -LiteralPath $signaturePath -Raw).Trim()
+if ([string]$manifest.version -ne $version) {
+  throw "latest.json version mismatch: expected $version"
+}
+if ([string]::IsNullOrWhiteSpace($signature)) {
+  throw "Updater signature is empty"
+}
+foreach ($platform in @("windows-x86_64", "windows-x86_64-nsis")) {
+  $entry = $manifest.platforms.$platform
+  if ($null -eq $entry) {
+    throw "latest.json missing platform: $platform"
+  }
+  if ([string]$entry.url -ne $expectedUrl) {
+    throw "latest.json URL mismatch for ${platform}: $($entry.url)"
+  }
+  if ([string]$entry.signature -ne $signature) {
+    throw "latest.json signature mismatch for $platform"
   }
 }
 

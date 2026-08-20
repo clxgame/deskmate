@@ -16,6 +16,9 @@ src-tauri/target/
 *.pfx
 *.token
 *secret*
+credentials*.json
+client_secret*.json
+*credential*
 
 # Local tooling and logs
 .omo/

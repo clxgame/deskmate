@@ -4,6 +4,9 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 
+mod update_repo;
+use update_repo::{migrated_update_repo, DEFAULT_UPDATE_REPO};
+
 /// A scheduled task: at `time` (HH:MM, daily), auto-send `prompt` to the AI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -63,7 +66,7 @@ impl Default for Settings {
             shortcut_toggle_pet: String::new(),
             persona_id: "default".into(),
             user_name: String::new(),
-            update_repo: "clx/deskmate".into(),
+            update_repo: DEFAULT_UPDATE_REPO.into(),
         }
     }
 }
@@ -73,17 +76,20 @@ pub struct SettingsState(pub Mutex<Settings>);
 fn settings_path(app: &tauri::AppHandle) -> PathBuf {
     app.path()
         .app_data_dir()
+        // SAFE-EXPECT: Tauri provides an app data directory after app setup.
         .expect("app data dir unavailable")
         .join("settings.json")
 }
 
 pub fn load(app: &tauri::AppHandle) -> Settings {
-    std::fs::read_to_string(settings_path(app))
+    let mut settings: Settings = std::fs::read_to_string(settings_path(app))
         .ok()
         // Tolerate a UTF-8 BOM (e.g. written by PowerShell).
         .map(|s| s.trim_start_matches('\u{feff}').to_string())
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    settings.update_repo = migrated_update_repo(&settings.update_repo).into_owned();
+    settings
 }
 
 fn save(app: &tauri::AppHandle, settings: &Settings) -> Result<(), String> {
@@ -97,6 +103,7 @@ fn save(app: &tauri::AppHandle, settings: &Settings) -> Result<(), String> {
 
 #[tauri::command]
 pub fn get_settings(state: tauri::State<SettingsState>) -> Settings {
+    // SAFE-UNWRAP: a poisoned settings mutex means an earlier command panicked.
     state.0.lock().unwrap().clone()
 }
 
@@ -104,11 +111,14 @@ pub fn get_settings(state: tauri::State<SettingsState>) -> Settings {
 pub fn set_settings(
     app: tauri::AppHandle,
     state: tauri::State<SettingsState>,
-    settings: Settings,
+    mut settings: Settings,
 ) -> Result<(), String> {
+    settings.update_repo = migrated_update_repo(&settings.update_repo).into_owned();
+    // SAFE-UNWRAP: a poisoned settings mutex means an earlier command panicked.
     let old = { state.0.lock().unwrap().clone() };
     save(&app, &settings)?;
     apply(&app, &old, &settings);
+    // SAFE-UNWRAP: a poisoned settings mutex means an earlier command panicked.
     *state.0.lock().unwrap() = settings.clone();
     // Notify every window (pet scale, persona, model...) of the change.
     let _ = app.emit("deskmate://settings-changed", &settings);
@@ -205,6 +215,7 @@ pub fn start_scheduler(app: tauri::AppHandle) {
                 let Some(state) = app.try_state::<SettingsState>() else {
                     continue;
                 };
+                // SAFE-UNWRAP: a poisoned settings mutex means an earlier command panicked.
                 let guard = state.0.lock().unwrap();
                 guard
                     .scheduled_tasks

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getAppVersion } from "../lib/settings";
 import { updateApp, type UpdateEvent } from "../lib/updater";
 import type { Dict } from "../lib/i18n";
@@ -19,6 +19,7 @@ function updateErrorMessage(t: Dict, error: Error | string): string {
 export function UpdateFooter({ repo, t }: { readonly repo: string; readonly t: Dict }) {
   const [version, setVersion] = useState("");
   const [state, setState] = useState(initialUpdateState);
+  const updateInFlight = useRef(false);
 
   useEffect(() => {
     void getAppVersion().then(setVersion, (error: unknown) => {
@@ -59,11 +60,14 @@ export function UpdateFooter({ repo, t }: { readonly repo: string; readonly t: D
   };
 
   const onUpdate = async (): Promise<void> => {
+    if (updateInFlight.current) return;
+
     if (!repo.trim()) {
       dispatch({ type: "fail", message: t.updateNeedRepo });
       return;
     }
 
+    updateInFlight.current = true;
     dispatch({ type: "check" });
     try {
       const outcome = await updateApp(repo, onEvent);
@@ -85,6 +89,8 @@ export function UpdateFooter({ repo, t }: { readonly repo: string; readonly t: D
         return;
       }
       dispatch({ type: "fail", message: t.updateError });
+    } finally {
+      updateInFlight.current = false;
     }
   };
 

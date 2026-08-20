@@ -1,8 +1,31 @@
-use std::fmt;
+use std::{
+    fmt,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use serde::{Serialize, Serializer};
 use tauri::{ipc::Channel, AppHandle};
 use tauri_plugin_updater::{Error as TauriUpdaterError, UpdaterExt};
+
+static UPDATE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+
+#[derive(Debug)]
+struct UpdateGuard;
+
+impl UpdateGuard {
+    fn acquire() -> Result<Self, UpdateError> {
+        UPDATE_IN_PROGRESS
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map(|_| Self)
+            .map_err(|_| UpdateError::InProgress)
+    }
+}
+
+impl Drop for UpdateGuard {
+    fn drop(&mut self) {
+        UPDATE_IN_PROGRESS.store(false, Ordering::Release);
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Repository {
@@ -78,6 +101,7 @@ impl Repository {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum UpdateError {
+    InProgress,
     InvalidRepository,
     PlaceholderRepository,
     ManifestNotFound,
@@ -89,6 +113,7 @@ pub enum UpdateError {
 impl UpdateError {
     const fn code(&self) -> &'static str {
         match self {
+            Self::InProgress => "in_progress",
             Self::InvalidRepository => "invalid_repo",
             Self::PlaceholderRepository => "placeholder",
             Self::ManifestNotFound => "manifest_not_found",
@@ -175,6 +200,7 @@ pub async fn update_app(
     repo: String,
     on_event: Channel<UpdateEvent>,
 ) -> Result<UpdateOutcome, UpdateError> {
+    let _guard = UpdateGuard::acquire()?;
     let endpoint = Repository::parse(&repo)?.endpoint()?;
     send_event(&on_event, UpdateEvent::Checking);
 

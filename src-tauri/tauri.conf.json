@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "deskmate",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "identifier": "com.deskmate.desktop",
   "build": {
     "beforeDevCommand": "bun run dev",
@@ -16,7 +16,7 @@
         "label": "pet",
         "url": "pet.html",
         "title": "deskmate",
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=9333",
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection",
         "width": 320,
         "height": 420,
         "transparent": true,
@@ -30,7 +30,7 @@
         "label": "chat",
         "url": "chat.html",
         "title": "deskmate chat",
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=9333",
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection",
         "width": 420,
         "height": 560,
         "x": -10000,
@@ -48,7 +48,7 @@
         "label": "settings",
         "url": "settings.html",
         "title": "deskmate 设置",
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=9333",
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection",
         "width": 720,
         "height": 520,
         "x": -10000,
@@ -63,7 +63,16 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": "'self' customprotocol: asset:",
+        "connect-src": "ipc: http://ipc.localhost http://127.0.0.1:*",
+        "img-src": "'self' asset: http://asset.localhost blob: data:",
+        "media-src": "'self' asset: http://asset.localhost blob: data:",
+        "style-src": "'self' 'unsafe-inline'",
+        "object-src": "'none'",
+        "base-uri": "'self'",
+        "frame-ancestors": "'none'"
+      }
     }
   },
   "bundle": {

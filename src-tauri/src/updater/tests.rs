@@ -1,4 +1,21 @@
-use super::Repository;
+use super::{Repository, UpdateGuard};
+
+#[test]
+fn concurrent_update_is_rejected_until_the_active_update_finishes() {
+    // Given
+    let active = UpdateGuard::acquire().expect("first update must acquire the guard");
+
+    // When
+    let concurrent = UpdateGuard::acquire();
+
+    // Then
+    assert_eq!(
+        concurrent.expect_err("concurrent update must fail").code(),
+        "in_progress"
+    );
+    drop(active);
+    assert!(UpdateGuard::acquire().is_ok());
+}
 
 #[test]
 fn repository_endpoint_when_owner_and_name_are_valid() {

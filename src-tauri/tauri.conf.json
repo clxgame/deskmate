@@ -1,0 +1,89 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "deskmate",
+  "version": "0.1.0",
+  "identifier": "com.deskmate.desktop",
+  "build": {
+    "beforeDevCommand": "bun run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "bun run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "pet",
+        "url": "pet.html",
+        "title": "deskmate",
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=9333",
+        "width": 320,
+        "height": 420,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "shadow": false
+      },
+      {
+        "label": "chat",
+        "url": "chat.html",
+        "title": "deskmate chat",
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=9333",
+        "width": 420,
+        "height": 560,
+        "x": -10000,
+        "y": -10000,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "shadow": false,
+        "visible": true,
+        "focus": false
+      },
+      {
+        "label": "settings",
+        "url": "settings.html",
+        "title": "deskmate 设置",
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=9333",
+        "width": 720,
+        "height": 520,
+        "x": -10000,
+        "y": -10000,
+        "decorations": false,
+        "transparent": true,
+        "resizable": false,
+        "shadow": true,
+        "skipTaskbar": false,
+        "visible": true,
+        "focus": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "nsis",
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "resources": ["resources/**/*"]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE0MzAxREYxQkQzRDc4NkQKUldSdGVEMjk4UjB3Rk9MWTdaZ2oyc3BXSUN0UmhsRkV4azR6OTBGVWQzanhWL0ZQbXNvMjhXcVUK",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

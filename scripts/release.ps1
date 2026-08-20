@@ -2,7 +2,7 @@
 # latest.json manifest for local publishing.
 #
 # Usage:
-#   powershell -File scripts\release.ps1 [-Repo "clxgame/deskmate"] [-Tag "v0.1.1"] [-Password "..."]
+#   powershell -File scripts\release.ps1 [-Repo "clxgame/deskmate"] [-Tag "v0.1.2"] [-Password "..."]
 #
 # The signing key is read from TAURI_SIGNING_PRIVATE_KEY first, then
 # %USERPROFILE%\.tauri\deskmate.key. The signing password must be supplied by

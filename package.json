@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "prepare:sidecar": "bun scripts/prepare-opencode.ts",
     "preview": "vite preview",
     "tauri": "tauri"
   },
@@ -22,6 +23,7 @@
     "@types/react-dom": "^19.2.3",
     "@types/three": "^0.182.0",
     "@vitejs/plugin-react": "^5.1.4",
+    "opencode-ai": "1.18.21",
     "typescript": "^5.9.3",
     "vite": "^7.3.4"
   }

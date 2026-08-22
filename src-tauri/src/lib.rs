@@ -96,14 +96,22 @@ pub(crate) fn show_chat(app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Resolve the opencode binary: bundled resources first, then npm global, then PATH.
+/// Resolve the opencode binary: bundled resources first, then platform-specific
+/// package-manager locations, then PATH.
 fn resolve_opencode(app: &tauri::AppHandle) -> PathBuf {
+    let executable = if cfg!(windows) {
+        "opencode.exe"
+    } else {
+        "opencode"
+    };
+
     if let Ok(dir) = app.path().resource_dir() {
-        let bundled = dir.join("resources").join("opencode").join("opencode.exe");
+        let bundled = dir.join("resources").join("opencode").join(executable);
         if bundled.exists() {
             return bundled;
         }
     }
+
     // npm global install ships a real .exe next to the shim.
     if let Ok(appdata) = std::env::var("APPDATA") {
         let npm = PathBuf::from(appdata)
@@ -116,6 +124,35 @@ fn resolve_opencode(app: &tauri::AppHandle) -> PathBuf {
             return npm;
         }
     }
+
+    // Apps opened from Finder do not inherit the interactive shell PATH, so
+    // probe the standard Homebrew and user-level install locations on macOS.
+    #[cfg(target_os = "macos")]
+    {
+        for path in [
+            PathBuf::from("/opt/homebrew/bin/opencode"),
+            PathBuf::from("/usr/local/bin/opencode"),
+        ] {
+            if path.exists() {
+                return path;
+            }
+        }
+
+        if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+            for relative in [
+                ".opencode/bin/opencode",
+                ".local/bin/opencode",
+                ".bun/bin/opencode",
+                "bin/opencode",
+            ] {
+                let path = home.join(relative);
+                if path.exists() {
+                    return path;
+                }
+            }
+        }
+    }
+
     PathBuf::from("opencode")
 }
 
@@ -200,6 +237,8 @@ fn spawn_sidecar(app: &tauri::AppHandle, port: u16) -> std::io::Result<Child> {
         // localhost dev origins are allowed by default.
         .arg("--cors")
         .arg("http://tauri.localhost")
+        .arg("--cors")
+        .arg("tauri://localhost")
         .arg("--print-logs")
         .current_dir(&workspace)
         // NOTE: we intentionally reuse the user's global opencode config +

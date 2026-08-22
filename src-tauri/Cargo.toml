@@ -1,6 +1,6 @@
 [package]
 name = "deskmate"
-version = "0.1.2"
+version = "0.1.4"
 description = "Desktop AI pet powered by an embedded OpenCode sidecar"
 edition = "2021"
 

@@ -10,7 +10,9 @@ import {
   getAppVersion,
   getSettings,
   hideSettingsWindow,
+  emitPetScalePreview,
   listModels,
+  previewPetScale,
   setSettings,
   verifyApiKey,
   type ProviderModel,
@@ -18,6 +20,13 @@ import {
 } from "../lib/settings";
 import { dict, verifyError, LANGS, type Dict } from "../lib/i18n";
 import { UpdateFooter } from "./UpdateFooter";
+import {
+  DEFAULT_PERSONA_ID,
+  PERSONAS,
+  personaById,
+  personaLabel,
+} from "../pet/personaCatalog";
+import { THEME_IDS, type ThemeId } from "./theme";
 import "./settings.css";
 
 type TabId = "general" | "ai" | "widget" | "shortcuts" | "account" | "about";
@@ -48,6 +57,20 @@ function tabLabel(t: Dict, id: TabId): string {
   }
 }
 
+const THEME_LABEL_KEYS: Record<
+  ThemeId,
+  "themeDark" | "themeMint" | "themePeach" | "themeLavender"
+> = {
+  dark: "themeDark",
+  mint: "themeMint",
+  peach: "themePeach",
+  lavender: "themeLavender",
+};
+
+function themeLabel(t: Dict, id: ThemeId): string {
+  return t[THEME_LABEL_KEYS[id]];
+}
+
 const SAVE_DELAY_MS = 400;
 
 export default function SettingsApp() {
@@ -64,7 +87,9 @@ export default function SettingsApp() {
         const loaded = await getSettings();
         if (!closed) setLocalSettings(loaded);
       } catch (error) {
-        console.error(error instanceof Error ? error : new Error(String(error)));
+        console.error(
+          error instanceof Error ? error : new Error(String(error)),
+        );
       }
     })();
     return () => {
@@ -80,21 +105,24 @@ export default function SettingsApp() {
   }, []);
 
   /** Update one field locally, then persist the whole object debounced. */
-  const patch = useCallback(<K extends keyof Settings>(key: K, value: Settings[K]) => {
-    setLocalSettings((prev) => {
-      if (!prev) return prev;
-      const next: Settings = { ...prev, [key]: value };
-      if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
-      saveTimer.current = window.setTimeout(() => {
-        saveTimer.current = null;
-        void setSettings(next).catch((e: unknown) => console.error(e));
-      }, SAVE_DELAY_MS);
-      return next;
-    });
-  }, []);
+  const patch = useCallback(
+    <K extends keyof Settings>(key: K, value: Settings[K]) => {
+      setLocalSettings((prev) => {
+        if (!prev) return prev;
+        const next: Settings = { ...prev, [key]: value };
+        if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+        saveTimer.current = window.setTimeout(() => {
+          saveTimer.current = null;
+          void setSettings(next).catch((e: unknown) => console.error(e));
+        }, SAVE_DELAY_MS);
+        return next;
+      });
+    },
+    [],
+  );
 
   return (
-    <div className="set-root">
+    <div className="set-root" data-theme={settings?.theme ?? "dark"}>
       <header className="set-titlebar" data-tauri-drag-region="">
         <span className="set-title">{t.settingsTitle}</span>
         <button
@@ -146,9 +174,7 @@ export default function SettingsApp() {
         )}
       </div>
 
-      {settings !== null && (
-        <UpdateFooter repo={settings.updateRepo} t={t} />
-      )}
+      {settings !== null && <UpdateFooter repo={settings.updateRepo} t={t} />}
     </div>
   );
 }
@@ -171,6 +197,40 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+function RenderSlider({
+  label,
+  value,
+  min,
+  max,
+  step,
+  format,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  format: (value: number) => string;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <Row label={label}>
+      <input
+        className="set-slider"
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        aria-label={label}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+      <span className="set-slider-value">{format(value)}</span>
+    </Row>
+  );
+}
+
 function Switch({
   checked,
   onChange,
@@ -190,6 +250,42 @@ function Switch({
       />
       <span className="set-switch-track" />
     </label>
+  );
+}
+
+function ThemePicker({
+  value,
+  onChange,
+  t,
+}: {
+  value: ThemeId;
+  onChange: (value: ThemeId) => void;
+  t: Dict;
+}) {
+  return (
+    <div className="set-theme-picker" role="radiogroup" aria-label={t.theme}>
+      {THEME_IDS.map((id) => {
+        const label = themeLabel(t, id);
+        return (
+          <button
+            key={id}
+            className={`set-theme-choice${value === id ? " set-theme-choice-active" : ""}`}
+            type="button"
+            role="radio"
+            aria-checked={value === id}
+            aria-label={label}
+            title={label}
+            onClick={() => onChange(id)}
+          >
+            <span
+              className={`set-theme-swatch set-theme-swatch-${id}`}
+              aria-hidden="true"
+            />
+            <span>{label}</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -219,6 +315,14 @@ function GeneralTab({ settings, patch, t }: TabProps) {
           ))}
         </select>
       </Row>
+      <Row label={t.theme}>
+        <ThemePicker
+          value={settings.theme}
+          onChange={(value) => patch("theme", value)}
+          t={t}
+        />
+      </Row>
+      <p className="set-note">{t.themeHint}</p>
     </>
   );
 }
@@ -241,7 +345,9 @@ function AiTab({ settings, patch, t }: TabProps) {
         const list = await listModels();
         if (!closed) setModels(list);
       } catch (error) {
-        console.error(error instanceof Error ? error : new Error(String(error)));
+        console.error(
+          error instanceof Error ? error : new Error(String(error)),
+        );
         if (!closed) setFailed(true);
       }
     })();
@@ -374,6 +480,16 @@ function AiTab({ settings, patch, t }: TabProps) {
 function WidgetTab({ settings, patch, t }: TabProps) {
   const [newTime, setNewTime] = useState("09:00");
   const [newPrompt, setNewPrompt] = useState("");
+  const scaleFrame = useRef<number | null>(null);
+  const scalePreviewValue = useRef(settings.petScale);
+
+  useEffect(() => {
+    return () => {
+      if (scaleFrame.current !== null) {
+        window.cancelAnimationFrame(scaleFrame.current);
+      }
+    };
+  }, []);
 
   const tasks = settings.scheduledTasks;
 
@@ -399,14 +515,32 @@ function WidgetTab({ settings, patch, t }: TabProps) {
         <input
           className="set-slider"
           type="range"
-          min={0.5}
+          min={0.1}
           max={2}
           step={0.1}
           value={settings.petScale}
           aria-label={t.petScale}
-          onChange={(e) => patch("petScale", Number(e.target.value))}
+          onChange={(e) => {
+            const value = Number(e.target.value);
+            patch("petScale", value);
+            scalePreviewValue.current = value;
+            void emitPetScalePreview(value).catch((error: unknown) =>
+              console.error("pet scale preview failed", error),
+            );
+            if (scaleFrame.current === null) {
+              scaleFrame.current = window.requestAnimationFrame(() => {
+                scaleFrame.current = null;
+                void previewPetScale(scalePreviewValue.current).catch(
+                  (error: unknown) =>
+                    console.error("pet scale resize failed", error),
+                );
+              });
+            }
+          }}
         />
-        <span className="set-slider-value">{settings.petScale.toFixed(1)}x</span>
+        <span className="set-slider-value">
+          {settings.petScale.toFixed(1)}x
+        </span>
       </Row>
       <Row label={t.petVisible}>
         <Switch
@@ -566,9 +700,10 @@ function ShortcutInput({
   );
 }
 
-// ----------------------------------------------------------------- 账号
+// ----------------------------------------------------------------- 角色
 
 function AccountTab({ settings, patch, t }: TabProps) {
+  const personaId = personaById(settings.personaId || DEFAULT_PERSONA_ID).id;
   return (
     <>
       <h2 className="set-panel-head">{t.tabAccount}</h2>
@@ -584,13 +719,62 @@ function AccountTab({ settings, patch, t }: TabProps) {
       <Row label={t.persona}>
         <select
           className="set-select"
-          value={settings.personaId}
+          aria-label={t.persona}
+          value={personaId}
           onChange={(e) => patch("personaId", e.target.value)}
         >
-          <option value="default">小碟</option>
+          {PERSONAS.map((persona) => (
+            <option key={persona.id} value={persona.id}>
+              {personaLabel(persona, settings.language)}
+            </option>
+          ))}
         </select>
       </Row>
       <p className="set-note">{t.personaComing}</p>
+      <Row label={t.mouseFollow}>
+        <Switch
+          label={t.mouseFollow}
+          checked={settings.mouseFollow}
+          onChange={(value) => patch("mouseFollow", value)}
+        />
+      </Row>
+      <RenderSlider
+        label={t.outlineWidth}
+        value={settings.outlineWidth}
+        min={0}
+        max={0.03}
+        step={0.0001}
+        format={(value) => value.toFixed(4)}
+        onChange={(value) => patch("outlineWidth", value)}
+      />
+      <RenderSlider
+        label={t.rimWidth}
+        value={settings.rimWidth}
+        min={0}
+        max={1}
+        step={0.01}
+        format={(value) => value.toFixed(2)}
+        onChange={(value) => patch("rimWidth", value)}
+      />
+      <RenderSlider
+        label={t.rimIntensity}
+        value={settings.rimIntensity}
+        min={0}
+        max={2}
+        step={0.05}
+        format={(value) => value.toFixed(2)}
+        onChange={(value) => patch("rimIntensity", value)}
+      />
+      <RenderSlider
+        label={t.specularIntensity}
+        value={settings.specularIntensity}
+        min={0}
+        max={2}
+        step={0.05}
+        format={(value) => value.toFixed(2)}
+        onChange={(value) => patch("specularIntensity", value)}
+      />
+      <p className="set-note">{t.renderTuningHint}</p>
     </>
   );
 }
@@ -607,7 +791,9 @@ function AboutTab({ settings, patch, t }: TabProps) {
         const v = await getAppVersion();
         if (!closed) setVersion(v);
       } catch (error) {
-        console.error(error instanceof Error ? error : new Error(String(error)));
+        console.error(
+          error instanceof Error ? error : new Error(String(error)),
+        );
       }
     })();
     return () => {
@@ -632,9 +818,7 @@ function AboutTab({ settings, patch, t }: TabProps) {
           onChange={(e) => patch("updateRepo", e.target.value)}
         />
       </Row>
-      <p className="set-note">
-        GitHub 仓库(用户名/仓库名),用于检查更新。
-      </p>
+      <p className="set-note">GitHub 仓库(用户名/仓库名),用于检查更新。</p>
     </>
   );
 }

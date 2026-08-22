@@ -604,7 +604,7 @@ dependencies = [
 
 [[package]]
 name = "deskmate"
-version = "0.1.2"
+version = "0.1.4"
 dependencies = [
  "chrono",
  "serde",

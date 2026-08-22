@@ -7,6 +7,45 @@ use tauri::{Emitter, Manager};
 mod update_repo;
 use update_repo::{migrated_update_repo, DEFAULT_UPDATE_REPO};
 
+const PET_SCALE_MIN: f64 = 0.1;
+const PET_SCALE_MAX: f64 = 2.0;
+const DEFAULT_THEME: &str = "dark";
+const OUTLINE_WIDTH_MIN: f64 = 0.0;
+const OUTLINE_WIDTH_MAX: f64 = 0.03;
+const DEFAULT_OUTLINE_WIDTH: f64 = 0.0073;
+const RIM_WIDTH_MIN: f64 = 0.0;
+const RIM_WIDTH_MAX: f64 = 1.0;
+const DEFAULT_RIM_WIDTH: f64 = 0.4;
+const RIM_INTENSITY_MIN: f64 = 0.0;
+const RIM_INTENSITY_MAX: f64 = 2.0;
+const DEFAULT_RIM_INTENSITY: f64 = 1.0;
+const SPECULAR_INTENSITY_MIN: f64 = 0.0;
+const SPECULAR_INTENSITY_MAX: f64 = 2.0;
+const DEFAULT_SPECULAR_INTENSITY: f64 = 0.5;
+
+fn normalize_pet_scale(scale: f64) -> f64 {
+    if scale.is_finite() {
+        scale.clamp(PET_SCALE_MIN, PET_SCALE_MAX)
+    } else {
+        1.0
+    }
+}
+
+fn normalize_render_value(value: f64, min: f64, max: f64, default: f64) -> f64 {
+    if value.is_finite() {
+        value.clamp(min, max)
+    } else {
+        default
+    }
+}
+
+fn normalize_theme(theme: &str) -> String {
+    match theme {
+        "dark" | "mint" | "peach" | "lavender" => theme.to_owned(),
+        _ => DEFAULT_THEME.to_owned(),
+    }
+}
+
 /// A scheduled task: at `time` (HH:MM, daily), auto-send `prompt` to the AI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,6 +64,7 @@ pub struct Settings {
     // 通用
     pub autostart: bool,
     pub language: String,
+    pub theme: String,
     // AI
     pub provider_id: String,
     pub model_id: String,
@@ -33,6 +73,10 @@ pub struct Settings {
     pub api_key: String,
     // 小组件
     pub pet_scale: f64,
+    pub outline_width: f64,
+    pub rim_width: f64,
+    pub rim_intensity: f64,
+    pub specular_intensity: f64,
     pub pet_visible: bool,
     pub always_on_top: bool,
     pub scheduled_tasks: Vec<ScheduledTask>,
@@ -41,6 +85,7 @@ pub struct Settings {
     pub shortcut_toggle_pet: String,
     // 账号
     pub persona_id: String,
+    pub mouse_follow: bool,
     pub user_name: String,
     // 更新
     pub update_repo: String,
@@ -51,12 +96,17 @@ impl Default for Settings {
         Self {
             autostart: false,
             language: "zh-CN".into(),
+            theme: DEFAULT_THEME.into(),
             provider_id: String::new(),
             model_id: String::new(),
             yolo: false,
             base_url: "https://ai-gateway.kurogames.com".into(),
             api_key: String::new(),
             pet_scale: 1.0,
+            outline_width: DEFAULT_OUTLINE_WIDTH,
+            rim_width: DEFAULT_RIM_WIDTH,
+            rim_intensity: DEFAULT_RIM_INTENSITY,
+            specular_intensity: DEFAULT_SPECULAR_INTENSITY,
             pet_visible: true,
             always_on_top: true,
             scheduled_tasks: Vec::new(),
@@ -64,7 +114,8 @@ impl Default for Settings {
             // is commonly taken by IMEs; Ctrl+Alt+D is usually free.
             shortcut_toggle_chat: "Ctrl+Alt+D".into(),
             shortcut_toggle_pet: String::new(),
-            persona_id: "default".into(),
+            persona_id: "aimisi".into(),
+            mouse_follow: false,
             user_name: String::new(),
             update_repo: DEFAULT_UPDATE_REPO.into(),
         }
@@ -88,6 +139,35 @@ pub fn load(app: &tauri::AppHandle) -> Settings {
         .map(|s| s.trim_start_matches('\u{feff}').to_string())
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
+    if settings.persona_id == "default" {
+        settings.persona_id = "aimisi".into();
+    }
+    settings.pet_scale = normalize_pet_scale(settings.pet_scale);
+    settings.outline_width = normalize_render_value(
+        settings.outline_width,
+        OUTLINE_WIDTH_MIN,
+        OUTLINE_WIDTH_MAX,
+        DEFAULT_OUTLINE_WIDTH,
+    );
+    settings.rim_width = normalize_render_value(
+        settings.rim_width,
+        RIM_WIDTH_MIN,
+        RIM_WIDTH_MAX,
+        DEFAULT_RIM_WIDTH,
+    );
+    settings.rim_intensity = normalize_render_value(
+        settings.rim_intensity,
+        RIM_INTENSITY_MIN,
+        RIM_INTENSITY_MAX,
+        DEFAULT_RIM_INTENSITY,
+    );
+    settings.specular_intensity = normalize_render_value(
+        settings.specular_intensity,
+        SPECULAR_INTENSITY_MIN,
+        SPECULAR_INTENSITY_MAX,
+        DEFAULT_SPECULAR_INTENSITY,
+    );
+    settings.theme = normalize_theme(&settings.theme);
     settings.update_repo = migrated_update_repo(&settings.update_repo).into_owned();
     settings
 }
@@ -113,6 +193,32 @@ pub fn set_settings(
     state: tauri::State<SettingsState>,
     mut settings: Settings,
 ) -> Result<(), String> {
+    settings.pet_scale = normalize_pet_scale(settings.pet_scale);
+    settings.outline_width = normalize_render_value(
+        settings.outline_width,
+        OUTLINE_WIDTH_MIN,
+        OUTLINE_WIDTH_MAX,
+        DEFAULT_OUTLINE_WIDTH,
+    );
+    settings.rim_width = normalize_render_value(
+        settings.rim_width,
+        RIM_WIDTH_MIN,
+        RIM_WIDTH_MAX,
+        DEFAULT_RIM_WIDTH,
+    );
+    settings.rim_intensity = normalize_render_value(
+        settings.rim_intensity,
+        RIM_INTENSITY_MIN,
+        RIM_INTENSITY_MAX,
+        DEFAULT_RIM_INTENSITY,
+    );
+    settings.specular_intensity = normalize_render_value(
+        settings.specular_intensity,
+        SPECULAR_INTENSITY_MIN,
+        SPECULAR_INTENSITY_MAX,
+        DEFAULT_SPECULAR_INTENSITY,
+    );
+    settings.theme = normalize_theme(&settings.theme);
     settings.update_repo = migrated_update_repo(&settings.update_repo).into_owned();
     // SAFE-UNWRAP: a poisoned settings mutex means an earlier command panicked.
     let old = { state.0.lock().unwrap().clone() };
@@ -244,7 +350,7 @@ const PET_BASE_H: f64 = 420.0;
 /// Resize the pet window to `scale`, keeping its bottom-center anchored so
 /// the pet stays planted where the user put it.
 pub fn apply_pet_scale(pet: &tauri::WebviewWindow, scale: f64) {
-    let scale = scale.clamp(0.5, 2.0);
+    let scale = normalize_pet_scale(scale);
     let new_w = PET_BASE_W * scale;
     let new_h = PET_BASE_H * scale;
 
@@ -294,5 +400,36 @@ pub fn register_shortcuts(app: &tauri::AppHandle, settings: &Settings) {
         }) {
             eprintln!("register shortcut {shortcut} failed: {e}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_pet_scale, normalize_render_value, normalize_theme};
+
+    #[test]
+    fn pet_scale_is_clamped_to_the_supported_range() {
+        assert_eq!(normalize_pet_scale(-1.0), 0.1);
+        assert_eq!(normalize_pet_scale(0.1), 0.1);
+        assert_eq!(normalize_pet_scale(1.25), 1.25);
+        assert_eq!(normalize_pet_scale(2.5), 2.0);
+    }
+
+    #[test]
+    fn theme_accepts_supported_palettes_and_falls_back_to_dark() {
+        assert_eq!(normalize_theme("dark"), "dark");
+        assert_eq!(normalize_theme("mint"), "mint");
+        assert_eq!(normalize_theme("peach"), "peach");
+        assert_eq!(normalize_theme("lavender"), "lavender");
+        assert_eq!(normalize_theme("unknown"), "dark");
+    }
+
+    #[test]
+    fn render_values_are_clamped_and_non_finite_values_use_defaults() {
+        assert_eq!(normalize_render_value(-1.0, 0.0, 0.03, 0.0073), 0.0);
+        assert_eq!(normalize_render_value(0.08, 0.0, 0.03, 0.0073), 0.03);
+        assert_eq!(normalize_render_value(0.4, 0.0, 1.0, 0.4), 0.4);
+        assert_eq!(normalize_render_value(f64::NAN, 0.0, 2.0, 1.0), 1.0);
+        assert_eq!(normalize_render_value(f64::INFINITY, 0.0, 2.0, 1.0), 1.0);
     }
 }

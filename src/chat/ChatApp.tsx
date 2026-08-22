@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   abortSession,
   createSession,
@@ -10,12 +9,20 @@ import {
   type OpenCodeEvent,
 } from "../lib/opencode";
 import { broadcastMood } from "../lib/petState";
+import { DEFAULT_PERSONA_ID } from "../pet/personaCatalog";
+import {
+  personaDisplayName,
+  personalizePersonaCopy,
+  resolvePersonaId,
+  shouldResetSessionForPersona,
+} from "./chatPersona";
 import {
   getSettings,
   onScheduledTask,
   onSettingsChanged,
   type Settings,
 } from "../lib/settings";
+import type { ThemeId } from "../settings/theme";
 import { dict } from "../lib/i18n";
 import {
   historyDelete,
@@ -53,6 +60,8 @@ export default function ChatApp() {
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<Status>("booting");
   const [lang, setLang] = useState("zh-CN");
+  const [theme, setTheme] = useState<ThemeId>("dark");
+  const [activePersonaId, setActivePersonaId] = useState(DEFAULT_PERSONA_ID);
   const [view, setView] = useState<View>("chat");
   const t = dict(lang);
   // Latest dict for use inside stable callbacks (SSE handler, task listener).
@@ -60,6 +69,9 @@ export default function ChatApp() {
   tRef.current = t;
   const sessionRef = useRef<string | null>(null);
   const personaRef = useRef<PersonaData | null>(null);
+  const activePersonaIdRef = useRef(DEFAULT_PERSONA_ID);
+  const personaLoadRef = useRef<Promise<void>>(Promise.resolve());
+  const personaLoadSequenceRef = useRef(0);
   const settingsRef = useRef<Settings | null>(null);
   /** role by server messageID; used to skip user-message parts in SSE. */
   const rolesRef = useRef<Map<string, string>>(new Map());
@@ -68,6 +80,42 @@ export default function ChatApp() {
   const messagesRef = useRef<ChatMessage[]>([]);
   const createdRef = useRef<number>(Date.now());
 
+  const resetSession = useCallback(async (): Promise<void> => {
+    const previousSession = sessionRef.current;
+    if (previousSession) {
+      await abortSession(previousSession).catch(() => {});
+    }
+    await waitForServer();
+    const session = await createSession("deskmate chat");
+    sessionRef.current = session.id;
+    rolesRef.current.clear();
+    createdRef.current = Date.now();
+    setMessages([]);
+    setView("chat");
+    setStatus("ready");
+    broadcastMood("idle");
+  }, []);
+
+  const loadPersona = useCallback((id: string): Promise<void> => {
+    const resolvedId = resolvePersonaId(id);
+    const sequence = ++personaLoadSequenceRef.current;
+    const request = invoke<PersonaData>("load_persona", { id: resolvedId })
+      .then((data) => {
+        if (sequence !== personaLoadSequenceRef.current) return;
+        personaRef.current = data;
+        activePersonaIdRef.current = resolvedId;
+        setActivePersonaId(resolvedId);
+      })
+      .catch((error: unknown) => {
+        console.error(
+          "persona load failed",
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      });
+    personaLoadRef.current = request;
+    return request;
+  }, []);
+
   // Boot: wait for sidecar, load persona, create session, subscribe SSE.
   useEffect(() => {
     let closed = false;
@@ -75,19 +123,42 @@ export default function ChatApp() {
 
     (async () => {
       try {
-        personaRef.current = await invoke<PersonaData>("load_persona", {
-          id: "default",
-        }).catch(() => null);
         settingsRef.current = await getSettings().catch(() => null);
-        if (settingsRef.current) setLang(settingsRef.current.language);
+        const initialPersonaId = resolvePersonaId(
+          settingsRef.current?.personaId,
+        );
+        if (settingsRef.current) {
+          setLang(settingsRef.current.language);
+          setTheme(settingsRef.current.theme);
+        }
+        await loadPersona(initialPersonaId);
         void onSettingsChanged((s) => {
           settingsRef.current = s;
           setLang(s.language);
+          setTheme(s.theme);
+          const nextPersonaId = resolvePersonaId(s.personaId);
+          if (
+            shouldResetSessionForPersona(
+              activePersonaIdRef.current,
+              nextPersonaId,
+            )
+          ) {
+            const switchRequest = loadPersona(nextPersonaId).then(() =>
+              activePersonaIdRef.current === nextPersonaId
+                ? resetSession()
+                : undefined,
+            );
+            personaLoadRef.current = switchRequest;
+            void switchRequest.catch((error: unknown) => {
+              console.error(
+                "persona session reset failed",
+                error instanceof Error ? error : new Error(String(error)),
+              );
+            });
+          }
         });
-        await waitForServer();
-        const session = await createSession("deskmate chat");
+        await resetSession();
         if (closed) return;
-        sessionRef.current = session.id;
         unsubscribe = await subscribeEvents(handleEvent);
         setStatus("ready");
         broadcastMood("idle");
@@ -102,8 +173,7 @@ export default function ChatApp() {
       closed = true;
       unsubscribe?.();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadPersona, resetSession]);
 
   const handleEvent = useCallback((e: OpenCodeEvent) => {
     const props = e.properties ?? {};
@@ -177,8 +247,7 @@ export default function ChatApp() {
         setStatus("ready");
         broadcastMood("error");
         const err = props.error as
-          | { name?: string; data?: { message?: string } }
-          | undefined;
+          { name?: string; data?: { message?: string } } | undefined;
         const detail = err?.data?.message || err?.name || "unknown error";
         setMessages((prev) => [
           ...prev,
@@ -238,6 +307,7 @@ export default function ChatApp() {
   const sendText = async (text: string) => {
     const sessionID = sessionRef.current;
     if (!text || !sessionID) return;
+    await personaLoadRef.current;
     setMessages((prev) => [
       ...prev,
       { id: `user-${Date.now()}`, role: "user", text },
@@ -288,7 +358,8 @@ export default function ChatApp() {
   }, []);
 
   const abort = async () => {
-    if (sessionRef.current) await abortSession(sessionRef.current).catch(() => {});
+    if (sessionRef.current)
+      await abortSession(sessionRef.current).catch(() => {});
   };
 
   /** Resume a past session: adopt its opencode session id and reload messages. */
@@ -313,33 +384,39 @@ export default function ChatApp() {
   /** Start a fresh session. */
   const newChat = useCallback(async () => {
     try {
-      await waitForServer();
-      const session = await createSession("deskmate chat");
-      sessionRef.current = session.id;
-      rolesRef.current.clear();
-      createdRef.current = Date.now();
-      setMessages([]);
-      setView("chat");
-      setStatus("ready");
-      broadcastMood("idle");
+      await resetSession();
     } catch (e) {
       console.error(e);
       setStatus("error");
       broadcastMood("error");
     }
-  }, []);
+  }, [resetSession]);
 
+  const closeChat = async (): Promise<void> => {
+    try {
+      await invoke("hide_chat");
+    } catch (error: unknown) {
+      console.error(
+        "chat close failed",
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    }
+  };
+
+  const activePersonaName = personaDisplayName(activePersonaId, lang);
+  const chatBooting = personalizePersonaCopy(t.chatBooting, activePersonaName);
+  const chatEmpty = personalizePersonaCopy(t.chatEmpty, activePersonaName);
   const statusLabel: Record<Status, string> = {
-    booting: t.chatBooting,
+    booting: chatBooting,
     ready: t.chatReady,
     busy: personaRef.current?.placeholders?.streaming ?? t.chatThinking,
     error: t.chatError,
   };
 
   return (
-    <div className="chat-root">
+    <div className="chat-root" data-theme={theme}>
       <header className="chat-header" data-tauri-drag-region="">
-        <span className="chat-title">小碟</span>
+        <span className="chat-title">{activePersonaName}</span>
         <span className={`chat-status chat-status-${status}`}>
           {statusLabel[status]}
         </span>
@@ -361,7 +438,7 @@ export default function ChatApp() {
         </button>
         <button
           className="chat-close"
-          onClick={() => void getCurrentWindow().hide()}
+          onClick={() => void closeChat()}
           aria-label={t.close}
         >
           ×
@@ -369,12 +446,17 @@ export default function ChatApp() {
       </header>
 
       {view === "history" ? (
-        <HistoryPanel t={t} onContinue={resumeSession} onNewChat={newChat} />
+        <HistoryPanel
+          t={t}
+          assistantName={activePersonaName}
+          onContinue={resumeSession}
+          onNewChat={newChat}
+        />
       ) : (
         <>
           <div className="chat-list" ref={listRef}>
             {messages.length === 0 && (
-              <div className="chat-empty">{t.chatEmpty}</div>
+              <div className="chat-empty">{chatEmpty}</div>
             )}
             {messages.map((m) => (
               <div key={m.id} className={`chat-msg chat-msg-${m.role}`}>
@@ -442,10 +524,12 @@ function upsertAssistant(
 
 function HistoryPanel({
   t,
+  assistantName,
   onContinue,
   onNewChat,
 }: {
   t: ReturnType<typeof dict>;
+  assistantName: string;
   onContinue: (id: string) => void;
   onNewChat: () => void;
 }) {
@@ -498,7 +582,7 @@ function HistoryPanel({
           {open.messages.map((m, i) => (
             <div key={i} className={`history-msg history-msg-${m.role}`}>
               <div className="history-role">
-                {m.role === "user" ? t.historyYou : "小碟"}
+                {m.role === "user" ? t.historyYou : assistantName}
               </div>
               <div className="history-text">{m.text}</div>
             </div>
@@ -519,7 +603,9 @@ function HistoryPanel({
           + {t.historyNewSession}
         </button>
       </div>
-      {failed && <p className="history-empty history-error">{t.historyLoadFailed}</p>}
+      {failed && (
+        <p className="history-empty history-error">{t.historyLoadFailed}</p>
+      )}
       {sessions === null ? (
         <p className="history-empty">{t.loading}</p>
       ) : sessions.length === 0 ? (

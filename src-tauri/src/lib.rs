@@ -8,6 +8,7 @@ use tauri::{Manager, RunEvent, State};
 mod history;
 mod settings;
 mod updater;
+mod window_layout;
 use history::HistoryState;
 use settings::{get_settings, set_settings, verify_api_key, SettingsState};
 
@@ -17,9 +18,6 @@ struct Sidecar {
     port: u16,
 }
 
-/// Whether the chat window is currently presented to the user.
-/// (The window itself stays "visible" offscreen at startup so that WebView2
-/// finishes initializing; a window created hidden never boots its IPC.)
 struct ChatShown(Mutex<bool>);
 
 #[tauri::command]
@@ -44,55 +42,149 @@ fn load_persona(app: tauri::AppHandle, id: String) -> Result<serde_json::Value, 
     Ok(serde_json::json!({ "persona": persona, "placeholders": placeholders }))
 }
 
-/// Toggle the chat window: anchor it next to the pet, then show/hide.
-/// Uses an explicit shown-state instead of `is_visible` because the chat
-/// window starts visible-but-offscreen (see `ChatShown`).
 #[tauri::command]
 fn toggle_chat(app: tauri::AppHandle) -> Result<bool, String> {
     toggle_chat_impl(&app)
 }
 
 pub(crate) fn toggle_chat_impl(app: &tauri::AppHandle) -> Result<bool, String> {
-    let chat = app.get_webview_window("chat").ok_or("chat window missing")?;
+    let chat = app
+        .get_webview_window("chat")
+        .ok_or("chat window missing")?;
     let shown = app.state::<ChatShown>();
 
-    let mut is_shown = shown.0.lock().unwrap();
-    if *is_shown {
-        chat.hide().map_err(|e| e.to_string())?;
-        *is_shown = false;
+    let explicitly_shown = *shown
+        .0
+        .lock()
+        .map_err(|_| "chat state poisoned".to_string())?;
+    let window_visible = chat.is_visible().map_err(|e| e.to_string())?;
+    if should_hide_chat(explicitly_shown, window_visible) {
+        hide_chat_impl(app)?;
         return Ok(false);
     }
-    drop(is_shown);
     show_chat(app)?;
     Ok(true)
 }
 
+fn should_hide_chat(explicitly_shown: bool, window_visible: bool) -> bool {
+    explicitly_shown && window_visible
+}
+
+fn should_restore_settings_focus(chat_was_shown: bool, settings_visible: bool) -> bool {
+    chat_was_shown && settings_visible
+}
+
+#[tauri::command]
+fn hide_chat(app: tauri::AppHandle) -> Result<(), String> {
+    hide_chat_impl(&app)
+}
+
+#[tauri::command]
+fn preview_pet_scale(app: tauri::AppHandle, scale: f64) {
+    if let Some(pet) = app.get_webview_window("pet") {
+        settings::apply_pet_scale(&pet, scale);
+    }
+}
+
+pub(crate) fn hide_chat_impl(app: &tauri::AppHandle) -> Result<(), String> {
+    let chat = app
+        .get_webview_window("chat")
+        .ok_or("chat window missing")?;
+    chat.hide().map_err(|e| e.to_string())?;
+    if let Some(shown) = app.try_state::<ChatShown>() {
+        *shown
+            .0
+            .lock()
+            .map_err(|_| "chat state poisoned".to_string())? = false;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{should_hide_chat, should_restore_settings_focus};
+
+    #[test]
+    fn stale_shown_state_does_not_hide_an_already_hidden_chat_window() {
+        assert!(!should_hide_chat(true, false));
+        assert!(should_hide_chat(true, true));
+        assert!(!should_hide_chat(false, true));
+    }
+
+    #[test]
+    fn visible_settings_window_reclaims_focus_after_chat_is_shown() {
+        assert!(should_restore_settings_focus(true, true));
+        assert!(!should_restore_settings_focus(true, false));
+        assert!(!should_restore_settings_focus(false, true));
+    }
+}
+
 /// Anchor the chat window next to the pet and bring it up (idempotent).
 pub(crate) fn show_chat(app: &tauri::AppHandle) -> Result<(), String> {
-    const CHAT_W: f64 = 420.0;
-    const CHAT_GAP: f64 = 8.0;
-
     let pet = app.get_webview_window("pet").ok_or("pet window missing")?;
-    let chat = app.get_webview_window("chat").ok_or("chat window missing")?;
+    let chat = app
+        .get_webview_window("chat")
+        .ok_or("chat window missing")?;
     let shown = app.state::<ChatShown>();
 
-    let pos = pet.outer_position().map_err(|e| e.to_string())?;
-    let size = pet.outer_size().map_err(|e| e.to_string())?;
-    let scale = pet.scale_factor().map_err(|e| e.to_string())?;
-    let logical: tauri::LogicalPosition<f64> = pos.to_logical(scale);
-    let pet_w = size.to_logical::<f64>(scale).width;
-    // Prefer the left side of the pet; fall back to the right when the pet
-    // sits near the left screen edge.
-    let x = if logical.x - CHAT_W - CHAT_GAP >= 0.0 {
-        logical.x - CHAT_W - CHAT_GAP
+    let pet_pos = pet.outer_position().map_err(|e| e.to_string())?;
+    let pet_size = pet.outer_size().map_err(|e| e.to_string())?;
+    let chat_scale = chat.scale_factor().map_err(|e| e.to_string())?;
+    let chat_size = chat.outer_size().unwrap_or_else(|_| {
+        tauri::PhysicalSize::new(
+            (420.0 * chat_scale).round() as u32,
+            (560.0 * chat_scale).round() as u32,
+        )
+    });
+    let monitor = pet.current_monitor().ok().flatten();
+    let (work_area, gap) = if let Some(monitor) = monitor {
+        let area = monitor.work_area();
+        (
+            window_layout::Rect {
+                x: i64::from(area.position.x),
+                y: i64::from(area.position.y),
+                width: i64::from(area.size.width),
+                height: i64::from(area.size.height),
+            },
+            (8.0 * monitor.scale_factor()).round() as i64,
+        )
     } else {
-        logical.x + pet_w + CHAT_GAP
+        (
+            window_layout::Rect {
+                x: i64::from(pet_pos.x) - 4096,
+                y: i64::from(pet_pos.y) - 4096,
+                width: 8192,
+                height: 8192,
+            },
+            (8.0 * chat_scale).round() as i64,
+        )
     };
-    chat.set_position(tauri::LogicalPosition::new(x, (logical.y - 140.0).max(0.0)))
-        .map_err(|e| e.to_string())?;
+    let point = window_layout::position_chat(
+        window_layout::Rect {
+            x: i64::from(pet_pos.x),
+            y: i64::from(pet_pos.y),
+            width: i64::from(pet_size.width),
+            height: i64::from(pet_size.height),
+        },
+        window_layout::Size {
+            width: i64::from(chat_size.width),
+            height: i64::from(chat_size.height),
+        },
+        work_area,
+        gap,
+    );
+    chat.set_position(tauri::PhysicalPosition::new(
+        point.x.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+        point.y.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+    ))
+    .map_err(|e| e.to_string())?;
     chat.show().map_err(|e| e.to_string())?;
     chat.set_focus().map_err(|e| e.to_string())?;
-    *shown.0.lock().unwrap() = true;
+    *shown
+        .0
+        .lock()
+        .map_err(|_| "chat state poisoned".to_string())? = true;
+    restore_settings_focus_if_visible(app);
     Ok(())
 }
 
@@ -130,15 +222,31 @@ fn pick_free_port() -> u16 {
 #[cfg(windows)]
 fn cleanup_orphan_sidecars() {
     use std::os::windows::process::CommandExt;
+    use std::time::{Duration, Instant};
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
     // Only matches opencode processes spawned by us: our sidecar is the only
     // one passing `--cors http://tauri.localhost` on its command line.
     let script = "Get-CimInstance Win32_Process -Filter \"Name = 'opencode.exe'\" | Where-Object { $_.CommandLine -match 'tauri\\.localhost' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
-    let _ = Command::new("powershell.exe")
+    let Ok(mut child) = Command::new("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
         .creation_flags(CREATE_NO_WINDOW)
-        .status();
+        .spawn()
+    else {
+        return;
+    };
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) | Err(_) => break,
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+        }
+    }
 }
 
 /// Copy ship resources (personas) into the app data dir on first run,
@@ -152,24 +260,24 @@ fn sync_ship_resources(app: &tauri::AppHandle, data_dir: &PathBuf) {
         res_dir.join("personas"),
     ];
     let dst = data_dir.join("personas");
-    if dst.exists() {
-        return;
-    }
     for src in candidates {
         if src.exists() {
-            let _ = copy_dir_recursive(&src, &dst);
+            let _ = copy_missing_dir_recursive(&src, &dst);
             return;
         }
     }
 }
 
-fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> std::io::Result<()> {
+fn copy_missing_dir_recursive(src: &PathBuf, dst: &PathBuf) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
         let target = dst.join(entry.file_name());
+        if target.exists() {
+            continue;
+        }
         if entry.file_type()?.is_dir() {
-            copy_dir_recursive(&entry.path(), &target)?;
+            copy_missing_dir_recursive(&entry.path(), &target)?;
         } else {
             std::fs::copy(entry.path(), &target)?;
         }
@@ -178,10 +286,7 @@ fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> std::io::Result<()> {
 }
 
 fn spawn_sidecar(app: &tauri::AppHandle, port: u16) -> std::io::Result<Child> {
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .expect("app data dir unavailable");
+    let data_dir = app.path().app_data_dir().expect("app data dir unavailable");
     std::fs::create_dir_all(&data_dir)?;
     sync_ship_resources(app, &data_dir);
 
@@ -268,24 +373,33 @@ pub(crate) fn toggle_pet_visibility(app: &tauri::AppHandle) {
     let visible = pet.is_visible().unwrap_or(true);
     if visible {
         let _ = pet.hide();
-        if let Some(chat) = app.get_webview_window("chat") {
-            let _ = chat.hide();
-        }
-        if let Some(shown) = app.try_state::<ChatShown>() {
-            *shown.0.lock().unwrap() = false;
-        }
+        let _ = hide_chat_impl(app);
     } else {
         let _ = pet.show();
     }
 }
 
-/// Bring the settings window on-screen, centered. Like the chat window it is
-/// created visible-but-offscreen so its WebView IPC boots reliably.
 fn show_settings_window(app: &tauri::AppHandle) {
     let Some(win) = app.get_webview_window("settings") else {
         return;
     };
+    let _ = win.set_always_on_top(true);
     let _ = win.center();
+    let _ = win.show();
+    let _ = win.set_focus();
+}
+
+fn restore_settings_focus_if_visible(app: &tauri::AppHandle) {
+    let Some(win) = app.get_webview_window("settings") else {
+        return;
+    };
+    let Ok(settings_visible) = win.is_visible() else {
+        return;
+    };
+    if !should_restore_settings_focus(true, settings_visible) {
+        return;
+    }
+    let _ = win.set_always_on_top(true);
     let _ = win.show();
     let _ = win.set_focus();
 }
@@ -294,6 +408,7 @@ fn show_settings_window(app: &tauri::AppHandle) {
 #[tauri::command]
 fn hide_settings(app: tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("settings") {
+        let _ = win.set_always_on_top(false);
         let _ = win.hide();
     }
 }
@@ -336,6 +451,8 @@ pub fn run() {
             sidecar_base_url,
             load_persona,
             toggle_chat,
+            hide_chat,
+            preview_pet_scale,
             get_settings,
             set_settings,
             verify_api_key,
@@ -357,6 +474,8 @@ pub fn run() {
             if let Some(pet) = app.get_webview_window("pet") {
                 if !loaded.pet_visible {
                     let _ = pet.hide();
+                } else {
+                    let _ = pet.show();
                 }
                 if !loaded.always_on_top {
                     let _ = pet.set_always_on_top(false);

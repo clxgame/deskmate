@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { ThemeId } from "../settings/theme";
 
 /** A scheduled task: at `time` (HH:MM, daily), auto-send `prompt` to the AI. */
 export interface ScheduledTask {
@@ -14,6 +15,7 @@ export interface Settings {
   // 通用
   autostart: boolean;
   language: string;
+  theme: ThemeId;
   // AI
   providerId: string;
   modelId: string;
@@ -22,6 +24,10 @@ export interface Settings {
   apiKey: string;
   // 小组件
   petScale: number;
+  outlineWidth: number;
+  rimWidth: number;
+  rimIntensity: number;
+  specularIntensity: number;
   petVisible: boolean;
   alwaysOnTop: boolean;
   scheduledTasks: ScheduledTask[];
@@ -30,6 +36,7 @@ export interface Settings {
   shortcutTogglePet: string;
   // 账号
   personaId: string;
+  mouseFollow: boolean;
   userName: string;
   // 更新
   updateRepo: string;
@@ -64,6 +71,20 @@ export function onSettingsChanged(
   cb: (s: Settings) => void,
 ): Promise<UnlistenFn> {
   return listen<Settings>("deskmate://settings-changed", (e) => cb(e.payload));
+}
+
+export function onPetScalePreview(
+  cb: (scale: number) => void,
+): Promise<UnlistenFn> {
+  return listen<number>("deskmate://pet-scale-preview", (e) => cb(e.payload));
+}
+
+export function emitPetScalePreview(scale: number): Promise<void> {
+  return emit("deskmate://pet-scale-preview", scale);
+}
+
+export function previewPetScale(scale: number): Promise<void> {
+  return invoke("preview_pet_scale", { scale });
 }
 
 /** Fires (from the Rust scheduler) when a scheduled task is due. */

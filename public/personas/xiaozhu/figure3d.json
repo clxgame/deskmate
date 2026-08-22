@@ -1,0 +1,11 @@
+{
+  "modelUrl": "figure.glb",
+  "scale": 1,
+  "clips": {
+    "idle": "Think",
+    "thinking": "Think",
+    "talking": "Wave",
+    "working": "Dance",
+    "error": "Sad"
+  }
+}

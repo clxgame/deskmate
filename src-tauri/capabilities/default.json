@@ -9,6 +9,7 @@
     "core:window:allow-set-position",
     "core:window:allow-outer-position",
     "core:window:allow-outer-size",
+    "core:window:allow-cursor-position",
     "core:window:allow-scale-factor",
     "core:window:allow-center",
     "core:window:allow-show",

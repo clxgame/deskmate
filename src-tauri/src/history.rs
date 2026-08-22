@@ -76,17 +76,8 @@ pub fn history_list(state: tauri::State<HistoryState>) -> Vec<HistorySummary> {
 }
 
 #[tauri::command]
-pub fn history_load(
-    state: tauri::State<HistoryState>,
-    id: String,
-) -> Option<HistorySession> {
-    state
-        .0
-        .lock()
-        .unwrap()
-        .iter()
-        .find(|s| s.id == id)
-        .cloned()
+pub fn history_load(state: tauri::State<HistoryState>, id: String) -> Option<HistorySession> {
+    state.0.lock().unwrap().iter().find(|s| s.id == id).cloned()
 }
 
 /// Upsert a session, preserving its original creation time, sorted by recency.

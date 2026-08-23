@@ -7,6 +7,10 @@ dist/
 # Rust/Tauri build output
 src-tauri/target/
 
+# Platform-specific OpenCode sidecar prepared from the locked npm package
+src-tauri/resources/opencode/opencode
+src-tauri/resources/opencode/opencode.exe
+
 # Local environment and secrets
 .env
 .env.*

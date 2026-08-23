@@ -4,9 +4,9 @@
   "version": "0.1.4",
   "identifier": "com.deskmate.desktop",
   "build": {
-    "beforeDevCommand": "bun run dev",
+    "beforeDevCommand": "bun run prepare:sidecar && bun run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun run build",
+    "beforeBuildCommand": "bun run prepare:sidecar && bun run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -65,7 +65,7 @@
     "security": {
       "csp": {
         "default-src": "'self' customprotocol: asset:",
-        "connect-src": "'self' ipc: http://ipc.localhost asset: http://asset.localhost http://127.0.0.1:* blob: data:",
+        "connect-src": "'self' customprotocol: asset: ipc: http://ipc.localhost http://asset.localhost http://127.0.0.1:* blob: data:",
         "img-src": "'self' asset: http://asset.localhost blob: data:",
         "media-src": "'self' asset: http://asset.localhost blob: data:",
         "style-src": "'self' 'unsafe-inline'",

@@ -2,6 +2,9 @@
 
 Desktop pet application built with Tauri, React, TypeScript, and Bun.
 
+OpenCode is pinned as a project dependency and bundled into release builds.
+Users of the packaged app do not need to install OpenCode separately.
+
 ## Development
 
 Install dependencies:
@@ -16,6 +19,10 @@ Run the desktop app in development:
 bun run tauri dev
 ```
 
+The Tauri dev/build hooks run `bun run prepare:sidecar`, which copies the
+platform-specific OpenCode binary installed from the lockfile into the app
+resources. The generated binary is intentionally ignored by Git.
+
 Build the frontend only:
 
 ```powershell
@@ -27,6 +34,15 @@ Build the signed Windows installer and updater artifacts:
 ```powershell
 bun run tauri build
 ```
+
+Build an unsigned local macOS app and DMG:
+
+```bash
+bun run tauri build --no-sign
+```
+
+The macOS build enables Tauri's private transparency API for the frameless pet
+window, so it is intended for direct distribution rather than the Mac App Store.
 
 ## Releases and updater
 

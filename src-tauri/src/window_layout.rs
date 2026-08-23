@@ -22,15 +22,10 @@ pub(crate) fn position_chat(pet: Rect, chat: Size, work_area: Rect, gap: i64) ->
     let work_right = work_area.x + work_area.width;
     let work_bottom = work_area.y + work_area.height;
     let pet_center_x = pet.x + pet.width / 2;
-    let pet_center_y = pet.y + pet.height / 2;
     let work_center_x = work_area.x + work_area.width / 2;
-    let work_center_y = work_area.y + work_area.height / 2;
 
     let left = pet.x - chat.width - gap;
     let right = pet.x + pet.width + gap;
-    let above = pet.y - chat.height - gap;
-    let below = pet.y + pet.height + gap;
-
     let preferred_x = if pet_center_x >= work_center_x {
         if left >= work_area.x {
             left
@@ -42,21 +37,48 @@ pub(crate) fn position_chat(pet: Rect, chat: Size, work_area: Rect, gap: i64) ->
     } else {
         left
     };
-    let preferred_y = if pet_center_y >= work_center_y {
-        if above >= work_area.y {
-            above
-        } else {
-            below
-        }
-    } else if below + chat.height <= work_bottom {
-        below
-    } else {
-        above
-    };
+    let preferred_y = pet.y + pet.height - chat.height;
 
     Point {
         x: clamp_window_axis(preferred_x, work_area.x, work_right - chat.width),
         y: clamp_window_axis(preferred_y, work_area.y, work_bottom - chat.height),
+    }
+}
+
+pub(crate) fn position_pet_bottom_right(pet: Size, work_area: Rect, gap: i64) -> Point {
+    let gap = gap.max(0);
+    Point {
+        x: clamp_window_axis(
+            work_area.x + work_area.width - pet.width - gap,
+            work_area.x,
+            work_area.x + work_area.width - pet.width,
+        ),
+        y: clamp_window_axis(
+            work_area.y + work_area.height - pet.height - gap,
+            work_area.y,
+            work_area.y + work_area.height - pet.height,
+        ),
+    }
+}
+
+pub(crate) fn smooth_step(current: Point, target: Point, amount: f64) -> Point {
+    let amount = if amount.is_finite() {
+        amount.clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    let step = |from: i64, to: i64| {
+        let delta = to - from;
+        if delta.abs() <= 2 {
+            return to;
+        }
+        let moved = (delta as f64 * amount).round() as i64;
+        let moved = if moved == 0 { delta.signum() } else { moved };
+        (from + moved).clamp(from.min(to), from.max(to))
+    };
+    Point {
+        x: step(current.x, target.x),
+        y: step(current.y, target.y),
     }
 }
 
@@ -70,7 +92,7 @@ fn clamp_window_axis(value: i64, min: i64, max: i64) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{position_chat, Point, Rect, Size};
+    use super::{position_chat, position_pet_bottom_right, smooth_step, Point, Rect, Size};
 
     const WORK: Rect = Rect {
         x: 0,
@@ -84,7 +106,7 @@ mod tests {
     };
 
     #[test]
-    fn bottom_right_pet_opens_chat_to_the_left_and_above() {
+    fn bottom_right_pet_opens_chat_to_the_left_and_bottom_aligned() {
         let point = position_chat(
             Rect {
                 x: 1580,
@@ -97,11 +119,11 @@ mod tests {
             8,
         );
 
-        assert_eq!(point, Point { x: 1152, y: 152 });
+        assert_eq!(point, Point { x: 1152, y: 520 });
     }
 
     #[test]
-    fn top_left_pet_opens_chat_to_the_right_and_below() {
+    fn top_left_pet_opens_chat_to_the_right_and_bottom_aligned() {
         let point = position_chat(
             Rect {
                 x: 16,
@@ -114,7 +136,7 @@ mod tests {
             8,
         );
 
-        assert_eq!(point, Point { x: 344, y: 392 });
+        assert_eq!(point, Point { x: 344, y: 0 });
     }
 
     #[test]
@@ -131,6 +153,33 @@ mod tests {
             8,
         );
 
-        assert_eq!(point, Point { x: 1382, y: 118 });
+        assert_eq!(point, Point { x: 1382, y: 0 });
+    }
+
+    #[test]
+    fn default_pet_position_is_inside_the_bottom_right_work_area() {
+        assert_eq!(
+            position_pet_bottom_right(
+                Size {
+                    width: 320,
+                    height: 420,
+                },
+                WORK,
+                16,
+            ),
+            Point { x: 1584, y: 644 }
+        );
+    }
+
+    #[test]
+    fn smooth_step_moves_toward_target_without_jumping() {
+        assert_eq!(
+            smooth_step(Point { x: 0, y: 0 }, Point { x: 100, y: 50 }, 0.25),
+            Point { x: 25, y: 13 }
+        );
+        assert_eq!(
+            smooth_step(Point { x: 98, y: 49 }, Point { x: 100, y: 50 }, 0.25),
+            Point { x: 100, y: 50 }
+        );
     }
 }

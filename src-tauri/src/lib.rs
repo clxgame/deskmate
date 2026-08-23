@@ -1,7 +1,11 @@
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Child, Command};
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
+use std::time::Duration;
 
 use tauri::{Manager, RunEvent, State};
 
@@ -19,6 +23,12 @@ struct Sidecar {
 }
 
 struct ChatShown(Mutex<bool>);
+
+#[derive(Default)]
+struct ChatMotion {
+    target: Mutex<Option<window_layout::Point>>,
+    worker_running: AtomicBool,
+}
 
 #[tauri::command]
 fn sidecar_base_url(sidecar: State<Sidecar>) -> String {
@@ -74,6 +84,14 @@ fn should_restore_settings_focus(chat_was_shown: bool, settings_visible: bool) -
     chat_was_shown && settings_visible
 }
 
+fn clear_chat_motion(app: &tauri::AppHandle) {
+    if let Some(motion) = app.try_state::<Arc<ChatMotion>>() {
+        if let Ok(mut target) = motion.target.lock() {
+            *target = None;
+        }
+    }
+}
+
 #[tauri::command]
 fn hide_chat(app: tauri::AppHandle) -> Result<(), String> {
     hide_chat_impl(&app)
@@ -91,6 +109,7 @@ pub(crate) fn hide_chat_impl(app: &tauri::AppHandle) -> Result<(), String> {
         .get_webview_window("chat")
         .ok_or("chat window missing")?;
     chat.hide().map_err(|e| e.to_string())?;
+    clear_chat_motion(app);
     if let Some(shown) = app.try_state::<ChatShown>() {
         *shown
             .0
@@ -102,7 +121,10 @@ pub(crate) fn hide_chat_impl(app: &tauri::AppHandle) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{should_hide_chat, should_restore_settings_focus};
+    use super::{
+        should_follow_chat_on_window_event, should_hide_chat, should_restore_settings_focus,
+    };
+    use tauri::{PhysicalPosition, WindowEvent};
 
     #[test]
     fn stale_shown_state_does_not_hide_an_already_hidden_chat_window() {
@@ -117,15 +139,27 @@ mod tests {
         assert!(!should_restore_settings_focus(true, false));
         assert!(!should_restore_settings_focus(false, true));
     }
+
+    #[test]
+    fn moving_the_pet_repositions_the_visible_chat_window() {
+        assert!(should_follow_chat_on_window_event(&WindowEvent::Moved(
+            PhysicalPosition::new(1500, 700),
+        )));
+        assert!(!should_follow_chat_on_window_event(&WindowEvent::Focused(
+            true,
+        )));
+    }
 }
 
-/// Anchor the chat window next to the pet and bring it up (idempotent).
-pub(crate) fn show_chat(app: &tauri::AppHandle) -> Result<(), String> {
+fn should_follow_chat_on_window_event(event: &tauri::WindowEvent) -> bool {
+    matches!(event, tauri::WindowEvent::Moved(_))
+}
+
+fn chat_target(app: &tauri::AppHandle) -> Result<tauri::PhysicalPosition<i32>, String> {
     let pet = app.get_webview_window("pet").ok_or("pet window missing")?;
     let chat = app
         .get_webview_window("chat")
         .ok_or("chat window missing")?;
-    let shown = app.state::<ChatShown>();
 
     let pet_pos = pet.outer_position().map_err(|e| e.to_string())?;
     let pet_size = pet.outer_size().map_err(|e| e.to_string())?;
@@ -173,11 +207,131 @@ pub(crate) fn show_chat(app: &tauri::AppHandle) -> Result<(), String> {
         work_area,
         gap,
     );
-    chat.set_position(tauri::PhysicalPosition::new(
+    Ok(tauri::PhysicalPosition::new(
         point.x.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
         point.y.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
     ))
-    .map_err(|e| e.to_string())?;
+}
+
+fn reposition_chat(app: &tauri::AppHandle) -> Result<(), String> {
+    let chat = app
+        .get_webview_window("chat")
+        .ok_or("chat window missing")?;
+    chat.set_position(chat_target(app)?)
+        .map_err(|e| e.to_string())
+}
+
+fn request_chat_reposition(app: &tauri::AppHandle) -> Result<(), String> {
+    let chat = app
+        .get_webview_window("chat")
+        .ok_or("chat window missing")?;
+    if !chat.is_visible().map_err(|e| e.to_string())? {
+        return Ok(());
+    }
+    let target = chat_target(app)?;
+    let motion = app.state::<Arc<ChatMotion>>().inner().clone();
+    *motion
+        .target
+        .lock()
+        .map_err(|_| "chat motion state poisoned".to_string())? = Some(window_layout::Point {
+        x: i64::from(target.x),
+        y: i64::from(target.y),
+    });
+    if !motion.worker_running.swap(true, Ordering::AcqRel) {
+        spawn_chat_motion_worker(chat, motion);
+    }
+    Ok(())
+}
+
+fn spawn_chat_motion_worker(chat: tauri::WebviewWindow, motion: Arc<ChatMotion>) {
+    std::thread::spawn(move || loop {
+        let target = motion.target.lock().ok().and_then(|guard| *guard);
+        let Some(target) = target else {
+            motion.worker_running.store(false, Ordering::Release);
+            if motion
+                .target
+                .lock()
+                .map(|guard| guard.is_some())
+                .unwrap_or(false)
+                && !motion.worker_running.swap(true, Ordering::AcqRel)
+            {
+                continue;
+            }
+            break;
+        };
+
+        let current = chat
+            .outer_position()
+            .unwrap_or(tauri::PhysicalPosition::new(
+                target.x.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+                target.y.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+            ));
+        let next = window_layout::smooth_step(
+            window_layout::Point {
+                x: i64::from(current.x),
+                y: i64::from(current.y),
+            },
+            target,
+            0.28,
+        );
+        let next_position = tauri::PhysicalPosition::new(
+            next.x.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+            next.y.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+        );
+        let _ = chat.set_position(next_position);
+        if next == target {
+            if let Ok(mut guard) = motion.target.lock() {
+                if *guard == Some(target) {
+                    *guard = None;
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(8));
+    });
+}
+
+fn reposition_visible_chat(app: &tauri::AppHandle) {
+    let Some(chat) = app.get_webview_window("chat") else {
+        return;
+    };
+    if chat.is_visible().unwrap_or(false) {
+        let _ = request_chat_reposition(app);
+    }
+}
+
+fn place_pet_bottom_right(pet: &tauri::WebviewWindow) {
+    let (Ok(size), Ok(Some(monitor))) = (pet.outer_size(), pet.current_monitor()) else {
+        return;
+    };
+    let area = monitor.work_area();
+    let point = window_layout::position_pet_bottom_right(
+        window_layout::Size {
+            width: i64::from(size.width),
+            height: i64::from(size.height),
+        },
+        window_layout::Rect {
+            x: i64::from(area.position.x),
+            y: i64::from(area.position.y),
+            width: i64::from(area.size.width),
+            height: i64::from(area.size.height),
+        },
+        16,
+    );
+    let _ = pet.set_position(tauri::PhysicalPosition::new(
+        point.x.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+        point.y.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+    ));
+}
+
+/// Anchor the chat window next to the pet and bring it up (idempotent).
+pub(crate) fn show_chat(app: &tauri::AppHandle) -> Result<(), String> {
+    let chat = app
+        .get_webview_window("chat")
+        .ok_or("chat window missing")?;
+    let shown = app.state::<ChatShown>();
+
+    clear_chat_motion(app);
+    reposition_chat(app)?;
     chat.show().map_err(|e| e.to_string())?;
     chat.set_focus().map_err(|e| e.to_string())?;
     *shown
@@ -486,6 +640,7 @@ pub fn run() {
             port,
         })
         .manage(ChatShown(Mutex::new(false)))
+        .manage(Arc::new(ChatMotion::default()))
         .invoke_handler(tauri::generate_handler![
             sidecar_base_url,
             load_persona,
@@ -511,6 +666,12 @@ pub fn run() {
             let loaded = settings::load(&handle);
             settings::register_shortcuts(&handle, &loaded);
             if let Some(pet) = app.get_webview_window("pet") {
+                let chat_follow_handle = handle.clone();
+                let _ = pet.on_window_event(move |event| {
+                    if should_follow_chat_on_window_event(event) {
+                        reposition_visible_chat(&chat_follow_handle);
+                    }
+                });
                 if !loaded.pet_visible {
                     let _ = pet.hide();
                 } else {
@@ -522,6 +683,7 @@ pub fn run() {
                 if (loaded.pet_scale - 1.0).abs() > f64::EPSILON {
                     settings::apply_pet_scale(&pet, loaded.pet_scale);
                 }
+                place_pet_bottom_right(&pet);
             }
             app.manage(SettingsState(Mutex::new(loaded)));
             app.manage(HistoryState(Mutex::new(history::load(&handle))));

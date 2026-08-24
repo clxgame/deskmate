@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ClipboardEvent,
+  type DragEvent,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   abortSession,
@@ -18,6 +26,7 @@ import {
 } from "./chatPersona";
 import {
   getSettings,
+  onResourceError,
   onScheduledTask,
   onSettingsChanged,
   type Settings,
@@ -32,6 +41,17 @@ import {
   type HistorySession,
   type HistorySummary,
 } from "../lib/history";
+import {
+  createPendingAttachment,
+  formatAttachmentSize,
+  isNcmFile,
+  isSupportedAttachment,
+  MAX_TOTAL_ATTACHMENT_BYTES,
+  readChatAttachment,
+  snapshotSelectedFiles,
+  toOpenCodeFilePart,
+  type ChatAttachment,
+} from "./attachments";
 import "./chat.css";
 
 interface ChatMessage {
@@ -40,10 +60,12 @@ interface ChatMessage {
   text: string;
   /** live tool activity line, e.g. "bash: npm test" */
   activity?: string;
+  attachments?: ChatAttachment[];
 }
 
 interface PersonaData {
   persona: string;
+  skills?: string;
   placeholders: {
     streaming?: string;
     completed?: string;
@@ -63,6 +85,10 @@ export default function ChatApp() {
   const [theme, setTheme] = useState<ThemeId>("dark");
   const [activePersonaId, setActivePersonaId] = useState(DEFAULT_PERSONA_ID);
   const [view, setView] = useState<View>("chat");
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [readingAttachments, setReadingAttachments] = useState(false);
+  const [isDragActive, setIsDragActive] = useState(false);
   const t = dict(lang);
   // Latest dict for use inside stable callbacks (SSE handler, task listener).
   const tRef = useRef(t);
@@ -76,6 +102,8 @@ export default function ChatApp() {
   /** role by server messageID; used to skip user-message parts in SSE. */
   const rolesRef = useRef<Map<string, string>>(new Map());
   const listRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const dragDepthRef = useRef(0);
   /** mirror of `messages` for persisting history outside render. */
   const messagesRef = useRef<ChatMessage[]>([]);
   const createdRef = useRef<number>(Date.now());
@@ -296,21 +324,175 @@ export default function ChatApp() {
     return () => clearTimeout(timer);
   }, [messages, status]);
 
-  const send = async () => {
-    const text = input.trim();
-    if (!text || status === "busy" || status === "booting") return;
-    setInput("");
-    await sendText(text);
+  const prepareAttachmentsForSend = async (
+    queuedAttachments: ChatAttachment[],
+  ): Promise<ChatAttachment[]> => {
+    if (!queuedAttachments.some((item) => item.status === "pending")) {
+      return queuedAttachments;
+    }
+    setReadingAttachments(true);
+    let lastError: string | null = null;
+    const prepared: ChatAttachment[] = [];
+    try {
+      for (const attachment of queuedAttachments) {
+        if (attachment.status !== "pending") {
+          prepared.push(attachment);
+          continue;
+        }
+        const file = attachment.file;
+        try {
+          if (!file) throw new Error(`${attachment.name} 无法访问，请重新添加`);
+          let readyAttachment: ChatAttachment;
+          if (isNcmFile(file)) {
+            if (activePersonaIdRef.current !== "xiaozhu") {
+              throw new Error(".ncm 音乐转换是小著的专属能力，请先切换到小著");
+            }
+            const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
+            const converted = await invoke<{
+              filename: string;
+              mime: string;
+              size: number;
+              dataUrl: string;
+            }>("convert_ncm", {
+              personaId: activePersonaIdRef.current,
+              filename: file.name,
+              bytes,
+            });
+            readyAttachment = {
+              id: attachment.id,
+              name: converted.filename,
+              mime: converted.mime,
+              size: converted.size,
+              kind: "audio",
+              status: "ready",
+              dataUrl: converted.dataUrl,
+            };
+          } else {
+            readyAttachment = {
+              ...(await readChatAttachment(file)),
+              id: attachment.id,
+              status: "ready",
+            };
+          }
+          prepared.push(readyAttachment);
+          setAttachments((current) =>
+            current.map((item) =>
+              item.id === attachment.id ? readyAttachment : item,
+            ),
+          );
+        } catch (error: unknown) {
+          const detail = error instanceof Error ? error.message : String(error);
+          const message = detail || tRef.current.chatAttachmentReadFailed;
+          lastError = message;
+          const failedAttachment = {
+            ...attachment,
+            status: "error" as const,
+            error: message,
+          };
+          prepared.push(failedAttachment);
+          setAttachments((current) =>
+            current.map((item) =>
+              item.id === attachment.id ? failedAttachment : item,
+            ),
+          );
+        }
+      }
+    } finally {
+      setReadingAttachments(false);
+    }
+    if (lastError) setAttachmentError(lastError);
+    return prepared;
   };
 
-  /** Shared send path for user input and scheduled tasks. */
-  const sendText = async (text: string) => {
+  const send = async () => {
+    const text = input.trim();
+    if (!text) {
+      if (attachments.length > 0) {
+        setAttachmentError(t.chatAttachmentNeedsText);
+      }
+      return;
+    }
+    if (status !== "ready" || !sessionRef.current) return;
+    if (readingAttachments) {
+      setAttachmentError(t.chatAttachmentStillReading);
+      return;
+    }
+    if (attachments.some((item) => item.status === "error")) {
+      setAttachmentError(t.chatAttachmentFixErrors);
+      return;
+    }
+    const pendingAttachments = await prepareAttachmentsForSend(attachments);
+    if (pendingAttachments.some((item) => item.status === "pending")) {
+      setAttachmentError(t.chatAttachmentStillReading);
+      return;
+    }
+    if (pendingAttachments.some((item) => item.status === "error")) {
+      setAttachmentError(t.chatAttachmentFixErrors);
+      return;
+    }
+    setInput("");
+    setAttachments([]);
+    setAttachmentError(null);
+    await sendText(text, pendingAttachments);
+  };
+
+  const queueSelectedFiles = (files: FileList | File[]) => {
+    const selected = Array.from(files);
+    if (selected.length === 0) return;
+    if (readingAttachments) {
+      setAttachmentError(t.chatAttachmentStillReading);
+      return;
+    }
+    let totalBytes = attachments.reduce(
+      (sum, item) => (item.status === "error" ? sum : sum + item.size),
+      0,
+    );
+    const queued = selected.map((file) => {
+      const placeholder = createPendingAttachment(file);
+      if (!isNcmFile(file) && !isSupportedAttachment(file)) {
+        return {
+          ...placeholder,
+          status: "error" as const,
+          error: `${file.name} 暂不支持读取，请选择图片、PDF、DOCX 或文本文件`,
+        };
+      }
+      if (totalBytes + file.size > MAX_TOTAL_ATTACHMENT_BYTES) {
+        return {
+          ...placeholder,
+          status: "error" as const,
+          error: `${file.name} 超过 20 MB 限制`,
+        };
+      }
+      totalBytes += file.size;
+      return placeholder;
+    });
+    const firstError = queued.find((item) => item.status === "error");
+    setAttachments((current) => [...current, ...queued]);
+    setAttachmentError(firstError?.error ?? null);
+  };
+
+  const removeAttachment = (id: string) => {
+    setAttachments((current) => current.filter((item) => item.id !== id));
+    setAttachmentError(null);
+  };
+
+  const sendText = async (
+    text: string,
+    messageAttachments: ChatAttachment[] = [],
+  ) => {
     const sessionID = sessionRef.current;
-    if (!text || !sessionID) return;
+    if ((!text && messageAttachments.length === 0) || !sessionID) return;
     await personaLoadRef.current;
+    const attachmentNames = messageAttachments.map((item) => item.name).join(", ");
+    const promptText = text || `请读取我上传的附件：${attachmentNames}`;
     setMessages((prev) => [
       ...prev,
-      { id: `user-${Date.now()}`, role: "user", text },
+      {
+        id: `user-${Date.now()}`,
+        role: "user",
+        text: text || `附件：${attachmentNames}`,
+        attachments: messageAttachments,
+      },
     ]);
     setStatus("busy");
     broadcastMood("thinking");
@@ -326,11 +508,14 @@ export default function ChatApp() {
       const persona = personaRef.current?.persona;
       const system = persona
         ? langName
-          ? `${persona}\n\n# 回复语言\n\n- 使用 ${langName} 回复(用户界面语言已切换)`
-          : persona
+          ? `${persona}${personaRef.current?.skills ? `\n\n${personaRef.current.skills}` : ""}\n\n# 回复语言\n\n- 使用 ${langName} 回复(用户界面语言已切换)`
+          : `${persona}${personaRef.current?.skills ? `\n\n${personaRef.current.skills}` : ""}`
         : undefined;
-      await promptAsync(sessionID, text, {
+      await promptAsync(sessionID, promptText, {
         system,
+        attachments: messageAttachments
+          .map(toOpenCodeFilePart)
+          .filter((part): part is NonNullable<typeof part> => part !== null),
         model:
           s?.providerId && s.modelId
             ? { providerID: s.providerId, modelID: s.modelId }
@@ -340,7 +525,60 @@ export default function ChatApp() {
       console.error(e);
       setStatus("ready");
       broadcastMood("error");
+      if (messageAttachments.length > 0) {
+        setAttachments(messageAttachments);
+        setAttachmentError(tRef.current.chatAttachmentSendFailed);
+      }
     }
+  };
+
+  const handleFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = snapshotSelectedFiles(event.target.files);
+    event.target.value = "";
+    if (files.length > 0) queueSelectedFiles(files);
+  };
+
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(event.clipboardData.files);
+    if (files.length === 0) return;
+    event.preventDefault();
+    queueSelectedFiles(files);
+  };
+
+  const hasFiles = (event: DragEvent<HTMLDivElement>): boolean =>
+    Array.from(event.dataTransfer.types).includes("Files");
+
+  const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    dragDepthRef.current += 1;
+    setIsDragActive(true);
+  };
+
+  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setIsDragActive(true);
+  };
+
+  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    if (!hasFiles(event) && dragDepthRef.current === 0) return;
+    event.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setIsDragActive(false);
+  };
+
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    dragDepthRef.current = 0;
+    setIsDragActive(false);
+    if (event.dataTransfer.files.length === 0) {
+      setAttachmentError(t.chatAttachmentDropFailed);
+      return;
+    }
+    queueSelectedFiles(event.dataTransfer.files);
   };
 
   // Scheduled tasks fired by the Rust scheduler: auto-send the prompt.
@@ -351,6 +589,18 @@ export default function ChatApp() {
       void sendTextRef.current(
         `[${tRef.current.scheduledTaskPrefix} ${task.time}] ${task.prompt}`,
       );
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // Bundled personas/skills failed to unpack: tell the user why instead of
+  // letting it look like an empty persona list.
+  useEffect(() => {
+    const unlisten = onResourceError((reason) => {
+      console.error("resource sync failed", reason);
+      setAttachmentError(tRef.current.resourceSyncFailed);
     });
     return () => {
       void unlisten.then((fn) => fn());
@@ -414,7 +664,19 @@ export default function ChatApp() {
   };
 
   return (
-    <div className="chat-root" data-theme={theme}>
+    <div
+      className={`chat-root${isDragActive ? " chat-drag-active" : ""}`}
+      data-theme={theme}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {isDragActive && (
+        <div className="chat-dropzone" role="status" aria-live="polite">
+          {t.chatDropHere}
+        </div>
+      )}
       <header className="chat-header" data-tauri-drag-region="">
         <span className="chat-title">{activePersonaName}</span>
         <span className={`chat-status chat-status-${status}`}>
@@ -463,25 +725,112 @@ export default function ChatApp() {
                 {m.activity && (
                   <div className="chat-activity">⚙ {m.activity}</div>
                 )}
+                {m.attachments && m.attachments.length > 0 && (
+                  <div className="chat-message-attachments">
+                    {m.attachments.map((attachment) => (
+                      <AttachmentPreview
+                        key={attachment.id}
+                        attachment={attachment}
+                      />
+                    ))}
+                  </div>
+                )}
                 <div className="chat-bubble">{m.text || "…"}</div>
               </div>
             ))}
           </div>
 
           <footer className="chat-input-row">
-            <textarea
-              className="chat-input"
-              value={input}
-              placeholder={t.chatInputPlaceholder}
-              rows={2}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  void send();
-                }
-              }}
+            <input
+              ref={fileInputRef}
+              className="chat-file-input"
+              type="file"
+              multiple
+              accept="image/png,image/jpeg,image/gif,image/webp,.txt,.md,.json,.csv,.pdf,.docx,.ncm,.ts,.tsx,.js,.jsx,.css,.html,.xml,.yaml,.yml,.toml,.log"
+              onChange={handleFileInputChange}
             />
+            <div className="chat-input-wrap">
+              {(attachments.length > 0 || attachmentError) && (
+                <div className="chat-attachment-tray" aria-live="polite">
+                  {attachments.map((attachment) => (
+                    <div
+                      className={`chat-attachment-chip chat-attachment-chip-${attachment.status}`}
+                      key={attachment.id}
+                    >
+                      <span className="chat-attachment-kind">
+                        {attachment.kind === "image"
+                          ? "图"
+                          : attachment.kind === "audio"
+                            ? "音"
+                            : "文"}
+                      </span>
+                      <span className="chat-attachment-name" title={attachment.name}>
+                        {attachment.name}
+                      </span>
+                      {attachment.status === "pending" ? (
+                        <span className="chat-attachment-status chat-attachment-status-pending">
+                          {t.chatAttachmentPending}
+                        </span>
+                      ) : attachment.status === "error" ? (
+                        <span
+                          className="chat-attachment-status chat-attachment-status-error"
+                          title={attachment.error}
+                        >
+                          {t.chatAttachmentError}
+                        </span>
+                      ) : (
+                        <span className="chat-attachment-size">
+                          {t.chatAttachmentReady} · {formatAttachmentSize(attachment.size)}
+                        </span>
+                      )}
+                      <button
+                        className="chat-attachment-remove"
+                        type="button"
+                        onClick={() => removeAttachment(attachment.id)}
+                        disabled={readingAttachments}
+                        aria-label={`${t.chatAttachmentRemove} ${attachment.name}`}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  {attachmentError && (
+                    <div className="chat-attachment-error">{attachmentError}</div>
+                  )}
+                </div>
+              )}
+              <div className="chat-textarea-wrap">
+                <textarea
+                  className="chat-input"
+                  value={input}
+                  placeholder={t.chatInputPlaceholder}
+                  rows={2}
+                  onChange={(e) => {
+                    setInput(e.target.value);
+                    if (e.target.value.trim()) setAttachmentError(null);
+                  }}
+                  onPaste={handlePaste}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      void send();
+                    }
+                  }}
+                />
+                <button
+                  className="chat-attach"
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={status === "busy" || readingAttachments}
+                  aria-label={t.chatAttach}
+                  title={t.chatAttachHint}
+                >
+                  <svg viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M8 2.5v11M2.5 8h11" />
+                  </svg>
+                </button>
+              </div>
+            </div>
             {status === "busy" ? (
               <button
                 className="chat-send chat-abort"
@@ -493,7 +842,7 @@ export default function ChatApp() {
               <button
                 className="chat-send"
                 onClick={() => void send()}
-                disabled={status !== "ready"}
+                disabled={status !== "ready" || readingAttachments || !input.trim()}
               >
                 {t.chatSend}
               </button>
@@ -503,6 +852,42 @@ export default function ChatApp() {
       )}
     </div>
   );
+}
+
+function AttachmentPreview({
+  attachment,
+}: {
+  attachment: ChatAttachment;
+}) {
+  if (attachment.status !== "ready" || !attachment.dataUrl) {
+    return (
+      <div className="chat-attachment-document">
+        {attachment.name} · {attachment.error ?? "读取中"}
+      </div>
+    );
+  }
+  if (attachment.kind === "image") {
+    return (
+      <img
+        className="chat-attachment-image"
+        src={attachment.dataUrl}
+        alt={attachment.name}
+        title={attachment.name}
+      />
+    );
+  }
+  if (attachment.kind === "audio") {
+    return (
+      <audio
+        className="chat-attachment-audio"
+        controls
+        preload="metadata"
+        src={attachment.dataUrl}
+        aria-label={attachment.name}
+      />
+    );
+  }
+  return <div className="chat-attachment-document">文档 · {attachment.name}</div>;
 }
 
 /** Update the assistant message with the given id, creating it if missing. */

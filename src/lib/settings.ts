@@ -96,6 +96,17 @@ export function onScheduledTask(
   );
 }
 
+/**
+ * Fires when bundled personas/skills could not be copied into the app data
+ * dir. Without this the failure only shows up as an unexplained empty persona
+ * list, so the reason is surfaced to the user instead.
+ */
+export function onResourceError(
+  cb: (reason: string) => void,
+): Promise<UnlistenFn> {
+  return listen<string>("deskmate://resource-error", (e) => cb(e.payload));
+}
+
 // ---- AI provider/model listing straight from the opencode sidecar ----
 
 export interface ProviderModel {

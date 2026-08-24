@@ -124,6 +124,38 @@ impl Default for Settings {
 
 pub struct SettingsState(pub Mutex<Settings>);
 
+/// The API key is a credential, not a preference: it lives in the OS keystore
+/// (Windows Credential Manager / macOS Keychain) instead of settings.json.
+const KEYRING_SERVICE: &str = "com.deskmate.desktop";
+const KEYRING_USER: &str = "ai-api-key";
+
+fn api_key_entry() -> Option<keyring::Entry> {
+    keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER).ok()
+}
+
+fn load_api_key() -> String {
+    api_key_entry()
+        .and_then(|entry| entry.get_password().ok())
+        .unwrap_or_default()
+}
+
+/// Persist (or clear) the API key in the OS keystore.
+fn store_api_key(api_key: &str) -> Result<(), String> {
+    let Some(entry) = api_key_entry() else {
+        return Err("无法访问系统凭据存储，API Key 未能保存".to_string());
+    };
+    if api_key.is_empty() {
+        return match entry.delete_credential() {
+            Ok(()) => Ok(()),
+            Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(format!("无法清除已保存的 API Key: {e}")),
+        };
+    }
+    entry
+        .set_password(api_key)
+        .map_err(|e| format!("无法保存 API Key 到系统凭据存储: {e}"))
+}
+
 fn settings_path(app: &tauri::AppHandle) -> PathBuf {
     app.path()
         .app_data_dir()
@@ -169,7 +201,37 @@ pub fn load(app: &tauri::AppHandle) -> Settings {
     );
     settings.theme = normalize_theme(&settings.theme);
     settings.update_repo = migrated_update_repo(&settings.update_repo).into_owned();
+
+    // Migrate a legacy plaintext key out of settings.json into the OS keystore,
+    // then rewrite the file so the secret stops living on disk.
+    let legacy_key = std::mem::take(&mut settings.api_key);
+    if !legacy_key.trim().is_empty() {
+        match store_api_key(legacy_key.trim()) {
+            Ok(()) => {
+                settings.api_key = legacy_key.trim().to_string();
+                if let Err(e) = save(app, &settings) {
+                    eprintln!("could not scrub legacy api key from settings.json: {e}");
+                }
+            }
+            Err(e) => {
+                // Keystore unavailable: keep the key usable in memory this run
+                // rather than silently locking the user out of their model.
+                eprintln!("api key migration failed: {e}");
+                settings.api_key = legacy_key;
+            }
+        }
+    } else {
+        settings.api_key = load_api_key();
+    }
     settings
+}
+
+/// The on-disk form of the settings: identical except the credential is removed.
+fn redacted_for_disk(settings: &Settings) -> Settings {
+    Settings {
+        api_key: String::new(),
+        ..settings.clone()
+    }
 }
 
 fn save(app: &tauri::AppHandle, settings: &Settings) -> Result<(), String> {
@@ -177,7 +239,8 @@ fn save(app: &tauri::AppHandle, settings: &Settings) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    // Never write the API key to disk; it belongs to the OS keystore.
+    let json = serde_json::to_string_pretty(&redacted_for_disk(settings)).map_err(|e| e.to_string())?;
     std::fs::write(&path, json).map_err(|e| e.to_string())
 }
 
@@ -220,6 +283,10 @@ pub fn set_settings(
     );
     settings.theme = normalize_theme(&settings.theme);
     settings.update_repo = migrated_update_repo(&settings.update_repo).into_owned();
+    settings.api_key = settings.api_key.trim().to_string();
+    // Store the credential in the OS keystore before anything else, so a
+    // keystore failure surfaces to the user instead of being lost silently.
+    store_api_key(&settings.api_key)?;
     // SAFE-UNWRAP: a poisoned settings mutex means an earlier command panicked.
     let old = { state.0.lock().unwrap().clone() };
     save(&app, &settings)?;
@@ -405,7 +472,26 @@ pub fn register_shortcuts(app: &tauri::AppHandle, settings: &Settings) {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_pet_scale, normalize_render_value, normalize_theme};
+    use super::{
+        normalize_pet_scale, normalize_render_value, normalize_theme, redacted_for_disk, Settings,
+    };
+
+    #[test]
+    fn api_key_is_never_serialized_to_settings_json() {
+        let settings = Settings {
+            api_key: "super-secret-key".into(),
+            base_url: "https://example.invalid".into(),
+            ..Settings::default()
+        };
+
+        let on_disk = redacted_for_disk(&settings);
+        assert_eq!(on_disk.api_key, "");
+        // Non-secret preferences must survive the redaction untouched.
+        assert_eq!(on_disk.base_url, "https://example.invalid");
+
+        let json = serde_json::to_string(&on_disk).expect("settings serialize");
+        assert!(!json.contains("super-secret-key"));
+    }
 
     #[test]
     fn pet_scale_is_clamped_to_the_supported_range() {

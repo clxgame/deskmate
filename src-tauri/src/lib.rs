@@ -5,9 +5,10 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use tauri::{Manager, RunEvent, State};
+use base64::Engine;
+use tauri::{Emitter, Manager, RunEvent, State};
 
 mod history;
 mod settings;
@@ -49,7 +50,121 @@ fn load_persona(app: tauri::AppHandle, id: String) -> Result<serde_json::Value, 
         .ok()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
         .unwrap_or(serde_json::Value::Null);
-    Ok(serde_json::json!({ "persona": persona, "placeholders": placeholders }))
+    let skills = if id == "xiaozhu" {
+        std::fs::read_to_string(data_dir.join("skills").join("xiaozhu").join("ncmdump.md")).ok()
+    } else {
+        None
+    };
+    Ok(serde_json::json!({
+        "persona": persona,
+        "placeholders": placeholders,
+        "skills": skills,
+    }))
+}
+
+#[derive(serde::Serialize)]
+struct ConvertedNcm {
+    filename: String,
+    mime: String,
+    size: usize,
+    #[serde(rename = "dataUrl")]
+    data_url: String,
+}
+
+#[tauri::command]
+fn convert_ncm(
+    app: tauri::AppHandle,
+    persona_id: String,
+    filename: String,
+    bytes: Vec<u8>,
+) -> Result<ConvertedNcm, String> {
+    if persona_id != "xiaozhu" {
+        return Err("ncm 转换仅对小著开放".into());
+    }
+    const MAX_NCM_BYTES: usize = 64 * 1024 * 1024;
+    if bytes.is_empty() || bytes.len() > MAX_NCM_BYTES {
+        return Err("NCM 文件必须在 1 B 至 64 MB 之间".into());
+    }
+    let source_name = std::path::Path::new(&filename)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| name.to_ascii_lowercase().ends_with(".ncm"))
+        .ok_or("无效的 NCM 文件名")?
+        .to_string();
+    let binary = resolve_ncmdump(&app).ok_or("客户端未找到内置 ncmdump")?;
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|error| error.to_string())?
+        .join("ncmdump");
+    std::fs::create_dir_all(&cache).map_err(|error| error.to_string())?;
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let work_dir = cache.join(format!("{}-{nonce}", std::process::id()));
+    std::fs::create_dir_all(&work_dir).map_err(|error| error.to_string())?;
+    let result = (|| -> Result<ConvertedNcm, String> {
+        let input = work_dir.join(source_name);
+        let output_dir = work_dir.join("output");
+        std::fs::create_dir_all(&output_dir).map_err(|error| error.to_string())?;
+        std::fs::write(&input, bytes).map_err(|error| error.to_string())?;
+
+        let mut command = Command::new(&binary);
+        command.arg(&input).arg("-o").arg(&output_dir);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+        let output = command.output().map_err(|_| "无法启动内置 ncmdump")?;
+        if !output.status.success() {
+            return Err("ncmdump 无法转换这个文件".into());
+        }
+
+        let mut converted = std::fs::read_dir(&output_dir)
+            .map_err(|error| error.to_string())?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                matches!(
+                    path.extension()
+                        .and_then(|extension| extension.to_str())
+                        .map(|extension| extension.to_ascii_lowercase())
+                        .as_deref(),
+                    Some("mp3") | Some("flac")
+                )
+            })
+            .collect::<Vec<_>>();
+        converted.sort();
+        let output_path = converted.first().ok_or("ncmdump 没有生成音频文件")?;
+        let output_bytes = std::fs::read(output_path).map_err(|error| error.to_string())?;
+        let extension = output_path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or("mp3")
+            .to_ascii_lowercase();
+        let mime = if extension == "flac" {
+            "audio/flac"
+        } else {
+            "audio/mpeg"
+        };
+        let output_name = output_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("converted-audio.mp3")
+            .to_string();
+        let data = base64::engine::general_purpose::STANDARD.encode(&output_bytes);
+        Ok(ConvertedNcm {
+            filename: output_name,
+            mime: mime.to_string(),
+            size: output_bytes.len(),
+            data_url: format!("data:{mime};base64,{data}"),
+        })
+    })();
+    let _ = std::fs::remove_dir_all(&work_dir);
+    result
 }
 
 #[tauri::command]
@@ -402,6 +517,26 @@ fn resolve_opencode(app: &tauri::AppHandle) -> PathBuf {
     PathBuf::from("opencode")
 }
 
+fn resolve_ncmdump(app: &tauri::AppHandle) -> Option<PathBuf> {
+    let executable = if cfg!(windows) {
+        "ncmdump.exe"
+    } else {
+        "ncmdump"
+    };
+    let mut candidates = Vec::new();
+    if let Ok(dir) = app.path().resource_dir() {
+        candidates.push(dir.join("resources").join("ncmdump").join(executable));
+        candidates.push(dir.join("ncmdump").join(executable));
+    }
+    candidates.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("ncmdump")
+            .join(executable),
+    );
+    candidates.into_iter().find(|path| path.is_file())
+}
+
 fn pick_free_port() -> u16 {
     TcpListener::bind("127.0.0.1:0")
         .and_then(|l| l.local_addr())
@@ -442,21 +577,25 @@ fn cleanup_orphan_sidecars() {
 
 /// Copy ship resources (personas) into the app data dir on first run,
 /// so users can edit them without touching the install dir.
-fn sync_ship_resources(app: &tauri::AppHandle, data_dir: &PathBuf) {
-    let Ok(res_dir) = app.path().resource_dir() else {
-        return;
-    };
-    let candidates = [
-        res_dir.join("resources").join("personas"),
-        res_dir.join("personas"),
-    ];
-    let dst = data_dir.join("personas");
-    for src in candidates {
-        if src.exists() {
-            let _ = copy_missing_dir_recursive(&src, &dst);
-            return;
+/// Returns a human-readable reason for the first failure, if any.
+fn sync_ship_resources(app: &tauri::AppHandle, data_dir: &PathBuf) -> Result<(), String> {
+    let res_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("无法定位安装资源目录: {e}"))?;
+    for name in ["personas", "skills"] {
+        let candidates = [res_dir.join("resources").join(name), res_dir.join(name)];
+        let dst = data_dir.join(name);
+        for src in candidates {
+            if src.exists() {
+                copy_missing_dir_recursive(&src, &dst).map_err(|e| {
+                    format!("无法复制 {name} 资源到 {}: {e}", dst.display())
+                })?;
+                break;
+            }
         }
     }
+    Ok(())
 }
 
 fn copy_missing_dir_recursive(src: &PathBuf, dst: &PathBuf) -> std::io::Result<()> {
@@ -479,7 +618,12 @@ fn copy_missing_dir_recursive(src: &PathBuf, dst: &PathBuf) -> std::io::Result<(
 fn spawn_sidecar(app: &tauri::AppHandle, port: u16) -> std::io::Result<Child> {
     let data_dir = app.path().app_data_dir().expect("app data dir unavailable");
     std::fs::create_dir_all(&data_dir)?;
-    sync_ship_resources(app, &data_dir);
+    // A resource-copy failure means personas/skills will be missing, which
+    // otherwise shows up as an unexplained empty persona list. Report it.
+    if let Err(reason) = sync_ship_resources(app, &data_dir) {
+        eprintln!("ship resource sync failed: {reason}");
+        let _ = app.emit("deskmate://resource-error", &reason);
+    }
 
     // Sessions live in a dedicated workspace dir under app data.
     let workspace = data_dir.join("workspace");
@@ -644,6 +788,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             sidecar_base_url,
             load_persona,
+            convert_ncm,
             toggle_chat,
             hide_chat,
             preview_pet_scale,

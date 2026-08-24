@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { OpenCodeFilePart } from "../chat/attachments";
 
 /** Minimal OpenCode server client (v1.17.x HTTP API). */
 
@@ -83,14 +84,19 @@ export async function promptAsync(
   options?: {
     system?: string;
     model?: { providerID: string; modelID: string };
+    attachments?: OpenCodeFilePart[];
   },
 ): Promise<void> {
+  const parts = [
+    ...(text ? [{ type: "text" as const, text }] : []),
+    ...(options?.attachments ?? []),
+  ];
   await api<void>(`/session/${sessionID}/prompt_async`, {
     method: "POST",
     body: JSON.stringify({
       ...(options?.system ? { system: options.system } : {}),
       ...(options?.model ? { model: options.model } : {}),
-      parts: [{ type: "text", text }],
+      parts,
     }),
   });
 }

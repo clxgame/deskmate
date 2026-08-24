@@ -19,9 +19,29 @@ Run the desktop app in development:
 bun run tauri dev
 ```
 
-The Tauri dev/build hooks run `bun run prepare:sidecar`, which copies the
-platform-specific OpenCode binary installed from the lockfile into the app
-resources. The generated binary is intentionally ignored by Git.
+The Tauri dev/build hooks run `bun run prepare:sidecar`, which fetches the
+binary build inputs into the app resources. These artifacts are intentionally
+ignored by Git:
+
+- **OpenCode sidecar** — copied from the version pinned in the lockfile.
+- **ncmdump** — downloaded from its pinned upstream release
+  ([taurusxin/ncmdump](https://github.com/taurusxin/ncmdump), MIT).
+- **3D persona assets** — the `.glb` models and texture PNGs, downloaded from a
+  release on the private `clxgame/deskmate-assets` repository.
+
+Each download is verified against a pinned SHA-256, so a swapped or truncated
+artifact fails the build instead of shipping.
+
+Fetching the persona assets needs a token with read access to the assets
+repository, from `DESKMATE_ASSETS_TOKEN` or `GH_TOKEN`:
+
+```powershell
+$env:DESKMATE_ASSETS_TOKEN = "<token with read access>"
+bun run prepare:sidecar
+```
+
+If no token is set but the assets are already unpacked, the build reuses them.
+In CI the token comes from the `DESKMATE_ASSETS_TOKEN` secret.
 
 Build the frontend only:
 
@@ -52,6 +72,7 @@ Release prerequisites:
 
 - `TAURI_SIGNING_PRIVATE_KEY`
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+- `DESKMATE_ASSETS_TOKEN` (read access to `clxgame/deskmate-assets`)
 
 Keep signing keys in the local environment or GitHub Actions secrets only. Never commit or publish the private signing key, password, tokens, or `.env` files.
 

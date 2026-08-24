@@ -774,14 +774,13 @@ function AccountTab({ settings, patch, t }: TabProps) {
         format={(value) => value.toFixed(2)}
         onChange={(value) => patch("specularIntensity", value)}
       />
-      <p className="set-note">{t.renderTuningHint}</p>
     </>
   );
 }
 
 // ----------------------------------------------------------------- 关于
 
-function AboutTab({ settings, patch, t }: TabProps) {
+function AboutTab({ t }: TabProps) {
   const [version, setVersion] = useState("");
 
   useEffect(() => {
@@ -808,17 +807,6 @@ function AboutTab({ settings, patch, t }: TabProps) {
       <p className="set-about-version">{version ? `v${version}` : "…"}</p>
       <p className="set-about-desc">{t.aboutDesc}</p>
       <p className="set-about-credits">{t.aboutCredits}</p>
-      <Row label={t.updateRepo}>
-        <input
-          className="set-input"
-          type="text"
-          value={settings.updateRepo}
-          placeholder="yourname/deskmate"
-          aria-label={t.updateRepo}
-          onChange={(e) => patch("updateRepo", e.target.value)}
-        />
-      </Row>
-      <p className="set-note">GitHub 仓库(用户名/仓库名),用于检查更新。</p>
     </>
   );
 }

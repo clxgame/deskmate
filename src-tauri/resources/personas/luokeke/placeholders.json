@@ -1,0 +1,8 @@
+{
+  "_comment": "对话区占位文字(luokeke / 洛可可)。schema 见 shared/protocol.ts 的 PersonaPlaceholders。任一字段缺失 → 前端走硬编码中文兜底。改完无需重启 sidecar(每次 list_personas 都重读)。",
+
+  "streaming": "幕布拉开,稍等…",
+  "completed": "这一场,落幕",
+  "compacting": "正在把前文收进盒子…",
+  "compacted": "(前文已收进奇妙的盒子)"
+}

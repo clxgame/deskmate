@@ -1,5 +1,5 @@
 use std::net::TcpListener;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -578,7 +578,7 @@ fn cleanup_orphan_sidecars() {
 /// Copy ship resources (personas) into the app data dir on first run,
 /// so users can edit them without touching the install dir.
 /// Returns a human-readable reason for the first failure, if any.
-fn sync_ship_resources(app: &tauri::AppHandle, data_dir: &PathBuf) -> Result<(), String> {
+fn sync_ship_resources(app: &tauri::AppHandle, data_dir: &Path) -> Result<(), String> {
     let res_dir = app
         .path()
         .resource_dir()
@@ -598,7 +598,7 @@ fn sync_ship_resources(app: &tauri::AppHandle, data_dir: &PathBuf) -> Result<(),
     Ok(())
 }
 
-fn copy_missing_dir_recursive(src: &PathBuf, dst: &PathBuf) -> std::io::Result<()> {
+fn copy_missing_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
@@ -812,7 +812,7 @@ pub fn run() {
             settings::register_shortcuts(&handle, &loaded);
             if let Some(pet) = app.get_webview_window("pet") {
                 let chat_follow_handle = handle.clone();
-                let _ = pet.on_window_event(move |event| {
+                pet.on_window_event(move |event| {
                     if should_follow_chat_on_window_event(event) {
                         reposition_visible_chat(&chat_follow_handle);
                     }

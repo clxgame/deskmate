@@ -11,6 +11,10 @@ src-tauri/target/
 src-tauri/resources/opencode/opencode
 src-tauri/resources/opencode/opencode.exe
 
+# ncmdump converter fetched from its pinned upstream release at build time
+src-tauri/resources/ncmdump/ncmdump
+src-tauri/resources/ncmdump/ncmdump.exe
+
 # Local environment and secrets
 .env
 .env.*

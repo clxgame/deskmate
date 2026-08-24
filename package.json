@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "prepare:sidecar": "bun scripts/prepare-opencode.ts",
+    "prepare:sidecar": "bun scripts/prepare-opencode.ts && bun scripts/prepare-ncmdump.ts",
     "preview": "vite preview",
     "tauri": "tauri"
   },

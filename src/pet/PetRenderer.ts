@@ -7,12 +7,8 @@ import {
   VRMHumanBoneName,
 } from "@pixiv/three-vrm";
 import type { PetMood } from "../lib/petState";
-import {
-  personaById,
-  personaClipName,
-  personaModelUrl,
-  personaTextureRoot,
-} from "./personaCatalog";
+import { personaAssets, type PersonaAssets } from "./personaAssets";
+import { personaById, personaClipName } from "./personaCatalog";
 import { ToonShading } from "./toonShader";
 
 type StandardMaterial = THREE.MeshStandardMaterial;
@@ -105,7 +101,7 @@ export class PetRenderer {
   private mouseYaw = 0;
   private mousePitch = 0;
   private readonly baseModelRotation = new THREE.Euler();
-  private personaId = "aimisi";
+  private personaId = "xiaozhu";
   private loadToken = 0;
   private disposed = false;
 
@@ -139,9 +135,12 @@ export class PetRenderer {
     const token = ++this.loadToken;
     const persona = personaById(requestedId);
     if (this.model !== null && this.personaId === persona.id) return;
+    // Built-in personas load from the bundled frontend; imported packs come off
+    // disk through the asset protocol.
+    const assets = await personaAssets(persona.id);
     let gltf: Awaited<ReturnType<GLTFLoader["loadAsync"]>>;
     try {
-      gltf = await this.loader.loadAsync(personaModelUrl(persona.id));
+      gltf = await this.loader.loadAsync(assets.modelUrl);
     } catch (error: unknown) {
       throw new Error(`模型 ${persona.id} 加载失败: ${errorMessage(error)}`);
     }
@@ -159,7 +158,7 @@ export class PetRenderer {
       VRMUtils.rotateVRM0(vrm);
     } else {
       try {
-        await this.applyPersonaTextures(model, personaTextureRoot(persona.id));
+        await this.applyPersonaTextures(model, assets);
       } catch (error: unknown) {
         throw new Error(
           `角色 ${persona.id} 贴图加载失败: ${errorMessage(error)}`,
@@ -385,7 +384,7 @@ export class PetRenderer {
 
   private async applyPersonaTextures(
     root: THREE.Object3D,
-    textureRoot: string,
+    assets: PersonaAssets,
   ): Promise<void> {
     const textureLoader = new THREE.TextureLoader();
     const tasks: Promise<void>[] = [];
@@ -396,11 +395,9 @@ export class PetRenderer {
         const slot = material.name.replace(/^MI_/, "");
         if (slot.length === 0) continue;
         tasks.push(
-          this.applyTexture(
-            material,
-            textureLoader,
-            `${textureRoot}/${slot}/baseColor.png`,
-          ),
+          assets
+            .textureUrl(slot)
+            .then((url) => this.applyTexture(material, textureLoader, url)),
         );
       }
     });

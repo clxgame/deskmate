@@ -65,6 +65,10 @@
       }
     ],
     "security": {
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$APPDATA/packs/**/*"]
+      },
       "csp": {
         "default-src": "'self' customprotocol: asset:",
         "connect-src": "'self' customprotocol: asset: ipc: http://ipc.localhost http://asset.localhost http://127.0.0.1:* blob: data:",

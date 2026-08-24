@@ -778,6 +778,9 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // Native file picker: importing a pack needs a real filesystem path,
+        // which a WebView `input[type=file]` never exposes.
+        .plugin(tauri_plugin_dialog::init())
         .manage(Sidecar {
             child: Mutex::new(None),
             port,

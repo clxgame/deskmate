@@ -165,21 +165,37 @@ export function packById(packId: string): PackManifest | undefined {
   return PACK_BY_ID.get(packId);
 }
 
+/** What the backend reports about a pack that is present on disk. */
+export interface InstalledPackState {
+  readonly packId: string;
+  readonly personaIds: readonly string[];
+}
+
 /**
- * Personas available for selection: built-in packs plus the installed pack ids
- * the caller passes in. Unknown ids are ignored so a stale setting cannot break
- * the catalog. Sorted by id for stable ordering in the UI.
+ * Personas available for selection: built-in packs plus the personas an
+ * installed pack actually shipped.
+ *
+ * The install state, not the manifest, decides which personas appear. A pack
+ * may be built with a subset of the personas its manifest describes, and
+ * offering one whose model is missing would leave the pet unable to render.
+ * Unknown pack ids are ignored so a stale setting cannot break the catalog.
  */
 export function personaCatalog(
-  installedPackIds: readonly string[] = [],
+  installed: readonly InstalledPackState[] = [],
 ): readonly PersonaEntry[] {
-  const extra = installedPackIds
-    .map((packId) => PACK_BY_ID.get(packId))
-    .filter((pack): pack is PackManifest => pack !== undefined && !pack.builtin);
-  return personasOf([...BUILTIN_PACKS, ...extra]).sort((left, right) =>
+  const extra = installed.flatMap((state) => {
+    const pack = PACK_BY_ID.get(state.packId);
+    if (pack === undefined || pack.builtin) return [];
+    const present = new Set(state.personaIds);
+    return pack.personas
+      .filter((persona) => present.has(persona.id))
+      .map((persona) => ({ ...persona, packId: pack.packId }));
+  });
+  return [...personasOf(BUILTIN_PACKS), ...extra].sort((left, right) =>
     left.id.localeCompare(right.id),
   );
 }
+
 
 /** Built-in personas only; used where install state is not available. */
 export const PERSONAS: readonly PersonaEntry[] = personaCatalog();

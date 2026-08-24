@@ -20,10 +20,12 @@ import {
 } from "../lib/settings";
 import { dict, verifyError, LANGS, type Dict } from "../lib/i18n";
 import { UpdateFooter } from "./UpdateFooter";
+import { PersonaPacks } from "./PersonaPacks";
+import type { InstalledPack } from "../lib/packs";
 import {
   DEFAULT_PERSONA_ID,
-  PERSONAS,
   personaById,
+  personaCatalog,
   personaLabel,
 } from "../pet/personaCatalog";
 import { THEME_IDS, type ThemeId } from "./theme";
@@ -704,6 +706,11 @@ function ShortcutInput({
 
 function AccountTab({ settings, patch, t }: TabProps) {
   const personaId = personaById(settings.personaId || DEFAULT_PERSONA_ID).id;
+  // Install state lives here so the selector and the pack list stay in sync.
+  const [installedPacks, setInstalledPacks] = useState<InstalledPack[]>([]);
+  // Pass the full state: only personas a pack actually shipped may be offered,
+  // otherwise selecting one would leave the pet without a model.
+  const personas = personaCatalog(installedPacks);
   return (
     <>
       <h2 className="set-panel-head">{t.tabAccount}</h2>
@@ -723,14 +730,21 @@ function AccountTab({ settings, patch, t }: TabProps) {
           value={personaId}
           onChange={(e) => patch("personaId", e.target.value)}
         >
-          {PERSONAS.map((persona) => (
+          {personas.map((persona) => (
             <option key={persona.id} value={persona.id}>
               {personaLabel(persona, settings.language)}
             </option>
           ))}
         </select>
       </Row>
-      <p className="set-note">{t.personaComing}</p>
+      <PersonaPacks
+        t={t}
+        language={settings.language}
+        installed={installedPacks}
+        onInstalledChange={setInstalledPacks}
+        activePersonaId={personaId}
+        onActivePersonaRemoved={() => patch("personaId", DEFAULT_PERSONA_ID)}
+      />
       <Row label={t.mouseFollow}>
         <Switch
           label={t.mouseFollow}

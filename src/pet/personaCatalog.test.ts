@@ -50,18 +50,46 @@ describe("persona packs", () => {
 
   test("adds a pack's personas to the catalog once it is installed", () => {
     const before = personaCatalog();
-    const after = personaCatalog(["aki"]);
+    const after = personaCatalog([
+      { packId: "aki", personaIds: AKI_PACK.personas.map((p) => p.id) },
+    ]);
 
     expect(before).toHaveLength(1);
     expect(after).toHaveLength(26);
     expect(after.map((persona) => persona.id)).toContain("changli");
   });
 
+  test("offers only the personas a pack actually shipped", () => {
+    // A pack may be built with a subset of its manifest. Offering a persona
+    // whose model is missing leaves the pet unable to render, so install state
+    // decides, not the manifest.
+    const partial = personaCatalog([
+      { packId: "aki", personaIds: ["changli"] },
+    ]);
+
+    expect(partial.map((persona) => persona.id)).toEqual(["changli", "xiaozhu"]);
+    expect(partial.map((persona) => persona.id)).not.toContain("aimisi");
+  });
+
   test("ignores unknown or duplicated pack ids in install state", () => {
     // A stale setting must never break the catalog.
-    expect(personaCatalog(["nope"])).toHaveLength(1);
+    expect(personaCatalog([{ packId: "nope", personaIds: ["x"] }])).toHaveLength(
+      1,
+    );
     // Built-in packs are already present and must not be added twice.
-    expect(personaCatalog(["ai-substitute"])).toHaveLength(1);
+    expect(
+      personaCatalog([{ packId: "ai-substitute", personaIds: ["xiaozhu"] }]),
+    ).toHaveLength(1);
+  });
+
+  test("ignores persona ids a pack's manifest does not describe", () => {
+    // The manifest supplies name, scale and clips, so an id it does not know
+    // cannot be rendered and must not reach the selector.
+    const catalog = personaCatalog([
+      { packId: "aki", personaIds: ["changli", "not-a-persona"] },
+    ]);
+
+    expect(catalog.map((persona) => persona.id)).toEqual(["changli", "xiaozhu"]);
   });
 
   test("resolves personas from packs that are not installed", () => {

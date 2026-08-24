@@ -26,3 +26,4 @@ ureq = { version = "2", features = ["json"] }
 keyring = { version = "3", features = ["windows-native", "apple-native"] }
 zip = { version = "8", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
+tauri-plugin-dialog = "2.7.2"

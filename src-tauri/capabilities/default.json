@@ -17,6 +17,7 @@
     "core:window:allow-is-visible",
     "core:window:allow-set-focus",
     "global-shortcut:allow-is-registered",
-    "autostart:allow-is-enabled"
+    "autostart:allow-is-enabled",
+    "dialog:allow-open"
   ]
 }

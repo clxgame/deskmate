@@ -11,6 +11,8 @@ use base64::Engine;
 use tauri::{Emitter, Manager, RunEvent, State};
 
 mod history;
+/// User-installable persona packs imported from local `.dmpack` archives.
+mod packs;
 mod settings;
 mod updater;
 mod window_layout;
@@ -36,31 +38,26 @@ fn sidecar_base_url(sidecar: State<Sidecar>) -> String {
     format!("http://127.0.0.1:{}", sidecar.port)
 }
 
-/// Load the persona system prompt + placeholders from the app data dir.
+/// Load the persona system prompt + placeholders, preferring an installed pack.
 #[tauri::command]
 fn load_persona(app: tauri::AppHandle, id: String) -> Result<serde_json::Value, String> {
-    // Reject path-traversal persona ids.
-    if id.contains(['/', '\\', '.']) {
-        return Err("invalid persona id".into());
-    }
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let dir = data_dir.join("personas").join(&id);
-    let persona = std::fs::read_to_string(dir.join("persona.md")).map_err(|e| e.to_string())?;
-    let placeholders = std::fs::read_to_string(dir.join("placeholders.json"))
-        .ok()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+    let (persona, placeholders_raw, skills) = packs::persona_files(&app, &id)?;
+    let placeholders = placeholders_raw
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
         .unwrap_or(serde_json::Value::Null);
-    let skills = if id == "xiaozhu" {
-        std::fs::read_to_string(data_dir.join("skills").join("xiaozhu").join("ncmdump.md")).ok()
-    } else {
-        None
-    };
+    // Skills come from the owning pack's manifest, so a new pack can grant
+    // abilities without changing this command.
+    let skills = (!skills.is_empty()).then(|| skills.join("\n\n"));
     Ok(serde_json::json!({
         "persona": persona,
         "placeholders": placeholders,
         "skills": skills,
     }))
 }
+
+/// Skill file that grants ncm conversion. A persona may use `convert_ncm` only
+/// when its owning pack declares this file and ships it.
+const NCM_SKILL_FILE: &str = "ncmdump.md";
 
 #[derive(serde::Serialize)]
 struct ConvertedNcm {
@@ -78,8 +75,10 @@ fn convert_ncm(
     filename: String,
     bytes: Vec<u8>,
 ) -> Result<ConvertedNcm, String> {
-    if persona_id != "xiaozhu" {
-        return Err("ncm 转换仅对小著开放".into());
+    // The ability is declared by the owning pack's manifest, so a future pack can
+    // grant ncm conversion without editing this command.
+    if !packs::persona_grants_skill(&app, &persona_id, NCM_SKILL_FILE) {
+        return Err("当前角色没有 ncm 转换能力".into());
     }
     const MAX_NCM_BYTES: usize = 64 * 1024 * 1024;
     if bytes.is_empty() || bytes.len() > MAX_NCM_BYTES {
@@ -802,6 +801,9 @@ pub fn run() {
             history::history_load,
             history::history_save,
             history::history_delete,
+            packs::installed_packs,
+            packs::import_pack,
+            packs::uninstall_pack,
             updater::update_app
         ])
         .setup(move |app| {

@@ -17,11 +17,11 @@ import { resolve } from "node:path";
  */
 
 const ASSETS_REPO = "clxgame/deskmate-assets";
-const PERSONAS_VERSION = "1.0.0";
+const PERSONAS_VERSION = "1.0.1";
 const RELEASE_TAG = `personas-${PERSONAS_VERSION}`;
 const ARCHIVE_NAME = `deskmate-personas-${PERSONAS_VERSION}.zip`;
 const ARCHIVE_SHA256 =
-  "cd4c826805d65c4868631a8bf31e3045055daf88815dfbdf43234d05c3674931";
+  "8d719610e0355f7273ce3dedcd8cb04bbb5b4e930313a5353e4b2e96e316b40a";
 
 /** Personas that must exist after unpacking, as a sanity check. */
 const EXPECTED_PERSONA_COUNT = 26;

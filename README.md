@@ -26,22 +26,37 @@ ignored by Git:
 - **OpenCode sidecar** — copied from the version pinned in the lockfile.
 - **ncmdump** — downloaded from its pinned upstream release
   ([taurusxin/ncmdump](https://github.com/taurusxin/ncmdump), MIT).
-- **3D persona assets** — the `.glb` models and texture PNGs, downloaded from a
-  release on the private `clxgame/deskmate-assets` repository.
 
 Each download is verified against a pinned SHA-256, so a swapped or truncated
 artifact fails the build instead of shipping.
 
-Fetching the persona assets needs a token with read access to the assets
-repository, from `DESKMATE_ASSETS_TOKEN` or `GH_TOKEN`:
+## Persona packs
+
+Only the built-in 「AI 替身」pack (小著, ~375 KB) ships inside the app, so the
+installer stays small. Everything else is a **persona pack**: a `.dmpack`
+archive the user imports from 设置 → 角色 → 导入角色包, and can remove again.
+
+Build a pack from the assets in `public/personas`:
+
+```powershell
+bun scripts/pack-personas.ts aki 1.0.0 aki-1.0.0.dmpack changli jinxi
+# omit the persona ids to pack every directory under public/personas
+```
+
+Imported packs are unpacked to `<appData>/packs/<packId>/` and read through the
+asset protocol, whose scope is restricted to that directory. Only personas a
+pack actually shipped are offered in the selector, so a pack built with a subset
+of its manifest cannot leave the pet without a model.
+
+To fetch the original 3D assets for packing, a maintainer needs read access to
+the private `clxgame/deskmate-assets` repository:
 
 ```powershell
 $env:DESKMATE_ASSETS_TOKEN = "<token with read access>"
-bun run prepare:sidecar
+bun run fetch:persona-assets
 ```
 
-If no token is set but the assets are already unpacked, the build reuses them.
-In CI the token comes from the `DESKMATE_ASSETS_TOKEN` secret.
+This is a maintainer-only step; building and running the app does not need it.
 
 Build the frontend only:
 
@@ -72,7 +87,6 @@ Release prerequisites:
 
 - `TAURI_SIGNING_PRIVATE_KEY`
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
-- `DESKMATE_ASSETS_TOKEN` (read access to `clxgame/deskmate-assets`)
 
 Keep signing keys in the local environment or GitHub Actions secrets only. Never commit or publish the private signing key, password, tokens, or `.env` files.
 

@@ -1,0 +1,4 @@
+# Bun test configuration. `preload` installs a DOM before component tests run,
+# so React can render into `document` under `bun test`.
+[test]
+preload = ["./src/testing/dom.ts"]

@@ -20,6 +20,7 @@ import {
 } from "../lib/settings";
 import { dict, verifyError, LANGS, type Dict } from "../lib/i18n";
 import { UpdateFooter } from "./UpdateFooter";
+import { MemoryTab } from "./MemoryTab";
 import { PersonaPacks } from "./PersonaPacks";
 import type { InstalledPack } from "../lib/packs";
 import {
@@ -31,7 +32,14 @@ import {
 import { THEME_IDS, type ThemeId } from "./theme";
 import "./settings.css";
 
-type TabId = "general" | "ai" | "widget" | "shortcuts" | "account" | "about";
+type TabId =
+  | "general"
+  | "ai"
+  | "widget"
+  | "shortcuts"
+  | "account"
+  | "memory"
+  | "about";
 
 const TAB_GLYPHS: { id: TabId; glyph: string }[] = [
   { id: "general", glyph: "◎" },
@@ -39,6 +47,7 @@ const TAB_GLYPHS: { id: TabId; glyph: string }[] = [
   { id: "widget", glyph: "▣" },
   { id: "shortcuts", glyph: "⌘" },
   { id: "account", glyph: "◍" },
+  { id: "memory", glyph: "❉" },
   { id: "about", glyph: "ⓘ" },
 ];
 
@@ -54,6 +63,8 @@ function tabLabel(t: Dict, id: TabId): string {
       return t.tabShortcuts;
     case "account":
       return t.tabAccount;
+    case "memory":
+      return t.tabMemory;
     case "about":
       return t.tabAbout;
   }
@@ -168,6 +179,19 @@ export default function SettingsApp() {
             )}
             {tab === "account" && (
               <AccountTab settings={settings} patch={patch} t={t} />
+            )}
+            {tab === "memory" && (
+              <MemoryTab
+                language={settings.language}
+                personaId={settings.personaId}
+                autoExtract={settings.memoryAutoExtract}
+                aiUse={settings.memoryAiUse}
+                onAutoExtractChange={(value) =>
+                  patch("memoryAutoExtract", value)
+                }
+                onAiUseChange={(value) => patch("memoryAiUse", value)}
+                t={t}
+              />
             )}
             {tab === "about" && (
               <AboutTab settings={settings} patch={patch} t={t} />

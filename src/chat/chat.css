@@ -16,6 +16,7 @@
   --accent-soft: rgba(74, 125, 255, 0.16);
   --accent-hover: #6b93ff;
   --danger: #ff8080;
+  --warn: #ffb066;
   --text-on-accent: #fff;
   display: flex;
   flex-direction: column;
@@ -63,6 +64,7 @@
   --accent-soft: rgba(87, 184, 154, 0.18);
   --accent-hover: #3e9c7b;
   --danger: #c96a76;
+  --warn: #b77a32;
   --text-on-accent: #fff;
 }
 
@@ -80,6 +82,7 @@
   --accent-soft: rgba(232, 154, 125, 0.18);
   --accent-hover: #d98062;
   --danger: #c96a76;
+  --warn: #b77a32;
   --text-on-accent: #fff;
 }
 
@@ -97,6 +100,7 @@
   --accent-soft: rgba(165, 139, 224, 0.18);
   --accent-hover: #8e72cf;
   --danger: #c96a76;
+  --warn: #b77a32;
   --text-on-accent: #fff;
 }
 
@@ -217,6 +221,123 @@
   margin-bottom: 3px;
   font-family: Consolas, monospace;
 }
+
+/* ---- 记忆 ---- */
+
+/* Memory controls stay quiet until the message is hovered or focused, so the
+   conversation does not turn into a row of buttons. */
+.chat-msg-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.chat-msg:hover .chat-msg-actions,
+.chat-msg:focus-within .chat-msg-actions {
+  opacity: 1;
+}
+
+.chat-memory-action {
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 8px;
+  transition:
+    background 140ms ease,
+    color 140ms ease;
+}
+
+.chat-memory-action:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.chat-memory-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  opacity: 1;
+}
+
+.chat-memory-action-danger:hover {
+  color: var(--danger);
+}
+
+.chat-memory-receipt {
+  align-items: center;
+  background: var(--accent-soft);
+  border-radius: 8px;
+  display: flex;
+  font-size: 11px;
+  gap: 8px;
+  margin-top: 4px;
+  max-width: 100%;
+  padding: 4px 8px;
+}
+
+.chat-memory-receipt-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-memory-undo {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.chat-memory-confirm {
+  background: var(--surface-raised);
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  margin-top: 8px;
+  padding: 12px;
+}
+
+.chat-memory-confirm-title {
+  color: var(--warn);
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.chat-memory-confirm-body {
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 0 0 8px;
+  opacity: 0.85;
+}
+
+.chat-memory-confirm-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.chat-memory-notice {
+  border-top: 1px solid var(--line);
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 8px 12px;
+}
+
+.history-memory-option {
+  align-items: center;
+  color: var(--text-dim);
+  display: flex;
+  font-size: 11px;
+  gap: 6px;
+  padding: 6px 12px;
+}
+
 
 .chat-input-row {
   display: flex;

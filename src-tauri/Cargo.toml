@@ -26,4 +26,9 @@ ureq = { version = "2", features = ["json"] }
 keyring = { version = "3", features = ["windows-native", "apple-native"] }
 zip = { version = "8", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+uuid = { version = "1.25.0", features = ["v4"] }
 tauri-plugin-dialog = "2.7.2"
+
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = "2"

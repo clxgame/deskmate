@@ -613,6 +613,158 @@ body,
   cursor: default;
 }
 
+/* ---------- memory tab ---------- */
+
+.set-btn {
+  background: var(--surface-sunken);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--t-small);
+  padding: var(--s-1) var(--s-3);
+  transition:
+    background var(--ease),
+    border-color var(--ease),
+    color var(--ease);
+}
+
+.set-btn:hover {
+  background: var(--surface-hover);
+  border-color: var(--accent);
+}
+
+.set-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.set-btn-danger:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.set-memory-toolbar {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  margin-top: var(--s-4);
+  padding-top: var(--s-4);
+}
+
+.set-memory-search {
+  flex: 1;
+  min-width: 160px;
+  width: auto;
+}
+
+.set-memory-scope {
+  width: auto;
+}
+
+.set-memory-history-toggle {
+  align-items: center;
+  display: flex;
+  font-size: var(--t-small);
+  gap: var(--s-1);
+  opacity: var(--opacity-muted);
+}
+
+.set-memory-notice {
+  color: var(--accent);
+  font-size: var(--t-small);
+  margin: var(--s-2) 0 0;
+}
+
+.set-memory-error {
+  color: var(--danger);
+  font-size: var(--t-small);
+  margin: var(--s-3) 0 0;
+}
+
+.set-memory-empty {
+  font-size: var(--t-small);
+  line-height: 1.6;
+  margin: var(--s-4) 0;
+  opacity: var(--opacity-faint);
+}
+
+.set-memory-list {
+  list-style: none;
+  margin: var(--s-3) 0 0;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.set-memory-item {
+  border-bottom: 1px solid var(--line);
+  padding: var(--s-3) 0;
+}
+
+/* Replaced and expired memories stay readable but visibly secondary. */
+.set-memory-item-superseded,
+.set-memory-item-expired {
+  opacity: 0.6;
+}
+
+.set-memory-content {
+  font-size: var(--t-body);
+  line-height: 1.5;
+  margin: 0 0 var(--s-1);
+  word-break: break-word;
+}
+
+.set-memory-meta {
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--t-small);
+  gap: var(--s-3);
+  margin: 0 0 var(--s-2);
+  opacity: var(--opacity-muted);
+}
+
+.set-memory-status {
+  color: var(--warn);
+}
+
+.set-memory-actions {
+  display: flex;
+  gap: var(--s-2);
+}
+
+.set-memory-textarea {
+  margin-bottom: var(--s-2);
+  resize: vertical;
+  width: 100%;
+}
+
+.set-memory-bulk {
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin-top: var(--s-4);
+  padding-top: var(--s-4);
+}
+
+.set-memory-confirm {
+  background: var(--surface-raised);
+  border: 1px solid var(--danger);
+  border-radius: var(--r-md);
+  margin-top: var(--s-3);
+  padding: var(--s-4);
+}
+
+.set-memory-confirm-body {
+  font-size: var(--t-small);
+  line-height: 1.5;
+  margin: 0 0 var(--s-3);
+}
+
 /* ---------- AI tab: api config ---------- */
 
 /* key input + 60px verify button + 12px gap = --control-w, aligned with other controls. */

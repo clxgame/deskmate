@@ -79,6 +79,78 @@ bun run tauri build --no-sign
 The macOS build enables Tauri's private transparency API for the frameless pet
 window, so it is intended for direct distribution rather than the Mac App Store.
 
+## Memory
+
+The companion can remember things about you. Memory is a local, inspectable
+feature, not a hidden extension of chat history.
+
+### What is remembered
+
+Only what you save, or what you approve. Pick **记住这件事** on any message and
+you get an inline receipt with a one-click undo. Nothing about a conversation is
+stored just because it happened.
+
+Memories have two scopes:
+
+- **Shared** — how you want to be addressed, stable preferences, boundaries,
+  routines, goals, and dated events. Every persona sees these.
+- **Persona-only** — shared moments and relationship notes. Only the persona
+  that created them can see or use them; switching personas never leaks them.
+
+A changed stable fact replaces the old value rather than piling up, and the
+previous value stays visible under **显示已替换和已过期** so you can see what
+changed.
+
+### What is refused
+
+Credentials are rejected outright and never stored, exported, logged, or sent to
+a model: passwords, API keys, tokens, private keys, recovery codes, payment-card
+numbers, and government identifiers.
+
+Private categories (health, finance, address, identity documents, intimate
+relationships, confidential work) are never saved automatically. They require an
+explicit confirmation that states where the data will live.
+
+The companion will not store conclusions it inferred about you — personality
+labels, diagnoses, political or religious identity — unless you state the fact
+yourself and ask for it to be remembered.
+
+### Where it lives
+
+`deskmate-memory.db` in the app data directory, next to `settings.json`:
+
+```
+%APPDATA%\com.deskmate.desktop\deskmate-memory.db
+```
+
+The file is **not encrypted**; it relies on your operating system's file
+permissions, like the existing chat history. Forgetting a memory is a hard
+delete: the content, its provenance, and its search index are removed, and the
+write-ahead log is flushed so nothing lingers. Only a content-free audit record
+("a memory was forgotten at this time") remains.
+
+### What is sent to the AI
+
+When a memory is relevant to what you are saying, it is included in the request
+to whichever AI gateway you configured in Settings → AI. At most 8 memories and
+1,200 characters are sent per message, always inside a clearly delimited
+untrusted-data block that the model is told is factual background and not
+instructions.
+
+Turn off **允许 AI 使用记忆** in Settings → 记忆 to stop sending memories
+entirely. Local memory management keeps working.
+
+### Managing it
+
+Settings → **记忆** lists everything with its type, scope, date, and the reason
+it exists. From there you can search, edit, forget a single memory, export
+everything to JSON, clear one persona, or clear all memory. Deleting a
+conversation also offers to delete the memories that came only from it, on by
+default.
+
+If the database cannot be opened, memory is disabled for that run and the pet
+and chat keep working normally.
+
 ## Releases and updater
 
 The public updater repository is `clxgame/deskmate`. The app checks GitHub Releases in that repository for signed Windows updater artifacts.

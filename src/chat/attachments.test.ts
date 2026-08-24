@@ -71,7 +71,7 @@ describe("chat attachments", () => {
 
   test("snapshots the file picker list before the input is cleared", () => {
     const file = new File(["hello"], "notes.md", { type: "text/markdown" });
-    const liveList: ArrayLike<File> = { 0: file, length: 1 };
+    const liveList: { 0: File; length: number } = { 0: file, length: 1 };
     const snapshot = snapshotSelectedFiles(liveList);
 
     liveList.length = 0;

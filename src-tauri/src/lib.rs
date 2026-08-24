@@ -11,6 +11,8 @@ use base64::Engine;
 use tauri::{Emitter, Manager, RunEvent, State};
 
 mod history;
+/// Local memory: storage, policy, retrieval, and the frontend command surface.
+mod memory;
 /// User-installable persona packs imported from local `.dmpack` archives.
 mod packs;
 mod settings;
@@ -770,7 +772,26 @@ pub fn run() {
 
     let port = pick_free_port();
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    // Registered first, before any other plugin or window is created: a second
+    // launch (double-clicking the icon again, autostart racing a manual start,
+    // a stuck process from a crash) takes a named OS mutex here and exits
+    // immediately if one is already held, forwarding its argv/cwd to the running
+    // instance instead. This is what stops "several dozen processes" from a
+    // single misbehaving launch path, and it also removes the two symptoms that
+    // motivated it: two instances fighting over global shortcuts, and two
+    // instances opening the same `deskmate-memory.db` file.
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // A second launch is treated exactly like the tray "show" action:
+            // bring the existing chat into view rather than doing nothing.
+            let _ = show_chat(app);
+        }));
+    }
+
+    builder
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -807,6 +828,20 @@ pub fn run() {
             packs::installed_packs,
             packs::import_pack,
             packs::uninstall_pack,
+            memory::commands::memory_available,
+            memory::commands::memory_create,
+            memory::commands::memory_update,
+            memory::commands::memory_list,
+            memory::commands::memory_forget,
+            memory::commands::memory_clear,
+            memory::commands::memory_forget_conversation,
+            memory::commands::memory_context,
+            memory::commands::memory_export,
+            memory::commands::memory_relationship,
+            memory::commands::memory_set_relationship_summary,
+            memory::commands::memory_link_task,
+            memory::commands::memory_unlink_task,
+            memory::commands::memory_unlink_deleted_task,
             updater::update_app
         ])
         .setup(move |app| {
@@ -837,6 +872,10 @@ pub fn run() {
             }
             app.manage(SettingsState(Mutex::new(loaded)));
             app.manage(HistoryState(Mutex::new(history::load(&handle))));
+            // Memory is optional infrastructure: if the database cannot open,
+            // `MemoryState` records that and every memory command answers
+            // MEMORY_DISABLED while chat and the pet keep working.
+            app.manage(memory::MemoryState::initialize(&handle));
             settings::start_scheduler(handle.clone());
 
             setup_tray(&handle)?;

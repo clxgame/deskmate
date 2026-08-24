@@ -87,6 +87,13 @@ pub struct Settings {
     pub persona_id: String,
     pub mouse_follow: bool,
     pub user_name: String,
+    // 记忆
+    /// Let the companion propose memories from the conversation. Off by
+    /// default: automatic memory is opt-in.
+    pub memory_auto_extract: bool,
+    /// Allow relevant confirmed memories to be sent to the configured AI
+    /// gateway. Off disables injection but keeps local memory management.
+    pub memory_ai_use: bool,
     // 更新
     pub update_repo: String,
 }
@@ -114,9 +121,13 @@ impl Default for Settings {
             // is commonly taken by IMEs; Ctrl+Alt+D is usually free.
             shortcut_toggle_chat: "Ctrl+Alt+D".into(),
             shortcut_toggle_pet: String::new(),
-            persona_id: "aimisi".into(),
+            persona_id: "xiaozhu".into(),
             mouse_follow: false,
             user_name: String::new(),
+            // Automatic extraction is opt-in; using stored memories in replies
+            // is on so an explicitly remembered fact is actually useful.
+            memory_auto_extract: false,
+            memory_ai_use: true,
             update_repo: DEFAULT_UPDATE_REPO.into(),
         }
     }
@@ -171,8 +182,9 @@ pub fn load(app: &tauri::AppHandle) -> Settings {
         .map(|s| s.trim_start_matches('\u{feff}').to_string())
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
+    // "default" was the pre-pack persona id; 小著 is the built-in fallback now.
     if settings.persona_id == "default" {
-        settings.persona_id = "aimisi".into();
+        settings.persona_id = "xiaozhu".into();
     }
     settings.pet_scale = normalize_pet_scale(settings.pet_scale);
     settings.outline_width = normalize_render_value(
@@ -477,6 +489,13 @@ mod tests {
     };
 
     #[test]
+    fn default_persona_is_the_built_in_one() {
+        // 小著 is the only persona bundled with the app. Defaulting to a persona
+        // that lives in an optional pack would leave a fresh install with no pet.
+        assert_eq!(Settings::default().persona_id, "xiaozhu");
+    }
+
+    #[test]
     fn api_key_is_never_serialized_to_settings_json() {
         let settings = Settings {
             api_key: "super-secret-key".into(),
@@ -517,5 +536,34 @@ mod tests {
         assert_eq!(normalize_render_value(0.4, 0.0, 1.0, 0.4), 0.4);
         assert_eq!(normalize_render_value(f64::NAN, 0.0, 2.0, 1.0), 1.0);
         assert_eq!(normalize_render_value(f64::INFINITY, 0.0, 2.0, 1.0), 1.0);
+    }
+
+    #[test]
+    fn memory_defaults_are_opt_in_for_extraction_and_on_for_use() {
+        let settings = Settings::default();
+        assert!(
+            !settings.memory_auto_extract,
+            "automatic extraction must be opt-in"
+        );
+        assert!(settings.memory_ai_use);
+    }
+
+    #[test]
+    fn a_settings_file_predating_memory_still_loads() {
+        // A real 0.1.5 settings.json has no memory fields at all.
+        let legacy = r#"{
+            "autostart": false,
+            "language": "zh-CN",
+            "theme": "mint",
+            "personaId": "changli",
+            "scheduledTasks": [{"id":"t1","time":"09:00","prompt":"喝水","enabled":true}]
+        }"#;
+        let settings: Settings = serde_json::from_str(legacy).expect("legacy settings parse");
+        assert_eq!(settings.theme, "mint");
+        assert_eq!(settings.persona_id, "changli");
+        assert_eq!(settings.scheduled_tasks.len(), 1);
+        // Missing memory fields fall back to the conservative defaults.
+        assert!(!settings.memory_auto_extract);
+        assert!(settings.memory_ai_use);
     }
 }

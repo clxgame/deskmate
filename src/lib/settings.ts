@@ -38,6 +38,9 @@ export interface Settings {
   personaId: string;
   mouseFollow: boolean;
   userName: string;
+  // 记忆
+  memoryAutoExtract: boolean;
+  memoryAiUse: boolean;
   // 更新
   updateRepo: string;
 }

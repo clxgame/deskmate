@@ -77,6 +77,22 @@ All spacing uses a 4px base: `--s-1` 4px, `--s-2` 8px, `--s-3` 12px, `--s-4` 16p
 - Structure: icon glyph plus label in `.set-tab`.
 - States: default, hover, active, keyboard focus.
 
+### Memory receipt (chat)
+- Structure: `.chat-memory-receipt` — an accent-tinted strip under the message, holding the remembered text and an inline Undo link.
+- States: default; the Undo link disappears once the memory is no longer freshly saved.
+- The controls that produce it (`.chat-msg-actions`) stay at zero opacity until the message is hovered or focused, so a conversation never turns into a row of buttons.
+- Accessibility: the receipt is a `role="status"` live region so a save is announced; every control is a real focusable button with a visible focus ring.
+
+### Sensitive-storage confirmation (chat)
+- Structure: `.chat-memory-confirm` — a `--warn` bordered card with a title, the local-storage disclosure, and confirm/decline buttons.
+- States: only rendered while a decision is pending; dismissing it stores nothing.
+- Accessibility: `role="alertdialog"`; both actions are keyboard reachable and the wording states where the data will live before the user commits.
+
+### Memory list row (settings)
+- Structure: `.set-memory-item` — content, then a `.set-memory-meta` line carrying type, scope, date, and the reason the memory exists, then per-row edit/forget actions.
+- States: default; replaced and expired rows drop to 0.6 opacity and gain a `--warn` status label; the edit state swaps the content for a textarea.
+- Destructive actions never fire directly — they open `.set-memory-confirm`, which names what will be deleted and that it cannot be undone.
+
 ## 6. Motion & Interaction
 
 Use `140ms ease` for control transitions. Persona changes are stateful but not animated in the settings surface; the pet renderer fades through a model swap only if a future transition is added. Mouse-follow rotation eases at a bounded rate and returns to neutral when disabled. Respect reduced-motion preferences for any future model transition.

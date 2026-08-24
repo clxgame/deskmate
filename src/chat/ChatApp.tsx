@@ -25,6 +25,16 @@ import {
   shouldResetSessionForPersona,
 } from "./chatPersona";
 import {
+  composeSystemPrompt,
+  draftFromMessage,
+  forgetMemory,
+  memoryBlockForTurn,
+  saveMemory,
+  type MemoryFailure,
+  type MemoryReceipt,
+} from "./memoryActions";
+import { memoryForgetConversation } from "../lib/memory";
+import {
   getSettings,
   onResourceError,
   onScheduledTask,
@@ -63,6 +73,12 @@ interface ChatMessage {
   attachments?: ChatAttachment[];
 }
 
+/** A pending sensitive-storage confirmation, awaiting the user's decision. */
+interface SensitivePrompt {
+  messageId: string;
+  draft: ReturnType<typeof draftFromMessage>;
+}
+
 interface PersonaData {
   persona: string;
   skills?: string;
@@ -89,6 +105,14 @@ export default function ChatApp() {
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [readingAttachments, setReadingAttachments] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
+  /** Inline memory receipts, keyed by the message they belong to. */
+  const [memoryReceipts, setMemoryReceipts] = useState<
+    Record<string, MemoryReceipt>
+  >({});
+  const [memoryNotice, setMemoryNotice] = useState<string | null>(null);
+  const [sensitivePrompt, setSensitivePrompt] = useState<SensitivePrompt | null>(
+    null,
+  );
   const t = dict(lang);
   // Latest dict for use inside stable callbacks (SSE handler, task listener).
   const tRef = useRef(t);
@@ -506,11 +530,20 @@ export default function ChatApp() {
       };
       const langName = s ? langNames[s.language] : undefined;
       const persona = personaRef.current?.persona;
-      const system = persona
+      const personaPrompt = persona
         ? langName
           ? `${persona}${personaRef.current?.skills ? `\n\n${personaRef.current.skills}` : ""}\n\n# 回复语言\n\n- 使用 ${langName} 回复(用户界面语言已切换)`
           : `${persona}${personaRef.current?.skills ? `\n\n${personaRef.current.skills}` : ""}`
         : undefined;
+      // Relevant confirmed memories, appended after the persona so they can
+      // only add context to the instructions above them. A memory failure
+      // yields an empty block rather than blocking the turn.
+      const memoryBlock = await memoryBlockForTurn({
+        personaId: activePersonaIdRef.current,
+        userText: promptText,
+        enabled: s?.memoryAiUse ?? true,
+      });
+      const system = composeSystemPrompt({ personaPrompt, memoryBlock });
       await promptAsync(sessionID, promptText, {
         system,
         attachments: messageAttachments
@@ -531,6 +564,76 @@ export default function ChatApp() {
       }
     }
   };
+
+  /** Turn a memory failure into a user-facing notice. */
+  const noticeForMemoryFailure = useCallback(
+    (failure: MemoryFailure): string => {
+      const dict = tRef.current;
+      switch (failure.kind) {
+        case "secret-rejected":
+          return dict.memorySecretRejected;
+        case "conflict":
+          return dict.memoryConflictNotice;
+        case "disabled":
+          return dict.memoryDisabledNotice;
+        default:
+          return dict.memorySaveFailed;
+      }
+    },
+    [],
+  );
+
+  /** "记住这件事" on one message. */
+  const rememberMessage = useCallback(
+    async (message: ChatMessage, sensitiveConfirmed = false) => {
+      const draft = draftFromMessage({
+        text: message.text,
+        personaId: activePersonaIdRef.current,
+        conversationId: sessionRef.current,
+        // History-loaded messages have synthetic ids, so only live server
+        // message ids are recorded as provenance.
+        messageId: message.id.startsWith("hist-") ? null : message.id,
+      });
+      const result = await saveMemory(draft, { sensitiveConfirmed });
+      if (result.ok) {
+        setSensitivePrompt(null);
+        setMemoryNotice(null);
+        setMemoryReceipts((current) => ({
+          ...current,
+          [message.id]: result.value,
+        }));
+        return;
+      }
+      if (result.failure.kind === "sensitive-confirmation") {
+        // Storing this needs the disclosure dialog first.
+        setSensitivePrompt({ messageId: message.id, draft: result.failure.draft });
+        return;
+      }
+      setSensitivePrompt(null);
+      setMemoryNotice(noticeForMemoryFailure(result.failure));
+    },
+    [noticeForMemoryFailure],
+  );
+
+  /** Undo a just-saved memory, or forget it outright. */
+  const dropMemory = useCallback(
+    async (messageId: string, memoryId: string, undo: boolean) => {
+      const result = await forgetMemory(memoryId);
+      if (!result.ok) {
+        setMemoryNotice(noticeForMemoryFailure(result.failure));
+        return;
+      }
+      setMemoryReceipts((current) => {
+        const next = { ...current };
+        delete next[messageId];
+        return next;
+      });
+      setMemoryNotice(
+        undo ? tRef.current.memoryUndone : tRef.current.memoryForgotten,
+      );
+    },
+    [noticeForMemoryFailure],
+  );
 
   const handleFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     const files = snapshotSelectedFiles(event.target.files);
@@ -736,9 +839,83 @@ export default function ChatApp() {
                   </div>
                 )}
                 <div className="chat-bubble">{m.text || "…"}</div>
+                {m.text.trim().length > 0 && (
+                  <div className="chat-msg-actions">
+                    <button
+                      type="button"
+                      className="chat-memory-action"
+                      onClick={() => void rememberMessage(m)}
+                      title={t.memoryRemember}
+                    >
+                      {t.memoryRemember}
+                    </button>
+                    {memoryReceipts[m.id] && (
+                      <button
+                        type="button"
+                        className="chat-memory-action chat-memory-action-danger"
+                        onClick={() =>
+                          void dropMemory(m.id, memoryReceipts[m.id].memoryId, false)
+                        }
+                        title={t.memoryForget}
+                      >
+                        {t.memoryForget}
+                      </button>
+                    )}
+                  </div>
+                )}
+                {memoryReceipts[m.id] && (
+                  <div className="chat-memory-receipt" role="status" aria-live="polite">
+                    <span className="chat-memory-receipt-text">
+                      {t.memorySaved(memoryReceipts[m.id].content)}
+                    </span>
+                    {memoryReceipts[m.id].undoable && (
+                      <button
+                        type="button"
+                        className="chat-memory-undo"
+                        onClick={() =>
+                          void dropMemory(m.id, memoryReceipts[m.id].memoryId, true)
+                        }
+                      >
+                        {t.memoryUndo}
+                      </button>
+                    )}
+                  </div>
+                )}
+                {sensitivePrompt?.messageId === m.id && (
+                  <div className="chat-memory-confirm" role="alertdialog">
+                    <div className="chat-memory-confirm-title">
+                      {t.memorySensitiveTitle}
+                    </div>
+                    <p className="chat-memory-confirm-body">
+                      {t.memorySensitiveBody}
+                    </p>
+                    <div className="chat-memory-confirm-actions">
+                      <button
+                        type="button"
+                        className="chat-memory-action"
+                        onClick={() => void rememberMessage(m, true)}
+                      >
+                        {t.memorySensitiveConfirm}
+                      </button>
+                      <button
+                        type="button"
+                        className="chat-memory-action"
+                        onClick={() => setSensitivePrompt(null)}
+                      >
+                        {t.memorySensitiveCancel}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
+
+          {memoryNotice && (
+            <div className="chat-memory-notice" role="status" aria-live="polite">
+              {memoryNotice}
+            </div>
+          )}
 
           <footer className="chat-input-row">
             <input
@@ -921,6 +1098,12 @@ function HistoryPanel({
   const [sessions, setSessions] = useState<HistorySummary[] | null>(null);
   const [open, setOpen] = useState<HistorySession | null>(null);
   const [failed, setFailed] = useState(false);
+  /**
+   * Deleting a conversation offers to drop the memories that came only from it,
+   * enabled by default. Memories with other sources, or that the user saved
+   * explicitly elsewhere, always survive.
+   */
+  const [deleteMemories, setDeleteMemories] = useState(true);
 
   const refresh = useCallback(() => {
     setFailed(false);
@@ -943,6 +1126,10 @@ function HistoryPanel({
 
   const remove = async (id: string) => {
     await historyDelete(id).catch(() => {});
+    if (deleteMemories) {
+      // A memory failure must not leave the conversation half-deleted.
+      await memoryForgetConversation(id).catch(() => {});
+    }
     refresh();
   };
 
@@ -990,6 +1177,16 @@ function HistoryPanel({
       </div>
       {failed && (
         <p className="history-empty history-error">{t.historyLoadFailed}</p>
+      )}
+      {sessions !== null && sessions.length > 0 && (
+        <label className="history-memory-option">
+          <input
+            type="checkbox"
+            checked={deleteMemories}
+            onChange={(event) => setDeleteMemories(event.target.checked)}
+          />
+          {t.memoryDeleteWithConversation}
+        </label>
       )}
       {sessions === null ? (
         <p className="history-empty">{t.loading}</p>

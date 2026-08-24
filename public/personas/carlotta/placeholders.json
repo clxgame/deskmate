@@ -1,0 +1,6 @@
+{
+  "_comment": "对话区占位文字(每个 persona 独立)。schema 见 shared/protocol.ts 的 PersonaPlaceholders。任一字段缺失 → 前端走该字段的硬编码中文兜底。改完无需重启 sidecar(每次 list_personas 都重读)。v0.14(#77)起删掉 compacting/compacted —— 自动压缩管线下线。user 老文件里残留这俩字段 sidecar 会忽略,不影响。",
+
+  "streaming": "思考中...",
+  "completed": "已完成"
+}

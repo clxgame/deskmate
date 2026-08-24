@@ -1,0 +1,103 @@
+{
+  "_comment": "V2 标准导出(linnai)。clips.roll=InOut(Jump01_2 跳跃入退场),rollDistance=5.00736。材质 MI_Face/MI_Hair/MI_Item,贴图仅 baseColor(channelMap 缺省走 1×1 fallback)。",
+  "modelUrl": "figure.glb",
+  "textureRoot": "textures",
+  "scale": 1.063,
+  "rollDistance": 5.00736,
+  "fadeDuration": 0.1,
+  "rotationDuration": 0.5,
+  "rotationOvershoot": 1.2,
+  "clips": {
+    "idle": "Idle",
+    "thinking": "Thinking",
+    "talking": "Talking",
+    "tool_call": "Thinking",
+    "error": "Error",
+    "compact_running": "Working",
+    "poke": "Touch",
+    "roll": "InOut"
+  },
+  "_rotation_comment": "陀螺感旋转的物理调参。impulseScale = 鼠标 1px 给 ω 加多少 rad/s(改这个改'轻飘'感)。dragDampRate = drag 期间 ω 衰减率(/sec,改这个改'鼠标多快转多快'手感,谨慎调)。releasedDampRate = release 后 ω 衰减率(/sec,改这个不影响手感,只控多快停)。holdMs = 停下后停留多久再回正。returnMs = 回正 tween 时长(从当前角度 lerp 回 0,0 用多久),也用作 LLM 状态切换时的回正速度。pitchClampDeg = 上下俯仰角度限幅(度数,正负对称)。整块缺失或单字段缺失走 personaFigure3d.ts 的默认值。",
+  "rotation": {
+    "impulseScale": 0.04,
+    "dragDampRate": 1.2,
+    "releasedDampRate": 2,
+    "holdMs": 500,
+    "returnMs": 1500,
+    "pitchClampDeg": 20
+  },
+  "_deprecated": [
+    "drag.capFps",
+    "drag.updateFps"
+  ],
+  "_drag_comment": "位置拖拽阻尼(只控视觉跟手感)。lerpRate = target 收敛率(/秒),current += (target-current) * (1-exp(-rate·dt));值大跟手(轻飘),值小拖泥带水,默认 30 ≈ 23ms 半衰。fps 上限已上提到顶层 frameLimit 块(全局影响渲染 + drag IPC 双 rAF)。",
+  "drag": {
+    "lerpRate": 45
+  },
+  "_frameLimit_comment": "全局固定帧率模式 —— Stage 渲染循环(animate)+ Pet3DView drag setPosition 双 rAF 都按这个节流。enabled=false(默认)= 不限,显示器刷新率封顶;enabled=true 时按 fps 节流。fps 典型值 30/60/120/144,默认 60。低端机 / 省电场景 / dev DevTools 调试用。",
+  "frameLimit": {
+    "enabled": false,
+    "fps": 60
+  },
+  "_expressionTags_comment": "9 格 atlas(3x3,行优先,左上=0,右下=8): 0=默认大眼小笑 / 1=X_X 死 / 2=>_< 害羞 / 3=闭眼笑+腮红 / 4=小眼小嘴沮丧 / 5=怒眉+腮红 / 6=O 嘴惊讶 / 7=怒眉+泪 / 8=闭眼得意笑+腮红。值可填单数字(固定一格)或数字数组(进态随机抽,长度 ≥2 时同状态连续不重复),如 \"thinking\": [4, 6]。dragging/rotating/pat_head 没配 clip(只换脸),交互层 transient 优先级高于 LLM 层(详见 petBridge.ts)。",
+  "expressionTags": {
+    "idle": 0,
+    "thinking": 6,
+    "talking": [
+      3,
+      8
+    ],
+    "tool_call": 6,
+    "error": 1,
+    "dragging": 2,
+    "rotating": [
+      1,
+      4
+    ],
+    "pat_head": [
+      3,
+      8
+    ]
+  },
+  "_outline_features_comment": "v2 文档 §8 MI 实测默认:USE_VERTEX_G_WIDTH / USE_VERTEX_B_INNER / USE_CURVATURE 默认 on(发尖 taper、内描线、曲率附加);USE_OUTLINE_MAX 默认 off(让 effectiveMax = 999 不夹);USE_MAIN_TEX 默认 on(描边色 = baseColor × OutlineColorTint,跟 UE 母材质对齐)。DEBUG_CONST_OUTLINE 永远 off。",
+  "slots": {
+    "MI_Face": {
+      "features": {
+        "USE_OUTLINE": true,
+        "USE_WITH_FACE": true,
+        "USE_RIM2": true,
+        "USE_VERTEX_G_WIDTH": true,
+        "USE_VERTEX_B_INNER": true,
+        "USE_CURVATURE": true,
+        "USE_MAIN_TEX": true
+      },
+      "uniforms": {
+        "tag": 0
+      }
+    },
+    "MI_Hair": {
+      "features": {
+        "USE_OUTLINE": true,
+        "USE_RIM": true,
+        "USE_RIM2": true,
+        "USE_VERTEX_G_WIDTH": true,
+        "USE_VERTEX_B_INNER": true,
+        "USE_CURVATURE": true,
+        "USE_MAIN_TEX": true
+      }
+    },
+    "MI_Item": {
+      "features": {
+        "USE_OUTLINE": true,
+        "USE_RIM": true,
+        "USE_RIM2": true,
+        "USE_SPECULAR": true,
+        "USE_NORMAL_MAP": true,
+        "USE_VERTEX_G_WIDTH": true,
+        "USE_VERTEX_B_INNER": true,
+        "USE_CURVATURE": true,
+        "USE_MAIN_TEX": true
+      }
+    }
+  }
+}

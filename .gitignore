@@ -15,6 +15,11 @@ src-tauri/resources/opencode/opencode.exe
 src-tauri/resources/ncmdump/ncmdump
 src-tauri/resources/ncmdump/ncmdump.exe
 
+# 3D persona assets fetched from the private assets release at build time
+public/personas/*/figure.glb
+public/personas/*/textures/
+public/personas/.personas-version
+
 # Local environment and secrets
 .env
 .env.*

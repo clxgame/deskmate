@@ -1,0 +1,8 @@
+{
+  "_comment": "对话区占位文字(kanteleila / 坎特蕾拉)。schema 见 shared/protocol.ts 的 PersonaPlaceholders。任一字段缺失 → 前端走硬编码中文兜底。改完无需重启 sidecar(每次 list_personas 都重读)。",
+
+  "streaming": "正在为你调一剂…",
+  "completed": "好了,请安睡",
+  "compacting": "正在把前文封进梦里…",
+  "compacted": "(前文已酿成一缕安眠的梦)"
+}

@@ -1,0 +1,8 @@
+{
+  "_comment": "对话区占位文字(changli / 长离)。schema 见 shared/protocol.ts 的 PersonaPlaceholders。任一字段缺失 → 前端走硬编码中文兜底。改完无需重启 sidecar(每次 list_personas 都重读)。",
+
+  "streaming": "容我思量片刻…",
+  "completed": "已为你妥帖办好",
+  "compacting": "正在将前文收拢成卷…",
+  "compacted": "(前文已收拢为备忘)"
+}

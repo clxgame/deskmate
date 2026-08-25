@@ -33,7 +33,7 @@ $version = $conf.version
 $tag = if ($Tag) { $Tag } else { "v$version" }
 
 $nsisDir = Join-Path $root "src-tauri\target\release\bundle\nsis"
-$installer = "deskmate_${version}_x64-setup.exe"
+$installer = "YUME_${version}_x64-setup.exe"
 $artifacts = @(
   (Join-Path $nsisDir $installer),
   (Join-Path $nsisDir "$installer.sig"),
@@ -90,7 +90,7 @@ if ($LASTEXITCODE -eq 0) {
   if ($LASTEXITCODE -ne 0) { throw "gh release upload failed" }
 } else {
   Write-Host "==> Creating draft release $tag ..." -ForegroundColor Cyan
-  gh release create $tag --repo $Repo @artifacts --draft --title "deskmate $tag" --notes "deskmate $version"
+  gh release create $tag --repo $Repo @artifacts --draft --title "YUME $tag" --notes "YUME $version"
   if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
 }
 

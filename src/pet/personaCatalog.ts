@@ -2,7 +2,7 @@ import type { PetMood } from "../lib/petState";
 
 /**
  * Persona packs are the unit users install and uninstall. A pack is a category
- * (「AI 替身」, 「aki 团子」, ...) that owns one or more personas together with
+ * (「小著」, 「aki 团子」, ...) that owns one or more personas together with
  * their prompts and skills.
  *
  * Only built-in packs ship inside the app. Everything else arrives as an
@@ -54,6 +54,7 @@ export interface PackManifest {
   readonly version: string;
   /** Built-in packs ship with the app and cannot be uninstalled. */
   readonly builtin: boolean;
+  readonly thumbnail?: string;
   readonly personas: readonly Omit<PersonaEntry, "packId">[];
 }
 
@@ -74,15 +75,16 @@ const PIXEL_CLIPS: PersonaClips = {
 };
 
 /**
- * 「AI 替身」— built into every build. 小著 is only ~375 KB and embeds its
+ * 「小著」— built into every build. 小著 is only ~375 KB and embeds its
  * textures in the GLB, so shipping it keeps a fresh install usable without
  * forcing a download before the pet can appear.
  */
 export const AI_SUBSTITUTE_PACK: PackManifest = {
   packId: "ai-substitute",
-  name: { zh: "AI 替身", en: "AI Substitute", ja: "AI 代理", ko: "AI 대리" },
+  name: { zh: "小著", en: "Xiaozhu", ja: "小著", ko: "샤오주" },
   version: "1.0.0",
   builtin: true,
+  thumbnail: "/persona-packs/xiaozhu.png",
   personas: [
     {
       id: "xiaozhu",
@@ -104,6 +106,7 @@ export const AKI_PACK: PackManifest = {
   name: { zh: "aki 团子", en: "aki Dango", ja: "aki 団子", ko: "aki 당고" },
   version: "1.0.0",
   builtin: false,
+  thumbnail: "/persona-packs/aki.png",
   personas: [
     { id: "aimisi", name: { zh: "爱弥斯", en: "Aemeath", ja: "エイメス", ko: "에이메스" }, clips: STANDARD_CLIPS, scale: 0.839 },
     { id: "aogusita", name: { zh: "奥古斯塔", en: "Augusta", ja: "オーガスタ", ko: "아우구스타" }, clips: STANDARD_CLIPS, scale: 1.05 },

@@ -9,39 +9,38 @@ import {
 } from "../lib/packs";
 import {
   KNOWN_PACKS,
+  personaById,
+  personaCatalog,
   packLabel,
   personaLabel,
-  personaById,
   type PackManifest,
 } from "../pet/personaCatalog";
+import { PersonaPackCard } from "./PersonaPackCard";
+import {
+  availablePersonaCount,
+  stateFor,
+  type PackActivity,
+} from "./personaPackModel";
+import "./persona-packs.css";
 
-/**
- * Persona pack management. Packs are the unit users add and remove, so this
- * lists every pack the app knows about and lets the removable ones be imported
- * from a local `.dmpack` or deleted again.
- */
-
-type Status =
-  | { kind: "idle" }
-  | { kind: "busy" }
-  | { kind: "ok"; message: string }
-  | { kind: "error"; message: string };
+type Notice = {
+  readonly tone: "ok" | "error";
+  readonly message: string;
+};
 
 export interface PersonaPacksProps {
   readonly t: Dict;
   readonly language: string;
-  /** Pack ids currently installed on disk, excluding built-ins. */
   readonly installed: readonly InstalledPack[];
   readonly onInstalledChange: (packs: InstalledPack[]) => void;
-  /** Called when a removed pack owned the active persona. */
   readonly onActivePersonaRemoved: () => void;
+  readonly onActivePersonaChange: (personaId: string) => void;
   readonly activePersonaId: string;
 }
 
 function errorText(error: unknown, fallback: string): string {
   const raw = error instanceof Error ? error.message : String(error);
   const trimmed = raw.replace(/^Error:?\s*/i, "").trim();
-  // The backend already returns localized messages; keep them.
   return trimmed.length > 0 ? trimmed : fallback;
 }
 
@@ -51,133 +50,179 @@ export function PersonaPacks({
   installed,
   onInstalledChange,
   onActivePersonaRemoved,
+  onActivePersonaChange,
   activePersonaId,
 }: PersonaPacksProps) {
-  const [status, setStatus] = useState<Status>({ kind: "idle" });
+  const [activity, setActivity] = useState<PackActivity>("idle");
+  const [notice, setNotice] = useState<Notice | null>(null);
 
   const refresh = useCallback(async () => {
-    try {
-      onInstalledChange(await listInstalledPacks());
-    } catch (error: unknown) {
-      console.error("could not list persona packs", error);
-    }
+    onInstalledChange(await listInstalledPacks());
   }, [onInstalledChange]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  const isInstalled = (pack: PackManifest): boolean =>
-    pack.builtin || installed.some((entry) => entry.packId === pack.packId);
+    void refresh().catch((error: unknown) => {
+      const detail = error instanceof Error ? error.message : String(error);
+      setNotice({
+        tone: "error",
+        message: errorText(detail, t.packLoadFailed),
+      });
+    });
+  }, [refresh, t.packLoadFailed]);
 
   const onImport = async () => {
     let path: string | null;
     try {
       path = await pickPackFile(t.packImport);
     } catch (error: unknown) {
-      setStatus({ kind: "error", message: errorText(error, t.packImportFailed) });
+      const detail = error instanceof Error ? error.message : String(error);
+      setNotice({ tone: "error", message: errorText(detail, t.packImportFailed) });
       return;
     }
     if (path === null) return;
 
-    setStatus({ kind: "busy" });
+    setActivity("import");
+    setNotice(null);
     try {
       await importPack(path);
       await refresh();
-      setStatus({ kind: "ok", message: t.packImportOk });
+      setNotice({ tone: "ok", message: t.packImportOk });
     } catch (error: unknown) {
-      setStatus({ kind: "error", message: errorText(error, t.packImportFailed) });
+      const detail = error instanceof Error ? error.message : String(error);
+      setNotice({ tone: "error", message: errorText(detail, t.packImportFailed) });
+    } finally {
+      setActivity("idle");
     }
   };
 
   const onUninstall = async (pack: PackManifest) => {
     if (!window.confirm(t.packUninstallConfirm)) return;
-    // Losing the pack that owns the active persona would leave the pet with no
-    // model, so hand that case back to the caller to reset.
     const ownsActive = personaById(activePersonaId).packId === pack.packId;
 
-    setStatus({ kind: "busy" });
+    setActivity("uninstall");
+    setNotice(null);
     try {
       await uninstallPack(pack.packId);
       await refresh();
       if (ownsActive) {
         onActivePersonaRemoved();
-        setStatus({ kind: "ok", message: t.packActivePersonaReset });
+        setNotice({ tone: "ok", message: t.packActivePersonaReset });
       } else {
-        setStatus({ kind: "ok", message: t.packUninstallOk });
+        setNotice({ tone: "ok", message: t.packUninstallOk });
       }
     } catch (error: unknown) {
-      setStatus({
-        kind: "error",
-        message: errorText(error, t.packUninstallFailed),
-      });
+      const detail = error instanceof Error ? error.message : String(error);
+      setNotice({ tone: "error", message: errorText(detail, t.packUninstallFailed) });
+    } finally {
+      setActivity("idle");
     }
   };
 
-  const busy = status.kind === "busy";
+  const packs = KNOWN_PACKS.map((pack) => ({
+    pack,
+    state: stateFor(pack, installed),
+  }));
+  const availablePacks = packs.filter(({ state }) => state.kind !== "available").length;
+  const availablePersonas = packs.reduce(
+    (total, { pack, state }) => total + availablePersonaCount(pack, state),
+    0,
+  );
+  const personas = personaCatalog(installed);
+  const selectablePacks = KNOWN_PACKS.map((pack) => ({
+    pack,
+    personas: personas.filter((persona) => persona.packId === pack.packId),
+  })).filter((group) => group.personas.length > 0);
+  const activePackId = personaById(activePersonaId).packId;
+  const selectedGroup =
+    selectablePacks.find((group) => group.pack.packId === activePackId) ??
+    selectablePacks[0];
+  const selectedPersonaId =
+    selectedGroup?.personas.some((persona) => persona.id === activePersonaId)
+      ? activePersonaId
+      : (selectedGroup?.personas[0]?.id ?? "");
 
   return (
-    <section className="set-packs">
+    <section className="set-packs" aria-labelledby="persona-packs-heading">
       <div className="set-packs-head">
-        <span className="set-row-label">{t.personaPacks}</span>
-        <button
-          className="set-btn"
-          type="button"
-          onClick={() => void onImport()}
-          disabled={busy}
-        >
-          {busy ? t.packImporting : t.packImport}
-        </button>
+        <div>
+          <h3 className="set-packs-title" id="persona-packs-heading">
+            {t.personaPacks}
+          </h3>
+          <p className="set-packs-summary" aria-live="polite">
+            {t.packLibrarySummary(availablePacks, availablePersonas)}
+          </p>
+        </div>
       </div>
 
       <ul className="set-pack-list">
-        {KNOWN_PACKS.map((pack) => {
-          const active = isInstalled(pack);
-          const personas = pack.personas
-            .map((persona) => personaLabel({ ...persona, packId: pack.packId }, language))
-            .join("、");
-          return (
-            <li className="set-pack" key={pack.packId}>
-              <div className="set-pack-main">
-                <span className="set-pack-name">{packLabel(pack, language)}</span>
-                <span className="set-pack-meta">
-                  {pack.personas.length} {t.packPersonaCount}
-                  {" · "}
-                  {pack.builtin
-                    ? t.packBuiltin
-                    : active
-                      ? t.packInstalled
-                      : t.packNotInstalled}
-                </span>
-                <span className="set-pack-personas" title={personas}>
-                  {personas}
-                </span>
-              </div>
-              {/* Built-in packs live inside the app bundle and cannot be removed. */}
-              {!pack.builtin && active && (
-                <button
-                  className="set-btn set-btn-danger"
-                  type="button"
-                  onClick={() => void onUninstall(pack)}
-                  disabled={busy}
-                >
-                  {t.packUninstall}
-                </button>
-              )}
-            </li>
-          );
-        })}
+        {packs.map(({ pack, state }) => (
+          <li key={pack.packId}>
+            <PersonaPackCard
+              pack={pack}
+              state={state}
+              activity={activity}
+              language={language}
+              t={t}
+              onImport={() => void onImport()}
+              onUninstall={(target) => void onUninstall(target)}
+            />
+          </li>
+        ))}
       </ul>
 
-      <p className="set-note">{t.packImportHint}</p>
-      {status.kind === "error" && (
-        <p className="set-note set-note-error" role="alert">
-          {status.message}
-        </p>
-      )}
-      {status.kind === "ok" && (
-        <p className="set-note set-note-ok" role="status">
-          {status.message}
+      <div className="set-pack-active-persona">
+        <div className="set-pack-active-persona-field">
+          <label className="set-pack-active-persona-label" htmlFor="active-pack">
+            {t.personaPack}
+          </label>
+          <select
+            className="set-select"
+            id="active-pack"
+            aria-label={t.personaPack}
+            value={selectedGroup?.pack.packId ?? ""}
+            onChange={(event) => {
+              const nextGroup = selectablePacks.find(
+                (group) => group.pack.packId === event.target.value,
+              );
+              const nextPersona = nextGroup?.personas[0];
+              if (nextPersona !== undefined) onActivePersonaChange(nextPersona.id);
+            }}
+            disabled={selectablePacks.length === 0}
+          >
+            {selectablePacks.map(({ pack }) => (
+              <option key={pack.packId} value={pack.packId}>
+                {packLabel(pack, language)}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="set-pack-active-persona-field">
+          <label className="set-pack-active-persona-label" htmlFor="active-persona">
+            {t.persona}
+          </label>
+          <select
+            className="set-select"
+            id="active-persona"
+            aria-label={t.persona}
+            value={selectedPersonaId}
+            onChange={(event) => onActivePersonaChange(event.target.value)}
+            disabled={selectedGroup === undefined}
+          >
+            {(selectedGroup?.personas ?? []).map((persona) => (
+              <option key={persona.id} value={persona.id}>
+                {personaLabel(persona, language)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {notice !== null && (
+        <p
+          className={`set-pack-feedback set-pack-feedback-${notice.tone}`}
+          role={notice.tone === "error" ? "alert" : "status"}
+        >
+          {notice.message}
         </p>
       )}
     </section>

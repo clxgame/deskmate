@@ -26,10 +26,10 @@ export interface PetMouseTarget {
 }
 
 const DEFAULT_RENDER_TUNING: PetRenderTuning = {
-  outlineWidth: 0.0073,
-  rimWidth: 0.4,
-  rimIntensity: 1,
-  specularIntensity: 0.5,
+  outlineWidth: 0.0008,
+  rimWidth: 0.1,
+  rimIntensity: 0.3,
+  specularIntensity: 0.05,
 };
 
 const MOUSE_YAW_LIMIT = 0.55;
@@ -45,6 +45,28 @@ export function mouseFollowPitchTarget(normalizedY: number): number {
     -MOUSE_PITCH_LIMIT,
     MOUSE_PITCH_LIMIT,
   );
+}
+
+export function nonIdleClipNames(personaId: string): readonly string[] {
+  const clips = personaById(personaId).clips;
+  return [...new Set([clips.thinking, clips.talking, clips.working, clips.error])].filter(
+    (name) => name !== clips.idle,
+  );
+}
+
+export function pickRandomClip(
+  clipNames: readonly string[],
+  randomValue: number,
+): string | undefined {
+  if (clipNames.length === 0) return undefined;
+  const normalized = Number.isFinite(randomValue)
+    ? THREE.MathUtils.clamp(randomValue, 0, 1)
+    : 0;
+  const index = Math.min(
+    clipNames.length - 1,
+    Math.floor(normalized * clipNames.length),
+  );
+  return clipNames[index];
 }
 
 function isVrm(value: unknown): value is VRM {
@@ -103,6 +125,8 @@ export class PetRenderer {
   private readonly baseModelRotation = new THREE.Euler();
   private personaId = "xiaozhu";
   private loadToken = 0;
+  private nudgeToken = 0;
+  private nudgeCleanup: (() => void) | null = null;
   private disposed = false;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
@@ -208,10 +232,46 @@ export class PetRenderer {
   }
 
   setMood(mood: PetMood): void {
+    this.cancelNudge();
     this.mood = mood;
     this.toon?.setExpression(expressionTagForMood(mood));
     if (this.vrm === null)
       this.selectClip(personaClipName(this.personaId, mood));
+  }
+
+  playNudge(): void {
+    if (this.mixer === null || this.model === null) return;
+    const requestedName = pickRandomClip(
+      nonIdleClipNames(this.personaId),
+      Math.random(),
+    );
+    if (requestedName === undefined) return;
+    const clip = this.clips.find((candidate) => candidate.name === requestedName);
+    if (clip === undefined) return;
+
+    const mixer = this.mixer;
+    const resumeName = personaClipName(this.personaId, this.mood);
+    this.cancelNudge();
+    const token = ++this.nudgeToken;
+    mixer.stopAllAction();
+    const action = mixer.clipAction(clip);
+    action.reset().setLoop(THREE.LoopOnce, 1);
+    action.clampWhenFinished = true;
+    let cleanup = (): void => undefined;
+    const onFinished = (event: { action: THREE.AnimationAction }): void => {
+      if (event.action !== action || token !== this.nudgeToken) return;
+      cleanup();
+      this.activeClip = "";
+      this.selectClip(resumeName);
+    };
+    cleanup = () => {
+      mixer.removeEventListener("finished", onFinished);
+      if (this.nudgeCleanup === cleanup) this.nudgeCleanup = null;
+    };
+    this.nudgeCleanup = cleanup;
+    mixer.addEventListener("finished", onFinished);
+    action.play();
+    this.activeClip = clip.name;
   }
 
   setScale(scale: number): void {
@@ -422,6 +482,7 @@ export class PetRenderer {
   }
 
   private unloadModel(): void {
+    this.cancelNudge();
     this.mixer?.stopAllAction();
     this.mixer = null;
     this.toon?.dispose();
@@ -434,6 +495,12 @@ export class PetRenderer {
     this.vrm = null;
     this.clips = [];
     this.activeClip = "";
+  }
+
+  private cancelNudge(): void {
+    this.nudgeToken += 1;
+    this.nudgeCleanup?.();
+    this.nudgeCleanup = null;
   }
 
   private disposeObject(root: THREE.Object3D): void {

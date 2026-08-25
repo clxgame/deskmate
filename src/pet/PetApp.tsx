@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { Menu, MenuItem } from "@tauri-apps/api/menu";
 import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
 import { onMood } from "../lib/petState";
 import {
@@ -17,7 +18,7 @@ async function getSettingsWithRetry(): Promise<Settings> {
     try {
       return await getSettings();
     } catch (error: unknown) {
-      lastError = error;
+      lastError = error instanceof Error ? error : new Error(String(error));
       if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }
@@ -30,6 +31,9 @@ function toggleChat(): Promise<boolean> {
 
 export default function PetApp() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rendererRef = useRef<PetRenderer | null>(null);
+  const contextMenuRef = useRef<Menu | null>(null);
+  const contextMenuPromiseRef = useRef<Promise<Menu> | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeId>("dark");
 
@@ -43,6 +47,7 @@ export default function PetApp() {
     let cursorPollBusy = false;
     try {
       renderer = new PetRenderer(canvas);
+      rendererRef.current = renderer;
     } catch (error: unknown) {
       const message =
         error instanceof Error ? error.message : "unknown WebGL error";
@@ -130,9 +135,57 @@ export default function PetApp() {
       void unlistenMood.then((stopListening) => stopListening());
       void unlistenScalePreview.then((stopListening) => stopListening());
       void unlistenSettings.then((stopListening) => stopListening());
+      rendererRef.current = null;
+      void contextMenuRef.current?.close();
+      contextMenuRef.current = null;
       renderer.dispose();
     };
   }, []);
+
+  const getContextMenu = (): Promise<Menu> => {
+    if (contextMenuRef.current !== null) {
+      return Promise.resolve(contextMenuRef.current);
+    }
+    if (contextMenuPromiseRef.current !== null) {
+      return contextMenuPromiseRef.current;
+    }
+    const menuPromise = Promise.all([
+      MenuItem.new({
+        id: "open-widget-settings",
+        text: "小组件",
+        action: () => {
+          void invoke<void>("open_widget_settings").catch((error: unknown) => {
+            console.error(
+              "widget settings open failed",
+              error instanceof Error ? error : new Error(String(error)),
+            );
+          });
+        },
+      }),
+      MenuItem.new({
+        id: "poke-pet",
+        text: "戳",
+        action: () => rendererRef.current?.playNudge(),
+      }),
+    ])
+      .then(([widgetItem, pokeItem]) =>
+        Menu.new({ items: [widgetItem, pokeItem] }),
+      )
+      .then((menu) => {
+        contextMenuRef.current = menu;
+        return menu;
+      });
+    contextMenuPromiseRef.current = menuPromise;
+    void menuPromise.then(
+      () => {
+        contextMenuPromiseRef.current = null;
+      },
+      () => {
+        contextMenuPromiseRef.current = null;
+      },
+    );
+    return menuPromise;
+  };
 
   const downAt = useRef<{ x: number; y: number; t: number } | null>(null);
 
@@ -162,6 +215,18 @@ export default function PetApp() {
     downAt.current = null;
   };
 
+  const onContextMenu = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    event.preventDefault();
+    void getContextMenu()
+      .then((menu) => menu.popup(undefined, getCurrentWindow()))
+      .catch((error: unknown) => {
+        console.error(
+          "pet context menu failed",
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      });
+  };
+
   return (
     <div
       className="pet-root"
@@ -175,11 +240,11 @@ export default function PetApp() {
           width: "100vw",
           height: "100vh",
           display: "block",
-          cursor: "grab",
         }}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
+        onContextMenu={onContextMenu}
       />
       {loadError !== null && (
         <div

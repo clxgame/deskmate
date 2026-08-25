@@ -583,7 +583,7 @@ mod tests {
     }
 
     fn scratch(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("deskmate-packs-{name}"));
+        let dir = std::env::temp_dir().join(format!("yume-packs-{name}"));
         let _ = super::fs::remove_dir_all(&dir);
         super::fs::create_dir_all(&dir).expect("scratch dir");
         dir

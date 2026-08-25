@@ -18,6 +18,7 @@ import {
   type ProviderModel,
   type Settings,
 } from "../lib/settings";
+import { listen } from "@tauri-apps/api/event";
 import { dict, verifyError, LANGS, type Dict } from "../lib/i18n";
 import { UpdateFooter } from "./UpdateFooter";
 import { MemoryTab } from "./MemoryTab";
@@ -26,8 +27,6 @@ import type { InstalledPack } from "../lib/packs";
 import {
   DEFAULT_PERSONA_ID,
   personaById,
-  personaCatalog,
-  personaLabel,
 } from "../pet/personaCatalog";
 import { THEME_IDS, type ThemeId } from "./theme";
 import "./settings.css";
@@ -86,19 +85,33 @@ function themeLabel(t: Dict, id: ThemeId): string {
 
 const SAVE_DELAY_MS = 400;
 
+// allow: SIZE_OK — this existing module is the settings composition root; extracting tabs is outside the UI-only patch.
 export default function SettingsApp() {
   const [tab, setTab] = useState<TabId>("general");
   const [settings, setLocalSettings] = useState<Settings | null>(null);
   const t = dict(settings?.language ?? "zh-CN");
 
+  const settingsRef = useRef<Settings | null>(null);
   const saveTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    const unlisten = listen<string>("deskmate://settings-tab", (event) => {
+      if (event.payload === "widget") setTab("widget");
+    });
+    return () => {
+      void unlisten.then((stopListening) => stopListening());
+    };
+  }, []);
 
   useEffect(() => {
     let closed = false;
     void (async () => {
       try {
         const loaded = await getSettings();
-        if (!closed) setLocalSettings(loaded);
+        if (!closed) {
+          settingsRef.current = loaded;
+          setLocalSettings(loaded);
+        }
       } catch (error) {
         console.error(
           error instanceof Error ? error : new Error(String(error)),
@@ -120,16 +133,17 @@ export default function SettingsApp() {
   /** Update one field locally, then persist the whole object debounced. */
   const patch = useCallback(
     <K extends keyof Settings>(key: K, value: Settings[K]) => {
-      setLocalSettings((prev) => {
-        if (!prev) return prev;
-        const next: Settings = { ...prev, [key]: value };
-        if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
-        saveTimer.current = window.setTimeout(() => {
-          saveTimer.current = null;
-          void setSettings(next).catch((e: unknown) => console.error(e));
-        }, SAVE_DELAY_MS);
-        return next;
-      });
+      const current = settingsRef.current;
+      if (current === null) return;
+
+      const next: Settings = { ...current, [key]: value };
+      settingsRef.current = next;
+      setLocalSettings(next);
+      if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+      saveTimer.current = window.setTimeout(() => {
+        saveTimer.current = null;
+        void setSettings(next).catch((e: unknown) => console.error(e));
+      }, SAVE_DELAY_MS);
     },
     [],
   );
@@ -214,9 +228,16 @@ interface TabProps {
   t: Dict;
 }
 
-function Row({ label, children }: { label: string; children: ReactNode }) {
+interface RowProps {
+  readonly label: string;
+  readonly children: ReactNode;
+  readonly className?: string;
+}
+
+function Row({ label, children, className }: RowProps) {
+  const rowClassName = className === undefined ? "set-row" : `set-row ${className}`;
   return (
-    <div className="set-row">
+    <div className={rowClassName}>
       <span className="set-row-label">{label}</span>
       <div className="set-row-control">{children}</div>
     </div>
@@ -506,16 +527,6 @@ function AiTab({ settings, patch, t }: TabProps) {
 function WidgetTab({ settings, patch, t }: TabProps) {
   const [newTime, setNewTime] = useState("09:00");
   const [newPrompt, setNewPrompt] = useState("");
-  const scaleFrame = useRef<number | null>(null);
-  const scalePreviewValue = useRef(settings.petScale);
-
-  useEffect(() => {
-    return () => {
-      if (scaleFrame.current !== null) {
-        window.cancelAnimationFrame(scaleFrame.current);
-      }
-    };
-  }, []);
 
   const tasks = settings.scheduledTasks;
 
@@ -537,44 +548,6 @@ function WidgetTab({ settings, patch, t }: TabProps) {
   return (
     <>
       <h2 className="set-panel-head">{t.tabWidget}</h2>
-      <Row label={t.petScale}>
-        <input
-          className="set-slider"
-          type="range"
-          min={0.1}
-          max={2}
-          step={0.1}
-          value={settings.petScale}
-          aria-label={t.petScale}
-          onChange={(e) => {
-            const value = Number(e.target.value);
-            patch("petScale", value);
-            scalePreviewValue.current = value;
-            void emitPetScalePreview(value).catch((error: unknown) =>
-              console.error("pet scale preview failed", error),
-            );
-            if (scaleFrame.current === null) {
-              scaleFrame.current = window.requestAnimationFrame(() => {
-                scaleFrame.current = null;
-                void previewPetScale(scalePreviewValue.current).catch(
-                  (error: unknown) =>
-                    console.error("pet scale resize failed", error),
-                );
-              });
-            }
-          }}
-        />
-        <span className="set-slider-value">
-          {settings.petScale.toFixed(1)}x
-        </span>
-      </Row>
-      <Row label={t.petVisible}>
-        <Switch
-          label={t.petVisible}
-          checked={settings.petVisible}
-          onChange={(v) => patch("petVisible", v)}
-        />
-      </Row>
       <Row label={t.alwaysOnTop}>
         <Switch
           label={t.alwaysOnTop}
@@ -730,15 +703,62 @@ function ShortcutInput({
 
 function AccountTab({ settings, patch, t }: TabProps) {
   const personaId = personaById(settings.personaId || DEFAULT_PERSONA_ID).id;
-  // Install state lives here so the selector and the pack list stay in sync.
+  const scaleFrame = useRef<number | null>(null);
+  const scalePreviewValue = useRef(settings.petScale);
+
+  useEffect(() => {
+    return () => {
+      if (scaleFrame.current !== null) {
+        window.cancelAnimationFrame(scaleFrame.current);
+      }
+    };
+  }, []);
+
   const [installedPacks, setInstalledPacks] = useState<InstalledPack[]>([]);
-  // Pass the full state: only personas a pack actually shipped may be offered,
-  // otherwise selecting one would leave the pet without a model.
-  const personas = personaCatalog(installedPacks);
   return (
     <>
       <h2 className="set-panel-head">{t.tabAccount}</h2>
-      <Row label={t.userName}>
+      <div className="set-pet-controls">
+        <Row label={t.petScale}>
+          <input
+            className="set-slider"
+            type="range"
+            min={0.1}
+            max={2}
+            step={0.1}
+            value={settings.petScale}
+            aria-label={t.petScale}
+            onChange={(e) => {
+              const value = Number(e.target.value);
+              patch("petScale", value);
+              scalePreviewValue.current = value;
+              void emitPetScalePreview(value).catch((error: unknown) =>
+                console.error("pet scale preview failed", error),
+              );
+              if (scaleFrame.current === null) {
+                scaleFrame.current = window.requestAnimationFrame(() => {
+                  scaleFrame.current = null;
+                  void previewPetScale(scalePreviewValue.current).catch(
+                    (error: unknown) =>
+                      console.error("pet scale resize failed", error),
+                  );
+                });
+              }
+            }}
+          />
+          <span className="set-slider-value">
+            {settings.petScale.toFixed(1)}x
+          </span>
+        </Row>
+        <Row label={t.petVisible}>
+          <Switch
+            label={t.petVisible}
+            checked={settings.petVisible}
+            onChange={(v) => patch("petVisible", v)}
+          />
+        </Row>
+      </div>
+      <Row label={t.userName} className="set-row-nickname">
         <input
           className="set-input"
           type="text"
@@ -747,20 +767,6 @@ function AccountTab({ settings, patch, t }: TabProps) {
           onChange={(e) => patch("userName", e.target.value)}
         />
       </Row>
-      <Row label={t.persona}>
-        <select
-          className="set-select"
-          aria-label={t.persona}
-          value={personaId}
-          onChange={(e) => patch("personaId", e.target.value)}
-        >
-          {personas.map((persona) => (
-            <option key={persona.id} value={persona.id}>
-              {personaLabel(persona, settings.language)}
-            </option>
-          ))}
-        </select>
-      </Row>
       <PersonaPacks
         t={t}
         language={settings.language}
@@ -768,6 +774,7 @@ function AccountTab({ settings, patch, t }: TabProps) {
         onInstalledChange={setInstalledPacks}
         activePersonaId={personaId}
         onActivePersonaRemoved={() => patch("personaId", DEFAULT_PERSONA_ID)}
+        onActivePersonaChange={(nextPersonaId) => patch("personaId", nextPersonaId)}
       />
       <Row label={t.mouseFollow}>
         <Switch
@@ -841,7 +848,7 @@ function AboutTab({ t }: TabProps) {
   return (
     <>
       <h2 className="set-panel-head">{t.tabAbout}</h2>
-      <p className="set-about-name">deskmate</p>
+      <p className="set-about-name">YUME</p>
       <p className="set-about-version">{version ? `v${version}` : "…"}</p>
       <p className="set-about-desc">{t.aboutDesc}</p>
       <p className="set-about-credits">{t.aboutCredits}</p>

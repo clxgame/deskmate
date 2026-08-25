@@ -59,7 +59,7 @@ async function assetUrl(token: string): Promise<string> {
     Accept: "application/vnd.github+json",
     Authorization: `Bearer ${token}`,
     "X-GitHub-Api-Version": "2022-11-28",
-    "User-Agent": "deskmate-build",
+    "User-Agent": "YUME-build",
   };
   const response = await fetch(
     `https://api.github.com/repos/${ASSETS_REPO}/releases/tags/${RELEASE_TAG}`,
@@ -87,7 +87,7 @@ async function download(url: string, token: string): Promise<Uint8Array> {
       Accept: "application/octet-stream",
       Authorization: `Bearer ${token}`,
       "X-GitHub-Api-Version": "2022-11-28",
-      "User-Agent": "deskmate-build",
+      "User-Agent": "YUME-build",
     },
     redirect: "follow",
   });

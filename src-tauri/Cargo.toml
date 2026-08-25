@@ -1,11 +1,11 @@
 [package]
-name = "deskmate"
-version = "0.1.6"
+name = "yume"
+version = "0.1.7"
 description = "Desktop AI pet powered by an embedded OpenCode sidecar"
 edition = "2021"
 
 [lib]
-name = "deskmate_lib"
+name = "yume_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

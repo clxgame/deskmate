@@ -1,4 +1,4 @@
-# Build deskmate with signed updater artifacts and generate a GitHub Releases
+# Build YUME with signed updater artifacts and generate a GitHub Releases
 # latest.json manifest for local publishing.
 #
 # Usage:
@@ -64,7 +64,7 @@ $version = $conf.version
 $tag = if ($Tag) { $Tag } else { "v$version" }
 
 $nsisDir = Join-Path $root "src-tauri\target\release\bundle\nsis"
-$installer = "deskmate_${version}_x64-setup.exe"
+$installer = "YUME_${version}_x64-setup.exe"
 $installerPath = Join-Path $nsisDir $installer
 $sigPath = Join-Path $nsisDir "$installer.sig"
 if (-not (Test-Path -LiteralPath $installerPath)) {

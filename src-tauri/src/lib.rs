@@ -680,7 +680,7 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 
     TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().expect("bundled icon").clone())
-        .tooltip("deskmate - 小碟")
+        .tooltip("YUME - 小著")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -757,6 +757,12 @@ fn open_settings(app: tauri::AppHandle) {
 }
 
 #[tauri::command]
+fn open_widget_settings(app: tauri::AppHandle) {
+    show_settings_window(&app);
+    let _ = app.emit("deskmate://settings-tab", "widget");
+}
+
+#[tauri::command]
 fn app_version(app: tauri::AppHandle) -> String {
     app.package_info().version.to_string()
 }
@@ -772,7 +778,7 @@ pub fn run() {
 
     let port = pick_free_port();
 
-    let mut builder = tauri::Builder::default();
+    let mut builder = tauri::Builder::default().manage(SettingsState::default());
 
     // Registered first, before any other plugin or window is created: a second
     // launch (double-clicking the icon again, autostart racing a manual start,
@@ -819,6 +825,7 @@ pub fn run() {
             set_settings,
             verify_api_key,
             open_settings,
+            open_widget_settings,
             hide_settings,
             app_version,
             history::history_list,
@@ -849,12 +856,16 @@ pub fn run() {
 
             // Load persisted settings and apply startup side-effects.
             let loaded = settings::load(&handle);
+            *app.state::<SettingsState>().0.lock().unwrap() = loaded.clone();
             settings::register_shortcuts(&handle, &loaded);
             if let Some(pet) = app.get_webview_window("pet") {
-                let chat_follow_handle = handle.clone();
+                let window_event_handle = handle.clone();
                 pet.on_window_event(move |event| {
                     if should_follow_chat_on_window_event(event) {
-                        reposition_visible_chat(&chat_follow_handle);
+                        reposition_visible_chat(&window_event_handle);
+                    }
+                    if let tauri::WindowEvent::Moved(position) = event {
+                        settings::persist_pet_position(&window_event_handle, *position);
                     }
                 });
                 if !loaded.pet_visible {
@@ -868,9 +879,15 @@ pub fn run() {
                 if (loaded.pet_scale - 1.0).abs() > f64::EPSILON {
                     settings::apply_pet_scale(&pet, loaded.pet_scale);
                 }
-                place_pet_bottom_right(&pet);
+                if let Some(position) = loaded.pet_position {
+                    let _ = pet.set_position(tauri::PhysicalPosition::new(
+                        position.x,
+                        position.y,
+                    ));
+                } else {
+                    place_pet_bottom_right(&pet);
+                }
             }
-            app.manage(SettingsState(Mutex::new(loaded)));
             app.manage(HistoryState(Mutex::new(history::load(&handle))));
             // Memory is optional infrastructure: if the database cannot open,
             // `MemoryState` records that and every memory command answers

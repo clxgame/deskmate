@@ -1,5 +1,5 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 fn main() {
-    deskmate_lib::run()
+    yume_lib::run()
 }

@@ -48,7 +48,6 @@ import {
   historyList,
   historyLoad,
   historySave,
-  type HistorySession,
   type HistorySummary,
 } from "../lib/history";
 import {
@@ -138,7 +137,7 @@ export default function ChatApp() {
       await abortSession(previousSession).catch(() => {});
     }
     await waitForServer();
-    const session = await createSession("deskmate chat");
+    const session = await createSession("YUME chat");
     sessionRef.current = session.id;
     rolesRef.current.clear();
     createdRef.current = Date.now();
@@ -813,7 +812,6 @@ export default function ChatApp() {
       {view === "history" ? (
         <HistoryPanel
           t={t}
-          assistantName={activePersonaName}
           onContinue={resumeSession}
           onNewChat={newChat}
         />
@@ -1086,17 +1084,14 @@ function upsertAssistant(
 
 function HistoryPanel({
   t,
-  assistantName,
   onContinue,
   onNewChat,
 }: {
   t: ReturnType<typeof dict>;
-  assistantName: string;
   onContinue: (id: string) => void;
   onNewChat: () => void;
 }) {
   const [sessions, setSessions] = useState<HistorySummary[] | null>(null);
-  const [open, setOpen] = useState<HistorySession | null>(null);
   const [failed, setFailed] = useState(false);
   /**
    * Deleting a conversation offers to drop the memories that came only from it,
@@ -1119,11 +1114,6 @@ function HistoryPanel({
     refresh();
   }, [refresh]);
 
-  const openSession = async (id: string) => {
-    const s = await historyLoad(id).catch(() => null);
-    setOpen(s);
-  };
-
   const remove = async (id: string) => {
     await historyDelete(id).catch(() => {});
     if (deleteMemories) {
@@ -1132,40 +1122,6 @@ function HistoryPanel({
     }
     refresh();
   };
-
-  if (open) {
-    return (
-      <div className="history-panel">
-        <div className="history-head">
-          <button className="history-back" onClick={() => setOpen(null)}>
-            ← {t.historyBack}
-          </button>
-          <span className="history-title" title={open.title}>
-            {open.title || t.historyNewSession}
-          </span>
-          <button
-            className="history-continue"
-            onClick={() => onContinue(open.id)}
-          >
-            {t.historyContinue}
-          </button>
-        </div>
-        <div className="history-msgs">
-          {open.messages.map((m, i) => (
-            <div key={i} className={`history-msg history-msg-${m.role}`}>
-              <div className="history-role">
-                {m.role === "user" ? t.historyYou : assistantName}
-              </div>
-              <div className="history-text">{m.text}</div>
-            </div>
-          ))}
-          {open.messages.length === 0 && (
-            <p className="history-empty">{t.historyEmpty}</p>
-          )}
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="history-panel">
@@ -1198,7 +1154,7 @@ function HistoryPanel({
             <div key={s.id} className="history-item">
               <button
                 className="history-main"
-                onClick={() => void openSession(s.id)}
+                onClick={() => void onContinue(s.id)}
               >
                 <span className="history-item-title">
                   {s.title || t.historyNewSession}
@@ -1206,13 +1162,6 @@ function HistoryPanel({
                 <span className="history-item-meta">
                   {formatTime(s.updated)} · {t.historyCount(s.count)}
                 </span>
-              </button>
-              <button
-                className="history-continue history-continue-sm"
-                onClick={() => onContinue(s.id)}
-                title={t.historyContinue}
-              >
-                →
               </button>
               <button
                 className="history-del"

@@ -1,5 +1,5 @@
 /* ===========================================================================
-   deskmate · settings window design tokens
+   YUME · settings window design tokens
    Extracted from src/chat/chat.css so both windows share one visual language.
    Every value below is a token; components reference tokens, never literals.
    =========================================================================== */
@@ -40,6 +40,8 @@
   --r-pill: 999px;
 
   /* spacing — 4px base scale */
+  --s-0: 0px;
+  --s-0-5: 2px;
   --s-1: 4px;
   --s-2: 8px;
   --s-3: 12px;
@@ -47,6 +49,15 @@
   --s-5: 20px;
   --s-6: 24px;
   --s-8: 32px;
+  --s-14: 56px;
+  --pack-tile-size: 60px;
+  --pet-slider-w: 140px;
+  --active-persona-control-w: 180px;
+  --pack-thumb-disabled-brightness: 0.48;
+  --pack-status-dot: 6px;
+  --pack-tooltip-max-width: 240px;
+  --surface-pack-overlay: rgba(18, 18, 26, 0.82);
+  --shadow-pack-count: 0 1px 2px rgba(0, 0, 0, 0.45);
 
   /* type scale */
   --t-title: 14px;
@@ -54,6 +65,11 @@
   --t-label: 13px;
   --t-small: 11px;
   --t-head: 15px;
+  --t-count: 24px;
+  --t-pack-name: 9px;
+  --t-pack-status: 8px;
+  --t-pack-action: 9px;
+  --t-pack-count: 18px;
 
   /* metrics */
   --sidebar-w: 160px;
@@ -63,6 +79,8 @@
   --font:
     "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
   --ease: 140ms ease;
+  --tooltip-delay: 420ms;
+  --shadow-tooltip: 0 var(--s-2) var(--s-5) rgba(0, 0, 0, 0.24);
 }
 
 .set-root[data-theme="mint"] {
@@ -851,62 +869,4 @@ body,
 .set-footer-error {
   color: var(--danger);
   opacity: 1;
-}
-
-/* ---------- persona packs ---------- */
-
-.set-packs {
-  border-bottom: 1px solid var(--line);
-  padding: var(--s-3) 0;
-}
-
-.set-packs-head {
-  align-items: center;
-  display: flex;
-  gap: var(--s-3);
-  justify-content: space-between;
-}
-
-.set-pack-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-2);
-  list-style: none;
-  margin: var(--s-3) 0 var(--s-2);
-  padding: 0;
-}
-
-.set-pack {
-  align-items: center;
-  background: var(--surface-sunken);
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  display: flex;
-  gap: var(--s-3);
-  padding: var(--s-2) var(--s-3);
-}
-
-.set-pack-main {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.set-pack-name {
-  font-size: var(--t-label);
-}
-
-.set-pack-meta {
-  font-size: var(--t-small);
-  opacity: var(--opacity-muted);
-}
-
-.set-pack-personas {
-  font-size: var(--t-small);
-  opacity: var(--opacity-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }

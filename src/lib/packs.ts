@@ -38,7 +38,7 @@ export async function pickPackFile(title: string): Promise<string | null> {
     title,
     multiple: false,
     directory: false,
-    filters: [{ name: "deskmate pack", extensions: [PACK_EXTENSION] }],
+    filters: [{ name: "YUME pack", extensions: [PACK_EXTENSION] }],
   });
   return typeof selected === "string" ? selected : null;
 }

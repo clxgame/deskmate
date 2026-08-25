@@ -27,7 +27,7 @@ export function personalizePersonaCopy(
   displayName: string,
 ): string {
   return copy
-    .replaceAll("小碟", displayName)
+    .replaceAll("小著", displayName)
     .replaceAll("Dishy", displayName)
     .replaceAll("샤오디에", displayName);
 }

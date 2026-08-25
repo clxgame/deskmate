@@ -9,25 +9,26 @@ use update_repo::{migrated_update_repo, DEFAULT_UPDATE_REPO};
 
 const PET_SCALE_MIN: f64 = 0.1;
 const PET_SCALE_MAX: f64 = 2.0;
+const DEFAULT_PET_SCALE: f64 = 0.5;
 const DEFAULT_THEME: &str = "dark";
 const OUTLINE_WIDTH_MIN: f64 = 0.0;
 const OUTLINE_WIDTH_MAX: f64 = 0.03;
-const DEFAULT_OUTLINE_WIDTH: f64 = 0.0073;
+const DEFAULT_OUTLINE_WIDTH: f64 = 0.0008;
 const RIM_WIDTH_MIN: f64 = 0.0;
 const RIM_WIDTH_MAX: f64 = 1.0;
-const DEFAULT_RIM_WIDTH: f64 = 0.4;
+const DEFAULT_RIM_WIDTH: f64 = 0.1;
 const RIM_INTENSITY_MIN: f64 = 0.0;
 const RIM_INTENSITY_MAX: f64 = 2.0;
-const DEFAULT_RIM_INTENSITY: f64 = 1.0;
+const DEFAULT_RIM_INTENSITY: f64 = 0.3;
 const SPECULAR_INTENSITY_MIN: f64 = 0.0;
 const SPECULAR_INTENSITY_MAX: f64 = 2.0;
-const DEFAULT_SPECULAR_INTENSITY: f64 = 0.5;
+const DEFAULT_SPECULAR_INTENSITY: f64 = 0.05;
 
 fn normalize_pet_scale(scale: f64) -> f64 {
     if scale.is_finite() {
         scale.clamp(PET_SCALE_MIN, PET_SCALE_MAX)
     } else {
-        1.0
+        DEFAULT_PET_SCALE
     }
 }
 
@@ -56,6 +57,13 @@ pub struct ScheduledTask {
     pub enabled: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PetPosition {
+    pub x: i32,
+    pub y: i32,
+}
+
 /// Persisted app settings. All fields have defaults so older settings.json
 /// files keep working when new fields are added.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,6 +87,7 @@ pub struct Settings {
     pub specular_intensity: f64,
     pub pet_visible: bool,
     pub always_on_top: bool,
+    pub pet_position: Option<PetPosition>,
     pub scheduled_tasks: Vec<ScheduledTask>,
     // 快捷键
     pub shortcut_toggle_chat: String,
@@ -109,20 +118,21 @@ impl Default for Settings {
             yolo: false,
             base_url: "https://ai-gateway.kurogames.com".into(),
             api_key: String::new(),
-            pet_scale: 1.0,
+            pet_scale: DEFAULT_PET_SCALE,
             outline_width: DEFAULT_OUTLINE_WIDTH,
             rim_width: DEFAULT_RIM_WIDTH,
             rim_intensity: DEFAULT_RIM_INTENSITY,
             specular_intensity: DEFAULT_SPECULAR_INTENSITY,
             pet_visible: true,
             always_on_top: true,
+            pet_position: None,
             scheduled_tasks: Vec::new(),
             // NOTE: Alt+Space is the Windows system menu and Ctrl+Shift+Space
             // is commonly taken by IMEs; Ctrl+Alt+D is usually free.
             shortcut_toggle_chat: "Ctrl+Alt+D".into(),
             shortcut_toggle_pet: String::new(),
             persona_id: "xiaozhu".into(),
-            mouse_follow: false,
+            mouse_follow: true,
             user_name: String::new(),
             // Automatic extraction is opt-in; using stored memories in replies
             // is on so an explicitly remembered fact is actually useful.
@@ -134,6 +144,12 @@ impl Default for Settings {
 }
 
 pub struct SettingsState(pub Mutex<Settings>);
+
+impl Default for SettingsState {
+    fn default() -> Self {
+        Self(Mutex::new(Settings::default()))
+    }
+}
 
 /// The API key is a credential, not a preference: it lives in the OS keystore
 /// (Windows Credential Manager / macOS Keychain) instead of settings.json.
@@ -238,6 +254,30 @@ pub fn load(app: &tauri::AppHandle) -> Settings {
     settings
 }
 
+pub fn persist_pet_position(
+    app: &tauri::AppHandle,
+    position: tauri::PhysicalPosition<i32>,
+) {
+    let Some(state) = app.try_state::<SettingsState>() else {
+        return;
+    };
+    let Ok(mut settings) = state.0.lock() else {
+        eprintln!("could not persist pet position: settings state poisoned");
+        return;
+    };
+    let next = PetPosition {
+        x: position.x,
+        y: position.y,
+    };
+    if settings.pet_position == Some(next) {
+        return;
+    }
+    settings.pet_position = Some(next);
+    if let Err(error) = save(app, &settings) {
+        eprintln!("could not persist pet position: {error}");
+    }
+}
+
 /// The on-disk form of the settings: identical except the credential is removed.
 fn redacted_for_disk(settings: &Settings) -> Settings {
     Settings {
@@ -301,6 +341,9 @@ pub fn set_settings(
     store_api_key(&settings.api_key)?;
     // SAFE-UNWRAP: a poisoned settings mutex means an earlier command panicked.
     let old = { state.0.lock().unwrap().clone() };
+    if settings.pet_position.is_none() {
+        settings.pet_position = old.pet_position;
+    }
     save(&app, &settings)?;
     apply(&app, &old, &settings);
     // SAFE-UNWRAP: a poisoned settings mutex means an earlier command panicked.
@@ -486,13 +529,46 @@ pub fn register_shortcuts(app: &tauri::AppHandle, settings: &Settings) {
 mod tests {
     use super::{
         normalize_pet_scale, normalize_render_value, normalize_theme, redacted_for_disk, Settings,
+        PetPosition, SettingsState,
     };
+
+    #[test]
+    fn settings_state_has_defaults_before_setup_hydrates_persisted_values() {
+        let state = SettingsState::default();
+        let settings = state.0.lock().expect("startup settings state").clone();
+        assert_eq!(settings.persona_id, "xiaozhu");
+        assert!(settings.pet_visible);
+    }
 
     #[test]
     fn default_persona_is_the_built_in_one() {
         // 小著 is the only persona bundled with the app. Defaulting to a persona
         // that lives in an optional pack would leave a fresh install with no pet.
-        assert_eq!(Settings::default().persona_id, "xiaozhu");
+        let settings = Settings::default();
+        assert_eq!(settings.persona_id, "xiaozhu");
+        assert_eq!(settings.pet_scale, 0.5);
+        assert_eq!(settings.outline_width, 0.0008);
+        assert_eq!(settings.rim_width, 0.1);
+        assert_eq!(settings.rim_intensity, 0.3);
+        assert_eq!(settings.specular_intensity, 0.05);
+        assert!(settings.mouse_follow);
+    }
+
+    #[test]
+    fn pet_position_is_optional_for_legacy_settings_and_round_trips() {
+        let legacy: Settings = serde_json::from_str("{}").expect("legacy settings");
+        assert_eq!(legacy.pet_position, None);
+
+        let positioned: Settings = serde_json::from_str(
+            r#"{"petPosition":{"x":123,"y":456}}"#,
+        )
+        .expect("positioned settings");
+        assert_eq!(
+            positioned.pet_position,
+            Some(PetPosition { x: 123, y: 456 })
+        );
+        let json = serde_json::to_string(&positioned).expect("settings serialize");
+        assert!(json.contains("\"petPosition\":{\"x\":123,\"y\":456}"));
     }
 
     #[test]

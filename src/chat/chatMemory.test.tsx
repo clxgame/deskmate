@@ -376,6 +376,50 @@ describe("deleting a conversation", () => {
   });
 });
 
+describe("resuming a conversation from history", () => {
+  test("clicking a history row resumes it without a separate continue button", async () => {
+    invoke.mockReset();
+    invoke.mockImplementation((command: string) => {
+      switch (command) {
+        case "get_settings":
+          return Promise.resolve(SETTINGS);
+        case "load_persona":
+          return Promise.resolve(PERSONA);
+        case "history_list":
+          return Promise.resolve([
+            { id: "ses_old", title: "旧会话", created: 1, updated: 2, count: 1 },
+          ]);
+        case "history_load":
+          return Promise.resolve({
+            id: "ses_old",
+            title: "旧会话",
+            created: 1,
+            updated: 2,
+            messages: [{ role: "user", text: "你好" }],
+          });
+        default:
+          return Promise.resolve(undefined);
+      }
+    });
+    render(<ChatApp />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "历史" }));
+    expect(screen.queryByRole("button", { name: "继续对话" })).toBeNull();
+
+    await user.click(await screen.findByRole("button", { name: /旧会话/ }));
+
+    expect(await screen.findByText("你好")).toBeDefined();
+    expect(
+      invoke.mock.calls.some(
+        ([command, args]) =>
+          command === "history_load" &&
+          (args as { id?: string } | undefined)?.id === "ses_old",
+      ),
+    ).toBe(true);
+  });
+});
+
 describe("memory retrieval on send", () => {
   test("a turn asks for context for the active persona", async () => {
     handleInvoke({});

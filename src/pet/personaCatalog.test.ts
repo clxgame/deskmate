@@ -16,10 +16,12 @@ import {
 } from "./personaCatalog";
 
 describe("persona packs", () => {
-  test("ships only the AI 替身 pack so the installer stays small", () => {
+  test("ships only the 小著 pack so the installer stays small", () => {
     expect(BUILTIN_PACKS).toHaveLength(1);
-    expect(BUILTIN_PACKS[0]!.packId).toBe("ai-substitute");
-    expect(BUILTIN_PACKS[0]!.builtin).toBe(true);
+    const builtinPack = BUILTIN_PACKS[0];
+    if (builtinPack === undefined) throw new Error("Missing built-in persona pack");
+    expect(builtinPack.packId).toBe("ai-substitute");
+    expect(builtinPack.builtin).toBe(true);
     // Bundling only 小著 keeps ~169 MB of aki assets out of the installer.
     expect(PERSONAS.map((persona) => persona.id)).toEqual(["xiaozhu"]);
   });
@@ -116,7 +118,7 @@ describe("persona packs", () => {
   test("localizes persona and pack names", () => {
     expect(personaLabel(personaById("xiaozhu"), "zh-CN")).toBe("小著");
     expect(personaLabel(personaById("xiaozhu"), "en-US")).toBe("Xiaozhu");
-    expect(packLabel(AI_SUBSTITUTE_PACK, "zh-CN")).toBe("AI 替身");
+    expect(packLabel(AI_SUBSTITUTE_PACK, "zh-CN")).toBe("小著");
     expect(packLabel(AKI_PACK, "zh-CN")).toBe("aki 团子");
     expect(packLabel(AKI_PACK, "en-US")).toBe("aki Dango");
   });

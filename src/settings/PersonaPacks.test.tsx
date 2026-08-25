@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import * as tauriCore from "@tauri-apps/api/core";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 /**
@@ -27,6 +27,7 @@ const t = dict("zh-CN");
 interface Harness {
   onInstalledChange: ReturnType<typeof mock>;
   onActivePersonaRemoved: ReturnType<typeof mock>;
+  onActivePersonaChange: ReturnType<typeof mock>;
 }
 
 function renderPacks(
@@ -37,6 +38,7 @@ function renderPacks(
 ): Harness {
   const onInstalledChange = mock(() => {});
   const onActivePersonaRemoved = mock(() => {});
+  const onActivePersonaChange = mock((_personaId: string) => {});
   render(
     <PersonaPacks
       t={t}
@@ -44,13 +46,14 @@ function renderPacks(
       installed={overrides.installed ?? []}
       onInstalledChange={onInstalledChange}
       onActivePersonaRemoved={onActivePersonaRemoved}
+      onActivePersonaChange={onActivePersonaChange}
       activePersonaId={overrides.activePersonaId ?? "xiaozhu"}
     />,
   );
-  return { onInstalledChange, onActivePersonaRemoved };
+  return { onInstalledChange, onActivePersonaRemoved, onActivePersonaChange };
 }
 
-const confirmSpy = mock(() => true);
+const confirmSpy = mock((_message?: string) => true);
 
 beforeEach(() => {
   invoke.mockReset();
@@ -59,7 +62,7 @@ beforeEach(() => {
   open.mockImplementation(() => Promise.resolve(null));
   confirmSpy.mockReset();
   confirmSpy.mockImplementation(() => true);
-  globalThis.window.confirm = confirmSpy as unknown as typeof window.confirm;
+  globalThis.window.confirm = (message) => confirmSpy(message);
 });
 
 afterEach(() => {
@@ -70,11 +73,25 @@ describe("persona pack management", () => {
   test("lists every known pack with its install state", async () => {
     renderPacks();
 
+    expect(await screen.findByRole("heading", { name: "角色包" })).toBeDefined();
+    expect(screen.getByText("1 个包可用 · 1 个角色")).toBeDefined();
+
+    const builtin = screen.getByRole("article", { name: "小著" });
+    const builtinTooltip = within(builtin).getByRole("tooltip");
+    expect(builtinTooltip.textContent).toContain("随应用提供，始终可用");
+    expect(within(builtin).getAllByText("随应用提供，始终可用")).toHaveLength(1);
+    expect(within(builtin).getByLabelText("1 个角色可用")).toBeDefined();
+
+    const optional = screen.getByRole("article", { name: "aki 团子" });
+    const optionalTooltip = within(optional).getByRole("tooltip");
+    expect(optionalTooltip.textContent).toContain("离线扩展包，通过 .dmpack 文件导入");
+    expect(within(optional).getAllByText("离线扩展包，通过 .dmpack 文件导入")).toHaveLength(1);
+    expect(within(optional).getByLabelText("包含 25 个角色")).toBeDefined();
+    const importButton = within(optional).getByRole("button", { name: "导入" });
+    expect(importButton.textContent).toBe("");
+    expect(importButton.querySelector("svg")).toBeDefined();
+
     // The built-in pack can never be removed, so it has no remove button.
-    expect(await screen.findByText("AI 替身")).toBeDefined();
-    expect(screen.getByText("aki 团子")).toBeDefined();
-    expect(screen.getAllByText(/内置/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/未安装/)).toBeDefined();
     expect(screen.queryByRole("button", { name: "卸载" })).toBeNull();
   });
 
@@ -83,8 +100,30 @@ describe("persona pack management", () => {
       installed: [{ packId: "aki", version: "1.0.0", personaIds: ["changli"] }],
     });
 
-    expect(await screen.findByRole("button", { name: "卸载" })).toBeDefined();
-    expect(screen.getByText(/已安装/)).toBeDefined();
+    const installed = await screen.findByRole("article", { name: "aki 团子" });
+    expect(within(installed).getByText("已安装 · v1.0.0")).toBeDefined();
+    expect(within(installed).getByLabelText("1 个角色可用")).toBeDefined();
+    const uninstallButton = await screen.findByRole("button", { name: "卸载" });
+    expect(uninstallButton.textContent).toBe("");
+    expect(uninstallButton.querySelector("svg")).toBeDefined();
+  });
+
+  test("filters the role selector to the selected pack", async () => {
+    const harness = renderPacks({
+      installed: [{ packId: "aki", version: "1.0.0", personaIds: ["changli"] }],
+      activePersonaId: "changli",
+    });
+
+    const packSelector = await screen.findByRole("combobox", { name: "角色包" });
+    const selector = await screen.findByRole("combobox", { name: "角色" });
+    expect(within(selector).queryByRole("option", { name: "小著" })).toBeNull();
+    expect(within(selector).getByRole("option", { name: "长离" })).toBeDefined();
+
+    const user = userEvent.setup();
+    await user.selectOptions(selector, "changli");
+    await user.selectOptions(packSelector, "aki");
+
+    expect(harness.onActivePersonaChange).toHaveBeenCalledWith("changli");
   });
 
   test("imports the file chosen in the native picker", async () => {
@@ -105,12 +144,13 @@ describe("persona pack management", () => {
     renderPacks();
 
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "导入角色包" }));
+    await user.click(await screen.findByRole("button", { name: "导入" }));
 
     await waitFor(() => {
       const call = invoke.mock.calls.find(([command]) => command === "import_pack");
       expect(call).toBeDefined();
-      expect(call![1]).toEqual({ path: "C:\\packs\\aki.dmpack" });
+      if (call === undefined) throw new Error("import_pack was not called");
+      expect(call[1]).toEqual({ path: "C:\\packs\\aki.dmpack" });
     });
     expect(await screen.findByText("角色包导入成功")).toBeDefined();
   });
@@ -120,7 +160,7 @@ describe("persona pack management", () => {
     renderPacks();
 
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "导入角色包" }));
+    await user.click(await screen.findByRole("button", { name: "导入" }));
 
     await waitFor(() => {
       expect(
@@ -141,7 +181,7 @@ describe("persona pack management", () => {
     renderPacks();
 
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "导入角色包" }));
+    await user.click(await screen.findByRole("button", { name: "导入" }));
 
     expect((await screen.findByRole("alert")).textContent).toContain(
       "不安全的路径",
@@ -163,7 +203,8 @@ describe("persona pack management", () => {
     await waitFor(() => {
       const call = invoke.mock.calls.find(([command]) => command === "uninstall_pack");
       expect(call).toBeDefined();
-      expect(call![1]).toEqual({ packId: "aki" });
+      if (call === undefined) throw new Error("uninstall_pack was not called");
+      expect(call[1]).toEqual({ packId: "aki" });
     });
     expect(await screen.findByText("角色包已卸载")).toBeDefined();
   });

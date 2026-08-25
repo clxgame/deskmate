@@ -11,8 +11,8 @@ describe("chat persona selection", () => {
     expect(resolvePersonaId("xiaozhu")).toBe("xiaozhu");
     expect(resolvePersonaId("pixel-glasses-chibi")).toBe("xiaozhu");
     expect(personaDisplayName("xiaozhu", "zh-CN")).toBe("小著");
-    expect(personalizePersonaCopy("跟小碟说点什么吧", "小著")).toBe(
-      "跟小著说点什么吧",
+    expect(personalizePersonaCopy("跟小著说点什么吧", "aki 团子")).toBe(
+      "跟aki 团子说点什么吧",
     );
   });
 

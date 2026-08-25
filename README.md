@@ -1,6 +1,6 @@
-# deskmate
+# YUME
 
-Desktop pet application built with Tauri, React, TypeScript, and Bun.
+YUME is a desktop pet application built with Tauri, React, TypeScript, and Bun.
 
 OpenCode is pinned as a project dependency and bundled into release builds.
 Users of the packaged app do not need to install OpenCode separately.
@@ -117,7 +117,7 @@ yourself and ask for it to be remembered.
 
 ### Where it lives
 
-`deskmate-memory.db` in the app data directory, next to `settings.json`:
+The legacy `deskmate-memory.db` file remains in the app data directory, next to `settings.json`, so existing YUME installations keep their memories:
 
 ```
 %APPDATA%\com.deskmate.desktop\deskmate-memory.db

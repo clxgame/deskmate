@@ -20,7 +20,7 @@ function Read-CargoVersion([string]$Path) {
   }
 
   $content = Get-Content -LiteralPath $Path -Raw
-  $match = [regex]::Match($content, '(?m)^\[package\]\s+name\s*=\s*"deskmate"\s+version\s*=\s*"(?<version>[^"]+)"')
+  $match = [regex]::Match($content, '(?m)^\[package\]\s+name\s*=\s*"yume"\s+version\s*=\s*"(?<version>[^"]+)"')
   if (-not $match.Success) {
     $match = [regex]::Match($content, '(?m)^version\s*=\s*"(?<version>[^"]+)"')
   }

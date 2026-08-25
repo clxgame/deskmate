@@ -10,6 +10,11 @@ export interface ScheduledTask {
   enabled: boolean;
 }
 
+export interface PetPosition {
+  readonly x: number;
+  readonly y: number;
+}
+
 /** Mirror of Rust `Settings` (serde camelCase). */
 export interface Settings {
   // 通用
@@ -30,6 +35,7 @@ export interface Settings {
   specularIntensity: number;
   petVisible: boolean;
   alwaysOnTop: boolean;
+  petPosition?: PetPosition | null;
   scheduledTasks: ScheduledTask[];
   // 快捷键
   shortcutToggleChat: string;

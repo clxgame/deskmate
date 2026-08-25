@@ -1,7 +1,7 @@
 {
-  "name": "deskmate",
+  "name": "yume",
   "private": true,
-  "version": "0.1.6",
+  "version": "0.1.7",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,7 +11,8 @@
     "prepare:sidecar": "bun scripts/prepare-opencode.ts && bun scripts/prepare-ncmdump.ts",
     "fetch:persona-assets": "bun scripts/prepare-personas.ts",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "doctor": "react-doctor"
   },
   "dependencies": {
     "@pixiv/three-vrm": "^3.4.4",
@@ -36,6 +37,9 @@
     "@vitejs/plugin-react": "^5.1.4",
     "happy-dom": "^20.11.6",
     "opencode-ai": "1.18.21",
+    "react-doctor": "^0.9.12",
+    "react-grab": "^0.2.0",
+    "react-scan": "^0.5.7",
     "typescript": "^5.9.3",
     "vite": "^7.3.4"
   }

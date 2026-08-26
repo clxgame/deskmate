@@ -15,6 +15,10 @@ const invoke = mock<(command: string, args?: unknown) => Promise<unknown>>(
   () => Promise.resolve(undefined),
 );
 const listen = mock(() => Promise.resolve(() => {}));
+const promptAsync = mock(
+  (_sessionId: string, _text: string, _options?: { system?: string }) =>
+    Promise.resolve(),
+);
 
 // Keep the module's other exports (convertFileSrc, ...) so replacing invoke
 // does not hide them from modules loaded later in the same process.
@@ -26,7 +30,7 @@ mock.module("@tauri-apps/api/event", () => ({
 mock.module("../lib/opencode", () => ({
   waitForServer: () => Promise.resolve(),
   createSession: () => Promise.resolve({ id: "ses_1", title: "t", directory: "." }),
-  promptAsync: () => Promise.resolve(),
+  promptAsync,
   abortSession: () => Promise.resolve(),
   subscribeEvents: () => Promise.resolve(() => {}),
 }));
@@ -121,12 +125,32 @@ async function sendMessage(text: string) {
 
 beforeEach(() => {
   invoke.mockReset();
+  promptAsync.mockReset();
+  promptAsync.mockImplementation(
+    (_sessionId: string, _text: string, _options?: { system?: string }) =>
+      Promise.resolve(),
+  );
   handleInvoke({});
 });
 
 afterEach(cleanup);
 
 describe("explicit memory controls in chat", () => {
+  test("uses a saved nickname over the persona's default form of address", async () => {
+    handleInvoke({
+      get_settings: () => Promise.resolve({ ...SETTINGS, userName: "指挥官" }),
+    });
+    render(<ChatApp />);
+
+    await sendMessage("帮我安排今天的工作");
+
+    await waitFor(() => expect(promptAsync).toHaveBeenCalledTimes(1));
+    const options = promptAsync.mock.calls[0]?.[2];
+    expect(options?.system).toContain("指挥官");
+    expect(options?.system).toContain("最高优先级");
+    expect(options?.system).toContain("覆盖角色设定中的默认称呼");
+  });
+
   test("saving a message shows an inline receipt with undo", async () => {
     handleInvoke({ memory_create: () => Promise.resolve(storedMemory()) });
     render(<ChatApp />);

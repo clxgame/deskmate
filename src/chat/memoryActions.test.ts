@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import * as tauriCore from "@tauri-apps/api/core";
+import { userNameInstruction } from "./chatPersona";
 
 /**
  * Chat memory-action tests. Tauri `invoke` is mocked at the module boundary so
@@ -266,6 +267,20 @@ describe("prompt assembly", () => {
     const memoryIndex = prompt!.indexOf("<user-memory>");
     expect(personaIndex).toBeGreaterThanOrEqual(0);
     expect(memoryIndex).toBeGreaterThan(personaIndex);
+  });
+
+  test("a custom nickname follows memories and overrides the persona default", () => {
+    const prompt = composeSystemPrompt({
+      personaPrompt: "# 我对你的称呼\n称呼你为\"漂泊者\"。",
+      memoryBlock: "# 关于用户的已确认信息\n- [identity] 叫我小林",
+      userNameInstruction: userNameInstruction("指挥官"),
+    });
+
+    if (prompt === undefined) throw new Error("expected a system prompt");
+    expect(prompt.indexOf("指挥官")).toBeGreaterThan(
+      prompt.indexOf("叫我小林"),
+    );
+    expect(prompt).toContain("覆盖角色设定中的默认称呼");
   });
 
   test("no persona and no memory means no system prompt at all", () => {

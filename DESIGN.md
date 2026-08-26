@@ -8,17 +8,20 @@ YUME is a quiet floating companion: compact, lightly playful, and calm enough to
 
 | Role | Token | Value | Usage |
 |---|---|---|---|
-| Surface | `--surface` | `#1c1c26` | Window shell |
-| Surface raised | `--surface-raised` | `#252531` | Titlebar and active layers |
-| Surface sunken | `--surface-sunken` | `#12121a` | Inputs and selects |
-| Surface hover | `--surface-hover` | `rgba(255, 255, 255, 0.07)` | Hover state |
-| Line | `--line` | `rgba(255, 255, 255, 0.08)` | Dividers |
-| Line strong | `--line-strong` | `rgba(255, 255, 255, 0.12)` | Control borders |
-| Text | `--text` | `#eee` | Primary copy |
-| Text dim | `--text-dim` | `#aaa` | Secondary copy |
-| Accent | `--accent` | `#4a7dff` | Active tab and focus |
-| Accent soft | `--accent-soft` | `rgba(74, 125, 255, 0.16)` | Active tab surface |
-| Accent hover | `--accent-hover` | `#6b93ff` | Hover state for accent buttons |
+| Surface | `--surface` | `#20212b` | Window shell |
+| Surface raised | `--surface-raised` | `#2a2c38` | Titlebar, cards, and menus |
+| Surface sunken | `--surface-sunken` | `#191a23` | Inputs and selects |
+| Surface hover / active / disabled | `--surface-hover`, `--surface-active`, `--surface-disabled` | Theme-specific tonal steps | Interactive, pressed, and disabled surfaces |
+| Line | `--line` | `#383a48` | Dividers |
+| Line strong | `--line-strong` | `#4a4d5d` | Control borders |
+| Text | `--text` | `#f1f0f7` | Primary copy |
+| Text dim / disabled | `--text-dim`, `--text-disabled` | Theme-specific readable secondary steps | Secondary and disabled copy |
+| Accent | `--accent` | `#819ff7` | Filled controls, toggles, and slider thumbs |
+| Accent ink | `--accent-ink` | `#c4d3ff` | Accent text, icons, and focus borders on normal surfaces |
+| Text on accent | `--text-on-accent` | `#17203b` | Text on filled accents; dark in the three light themes |
+| Accent soft / hover | `--accent-soft`, `--accent-hover` | Theme-specific tonal steps | Selected surfaces and filled-control hover |
+| Media overlay text | `--text-on-media`, `--shadow-pack-title`, `--shadow-pack-count` | Light text with a high-contrast shadow, no label backing | Persona thumbnail title and count, independent of page theme |
+| Focus | `--focus-ring` | Theme-specific translucent ring | Keyboard focus around every interactive control |
 | Success | `--success` | `#7dd97d` | Successful verification/update copy |
 | Danger | `--danger` | `#ff8080` | Destructive or failed state copy |
 | Warning | `--warn` | `#ffb066` | Caution copy |
@@ -27,12 +30,12 @@ Theme variants keep the same semantic roles and only swap their palette:
 
 | Theme | Surface | Accent | Text | Mood |
 |---|---|---|---|---|
-| `dark` | `#1c1c26` | `#4a7dff` | `#eee` | Quiet charcoal default |
-| `mint` | `#f6fcf9` | `#57b89a` | `#244338` | Mint cream |
-| `peach` | `#fff8f5` | `#e89a7d` | `#4e2f2b` | Peach frosting |
-| `lavender` | `#faf8ff` | `#a58be0` | `#352c4f` | Lavender sugar |
+| `dark` | Charcoal `#20212b` | Periwinkle `#819ff7` | Soft white `#f1f0f7` | Quiet charcoal default |
+| `mint` | Cream `#fbf8ee` | Soft mint `#83c8aa` | Forest `#25443a` | Mint cream |
+| `peach` | Cream `#fff8ee` | Soft peach `#f3b096` | Cocoa `#543632` | Peach frosting |
+| `lavender` | Cream `#fcf9f1` | Lavender `#b9a4e8` | Plum `#3e3552` | Lavender sugar |
 
-Rules: interactive accents use `--accent`; new colors extend this table first. Every theme must preserve readable contrast and native control focus. The settings document and root are transparent outside `--r-window` and clip their contents to the rounded window; native window shadows are disabled so no square corner artifact remains. The 3D model uses the glb-viewer toon shader's authored light ramp rather than UI colors.
+Rules: filled interactive accents use `--accent`, while accent copy, icons, and normal-surface focus use `--accent-ink`; never use one for both roles by default. `--text-on-accent` is selected per palette instead of assuming white. Every theme preserves readable contrast for normal, secondary, disabled, hover, active, selected, focus, menu, and tooltip states. Persona-thumbnail labels use `--text-on-media` on their dedicated dark overlay, never ordinary page text. The settings document and root are transparent outside `--r-window` and clip their contents to the rounded window; native window shadows are disabled so no square corner artifact remains. The 3D model uses the glb-viewer toon shader's authored light ramp rather than UI colors.
 
 Theme scope: `.set-root`, `.chat-root`, and `.pet-root` carry the same `data-theme` value so a selected palette applies to settings, conversation/history surfaces, and the desktop pet shell together.
 
@@ -57,7 +60,7 @@ All spacing uses a 4px base: `--s-0-5` 2px, `--s-1` 4px, `--s-2` 8px, `--s-3` 12
 
 ### Settings row
 - Structure: label plus right-aligned control inside `.set-row`.
-- States: default, hover/focus on control, disabled where applicable, loading for async data.
+- States: default, hover, active, selected, keyboard focus, disabled where applicable, and loading for async data. Inputs and selects use the sunken layer; disabled controls use their own surface and text tokens rather than a low-opacity accent.
 - Accessibility: controls retain visible labels and native keyboard behavior.
 
 ### Desktop pet controls
@@ -66,12 +69,12 @@ All spacing uses a 4px base: `--s-0-5` 2px, `--s-1` 4px, `--s-2` 8px, `--s-3` 12
 - Accessibility: native range and switch controls retain visible labels and immediate settings-changed feedback.
 
 ### Persona library
-- Structure: a heading and live availability summary followed by a compact grid of 60px square persona-pack tiles. Each tile keeps the name, semantic status, numeric count, and contextual action as a compact overlay; the grid remains dense on narrow settings windows.
+- Structure: a heading and live availability summary followed by a compact grid of 60px square persona-pack tiles. Each tile keeps the name, semantic status, numeric count, and contextual action over the thumbnail; the name and count are unbacked text, while the grid remains dense on narrow settings windows.
 - Availability is derived from the backend: built-in packs are always ready, installed packs show their installed version and actual on-disk persona subset, and absent packs show their manifest capacity as an offline option.
 - Pack tiles prioritize the supplied transparent thumbnail, pack name, status, and one numeric character count. Loaded thumbnails render at normal brightness; not-installed thumbnails are dimmed. Descriptions and import-format guidance are not persistent copy; they appear in a delayed tooltip on hover or focus.
 
 ### Persona pack card
-- Structure: a 60px square tile with a full-bleed transparent PNG thumbnail, pack name, semantic status badge, one numeric character count, and one contextual action layered inside the tile. Available packs use a borderless, backgroundless 24px SVG plus action; installed packs use the same treatment with a minus action. Labels remain available through each button's accessible name and title.
+- Structure: a 60px square tile with a full-bleed transparent PNG thumbnail, pack name, semantic status badge, one numeric character count, and one contextual action layered inside the tile. Name and count use `--text-on-media` plus their dedicated text shadows with no border, padding, or background. Labels remain available through each button's accessible name and title.
 - Variants: `builtin`, `installed`, and `available`; only installed removable packs expose the destructive action.
 - Counts for installed packs use the backend's actual `personaIds`, never the static manifest total. Each tile shows only the total character count; detailed descriptions and import guidance remain available through the delayed tooltip.
 - States: default, import busy, uninstall busy, keyboard focus, delayed hover tooltip, success, and error. Motion is limited to action affordances, status changes, and the tooltip reveal.
@@ -87,7 +90,7 @@ All spacing uses a 4px base: `--s-0-5` 2px, `--s-1` 4px, `--s-2` 8px, `--s-3` 12
 
 ### Tab button
 - Structure: icon glyph plus label in `.set-tab`.
-- States: default, hover, active, keyboard focus.
+- States: default, hover, active/selected, and keyboard focus. Selected label and icon use `--accent-ink` on `--accent-soft` so light-theme text stays readable.
 
 ### Memory receipt (chat)
 - Structure: `.chat-memory-receipt` — an accent-tinted strip under the message, holding the remembered text and an inline Undo link.

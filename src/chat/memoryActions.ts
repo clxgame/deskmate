@@ -232,13 +232,16 @@ export async function forgetMemory(
 export function composeSystemPrompt(options: {
   personaPrompt: string | undefined;
   memoryBlock: string;
+  userNameInstruction?: string;
 }): string | undefined {
   const persona = options.personaPrompt?.trim();
   const memory = options.memoryBlock.trim();
-  if (!persona && !memory) return undefined;
-  if (!memory) return persona;
-  if (!persona) return memory;
-  return `${persona}\n\n${memory}`;
+  const userName = options.userNameInstruction?.trim();
+  const sections = [persona, memory, userName].filter(
+    (section): section is string =>
+      section !== undefined && section.length > 0,
+  );
+  return sections.length > 0 ? sections.join("\n\n") : undefined;
 }
 
 /**

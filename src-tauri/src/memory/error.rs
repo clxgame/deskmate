@@ -108,8 +108,8 @@ mod tests {
 
     #[test]
     fn serializes_codes_as_screaming_snake_case() {
-        let json = serde_json::to_string(&MemoryError::secret_rejected("no detail"))
-            .expect("serialize");
+        let json =
+            serde_json::to_string(&MemoryError::secret_rejected("no detail")).expect("serialize");
         assert!(json.contains("\"code\":\"SECRET_REJECTED\""), "{json}");
         assert!(json.contains("\"message\":\"no detail\""), "{json}");
     }

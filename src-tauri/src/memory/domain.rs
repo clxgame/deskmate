@@ -384,7 +384,10 @@ mod tests {
             MemoryStatus::Superseded,
             MemoryStatus::Expired,
         ] {
-            assert_eq!(MemoryStatus::parse(status.as_str()).expect("status"), status);
+            assert_eq!(
+                MemoryStatus::parse(status.as_str()).expect("status"),
+                status
+            );
         }
         for sensitivity in [
             Sensitivity::Normal,
@@ -440,7 +443,10 @@ mod tests {
             .expect("serialize");
         assert!(json.contains("\"memoryId\":\"m1\""), "{json}");
         assert!(json.contains("\"personaId\":\"aimisi\""), "{json}");
-        assert!(!json.contains("流星雨"), "event leaked memory content: {json}");
+        assert!(
+            !json.contains("流星雨"),
+            "event leaked memory content: {json}"
+        );
     }
 
     #[test]

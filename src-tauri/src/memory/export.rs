@@ -7,9 +7,9 @@
 use serde::Serialize;
 
 use super::domain::{MemoryQuery, MemoryRecord, MemoryStatus, RelationshipState};
-use super::error::MemoryResult;
 #[cfg(test)]
 use super::error::MemoryError;
+use super::error::MemoryResult;
 use super::repository::{Clock, MemoryRepository};
 
 /// Bumped when the export shape changes so an importer can tell versions apart.

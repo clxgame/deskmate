@@ -253,10 +253,8 @@ mod tests {
     use super::*;
 
     fn temp_dir(label: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "deskmate-memory-{label}-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("deskmate-memory-{label}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).expect("temp dir");
         dir
     }
@@ -434,7 +432,10 @@ mod tests {
             .query_row("SELECT wrong_shape FROM memories", [], |row| row.get(0))
             .expect("legacy row survived");
         assert_eq!(legacy, "legacy row");
-        assert!(!backup_path(&path).exists(), "backup file must be cleaned up");
+        assert!(
+            !backup_path(&path).exists(),
+            "backup file must be cleaned up"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 

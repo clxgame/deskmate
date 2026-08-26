@@ -145,6 +145,23 @@ impl Default for Settings {
 
 pub struct SettingsState(pub Mutex<Settings>);
 
+const MODEL_CATALOG_FILE: &str = "model-catalog.json";
+const YUME_PROVIDER_ID: &str = "yume";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ApiModel {
+    pub(crate) id: String,
+    pub(crate) name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ModelCatalog {
+    pub(crate) base_url: String,
+    pub(crate) models: Vec<ApiModel>,
+}
+
 impl Default for SettingsState {
     fn default() -> Self {
         Self(Mutex::new(Settings::default()))
@@ -254,10 +271,7 @@ pub fn load(app: &tauri::AppHandle) -> Settings {
     settings
 }
 
-pub fn persist_pet_position(
-    app: &tauri::AppHandle,
-    position: tauri::PhysicalPosition<i32>,
-) {
+pub fn persist_pet_position(app: &tauri::AppHandle, position: tauri::PhysicalPosition<i32>) {
     let Some(state) = app.try_state::<SettingsState>() else {
         return;
     };
@@ -292,7 +306,8 @@ fn save(app: &tauri::AppHandle, settings: &Settings) -> Result<(), String> {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
     // Never write the API key to disk; it belongs to the OS keystore.
-    let json = serde_json::to_string_pretty(&redacted_for_disk(settings)).map_err(|e| e.to_string())?;
+    let json =
+        serde_json::to_string_pretty(&redacted_for_disk(settings)).map_err(|e| e.to_string())?;
     std::fs::write(&path, json).map_err(|e| e.to_string())
 }
 
@@ -353,6 +368,64 @@ pub fn set_settings(
     Ok(())
 }
 
+fn model_catalog_path(app: &tauri::AppHandle) -> PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("app data dir unavailable")
+        .join(MODEL_CATALOG_FILE)
+}
+
+fn save_model_catalog(app: &tauri::AppHandle, catalog: &ModelCatalog) -> Result<(), String> {
+    let path = model_catalog_path(app);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let json = serde_json::to_string_pretty(catalog).map_err(|e| e.to_string())?;
+    std::fs::write(path, json).map_err(|e| e.to_string())
+}
+
+pub(crate) fn load_model_catalog(app: &tauri::AppHandle) -> Option<ModelCatalog> {
+    std::fs::read_to_string(model_catalog_path(app))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<ModelCatalog>(&raw).ok())
+        .filter(|catalog| {
+            catalog.base_url.starts_with("http://") || catalog.base_url.starts_with("https://")
+        })
+}
+
+pub(crate) fn sidecar_environment(app: &tauri::AppHandle) -> Option<(String, String)> {
+    let catalog = load_model_catalog(app)?;
+    let api_key = load_api_key();
+    build_sidecar_environment(&catalog, &api_key)
+}
+
+fn build_sidecar_environment(catalog: &ModelCatalog, api_key: &str) -> Option<(String, String)> {
+    if api_key.trim().is_empty() || catalog.models.is_empty() {
+        return None;
+    }
+
+    let models = catalog
+        .models
+        .iter()
+        .map(|model| (model.id.clone(), serde_json::json!({ "name": model.name })))
+        .collect::<serde_json::Map<String, serde_json::Value>>();
+    let config = serde_json::json!({
+        "$schema": "https://opencode.ai/config.json",
+        "provider": {
+            YUME_PROVIDER_ID: {
+                "npm": "@ai-sdk/openai-compatible",
+                "name": "YUME",
+                "options": { "baseURL": catalog.base_url },
+                "models": models,
+            }
+        }
+    });
+    let auth = serde_json::json!({
+        YUME_PROVIDER_ID: { "type": "api", "key": api_key.trim() }
+    });
+    Some((config.to_string(), auth.to_string()))
+}
+
 /// Apply side-effectful settings (autostart, shortcuts, window state).
 pub fn apply(app: &tauri::AppHandle, old: &Settings, new: &Settings) {
     // Autostart.
@@ -395,18 +468,43 @@ pub fn apply(app: &tauri::AppHandle, old: &Settings, new: &Settings) {
     }
 }
 
-/// Verify a gateway API key by hitting the OpenAI-compatible /v1/models
-/// endpoint (done in Rust to avoid browser CORS restrictions).
-/// Returns the model count on success; errors are machine codes that the
-/// frontend localizes: empty_key / bad_url / unauthorized / not_found /
-/// status:<code> / network:<detail>.
-#[tauri::command]
-pub fn verify_api_key(base_url: String, api_key: String) -> Result<Option<usize>, String> {
-    if api_key.trim().is_empty() {
-        return Err("empty_key".into());
+fn parse_api_models(payload: &serde_json::Value) -> Result<Vec<ApiModel>, String> {
+    let data = payload
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "invalid_response".to_string())?;
+    let mut seen = std::collections::HashSet::new();
+    let mut models = Vec::new();
+    for item in data {
+        let Some(id) = ["id", "model", "slug"]
+            .into_iter()
+            .find_map(|key| item.get(key).and_then(serde_json::Value::as_str))
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+        else {
+            continue;
+        };
+        if !seen.insert(id.to_string()) {
+            continue;
+        }
+        let name = item
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .unwrap_or(id)
+            .to_string();
+        models.push(ApiModel {
+            id: id.to_string(),
+            name,
+        });
     }
-    let base = base_url.trim().trim_end_matches('/').to_string();
-    if !base.starts_with("http") {
+    Ok(models)
+}
+
+fn fetch_api_models(base_url: &str, api_key: &str) -> Result<Vec<ApiModel>, String> {
+    let base = base_url.trim().trim_end_matches('/');
+    if !base.starts_with("http://") && !base.starts_with("https://") {
         return Err("bad_url".into());
     }
     let url = format!("{base}/v1/models");
@@ -415,10 +513,12 @@ pub fn verify_api_key(base_url: String, api_key: String) -> Result<Option<usize>
         .timeout(std::time::Duration::from_secs(10))
         .call();
     match resp {
-        Ok(r) => Ok(r
-            .into_json::<serde_json::Value>()
-            .ok()
-            .and_then(|v| v.get("data").and_then(|d| d.as_array().map(|a| a.len())))),
+        Ok(r) => {
+            let payload = r
+                .into_json::<serde_json::Value>()
+                .map_err(|_| "invalid_response".to_string())?;
+            parse_api_models(&payload)
+        }
         Err(ureq::Error::Status(code, _)) => match code {
             401 | 403 => Err("unauthorized".into()),
             404 => Err("not_found".into()),
@@ -426,6 +526,32 @@ pub fn verify_api_key(base_url: String, api_key: String) -> Result<Option<usize>
         },
         Err(e) => Err(format!("network:{e}")),
     }
+}
+
+#[tauri::command]
+pub fn verify_api_key(
+    app: tauri::AppHandle,
+    base_url: String,
+    api_key: String,
+) -> Result<Option<usize>, String> {
+    if api_key.trim().is_empty() {
+        return Err("empty_key".into());
+    }
+    let base = base_url.trim().trim_end_matches('/').to_string();
+    let models = fetch_api_models(&base, &api_key)?;
+    if models.is_empty() {
+        return Err("no_models".into());
+    }
+    store_api_key(api_key.trim())?;
+    save_model_catalog(
+        &app,
+        &ModelCatalog {
+            base_url: base,
+            models: models.clone(),
+        },
+    )?;
+    crate::restart_sidecar(&app)?;
+    Ok(Some(models.len()))
 }
 
 /// Spawn the scheduler loop: every 20s, fire enabled tasks whose HH:MM
@@ -528,9 +654,59 @@ pub fn register_shortcuts(app: &tauri::AppHandle, settings: &Settings) {
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_pet_scale, normalize_render_value, normalize_theme, redacted_for_disk, Settings,
-        PetPosition, SettingsState,
+        build_sidecar_environment, normalize_pet_scale, normalize_render_value, normalize_theme,
+        parse_api_models, redacted_for_disk, ApiModel, ModelCatalog, PetPosition, Settings,
+        SettingsState,
     };
+
+    #[test]
+    fn parses_openai_model_catalog_into_stable_display_metadata() {
+        let payload = serde_json::json!({
+            "object": "list",
+            "data": [
+                { "id": "model-a", "name": "Model A" },
+                { "id": "model-b", "owned_by": "team-b" },
+                { "id": "model-a", "name": "duplicate" },
+                { "object": "model" }
+            ]
+        });
+
+        let models = parse_api_models(&payload).expect("valid model catalog");
+
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].id, "model-a");
+        assert_eq!(models[0].name, "Model A");
+        assert_eq!(models[1].id, "model-b");
+        assert_eq!(models[1].name, "model-b");
+    }
+
+    #[test]
+    fn generated_sidecar_environment_declares_the_yume_provider() {
+        let catalog = ModelCatalog {
+            base_url: "https://models.example.test".into(),
+            models: vec![ApiModel {
+                id: "model-a".into(),
+                name: "Model A".into(),
+            }],
+        };
+
+        let (config, auth) =
+            build_sidecar_environment(&catalog, "secret-key").expect("configured provider");
+        let config = serde_json::from_str::<serde_json::Value>(&config).expect("valid config");
+        let auth = serde_json::from_str::<serde_json::Value>(&auth).expect("valid auth");
+
+        assert_eq!(config["provider"]["yume"]["name"], "YUME");
+        assert_eq!(
+            config["provider"]["yume"]["options"]["baseURL"],
+            "https://models.example.test"
+        );
+        assert_eq!(
+            config["provider"]["yume"]["models"]["model-a"]["name"],
+            "Model A"
+        );
+        assert_eq!(auth["yume"]["type"], "api");
+        assert_eq!(auth["yume"]["key"], "secret-key");
+    }
 
     #[test]
     fn settings_state_has_defaults_before_setup_hydrates_persisted_values() {
@@ -559,10 +735,8 @@ mod tests {
         let legacy: Settings = serde_json::from_str("{}").expect("legacy settings");
         assert_eq!(legacy.pet_position, None);
 
-        let positioned: Settings = serde_json::from_str(
-            r#"{"petPosition":{"x":123,"y":456}}"#,
-        )
-        .expect("positioned settings");
+        let positioned: Settings = serde_json::from_str(r#"{"petPosition":{"x":123,"y":456}}"#)
+            .expect("positioned settings");
         assert_eq!(
             positioned.pet_position,
             Some(PetPosition { x: 123, y: 456 })

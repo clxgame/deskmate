@@ -68,11 +68,7 @@ fn notify(app: &tauri::AppHandle, change: MemoryChange) {
 
 #[tauri::command]
 pub fn memory_available(state: tauri::State<MemoryState>) -> bool {
-    state
-        .0
-        .lock()
-        .map(|guard| guard.is_some())
-        .unwrap_or(false)
+    state.0.lock().map(|guard| guard.is_some()).unwrap_or(false)
 }
 
 #[tauri::command]
@@ -82,7 +78,10 @@ pub fn memory_create(
     memory: NewMemory,
 ) -> Result<Memory, MemoryError> {
     let created = with_repository(&state, |repository| repository.create(&memory))?;
-    notify(&app, MemoryChange::for_memory(MemoryAction::Created, &created));
+    notify(
+        &app,
+        MemoryChange::for_memory(MemoryAction::Created, &created),
+    );
     Ok(created)
 }
 
@@ -93,7 +92,10 @@ pub fn memory_update(
     update: MemoryUpdate,
 ) -> Result<Memory, MemoryError> {
     let updated = with_repository(&state, |repository| repository.update(&update))?;
-    notify(&app, MemoryChange::for_memory(MemoryAction::Updated, &updated));
+    notify(
+        &app,
+        MemoryChange::for_memory(MemoryAction::Updated, &updated),
+    );
     Ok(updated)
 }
 

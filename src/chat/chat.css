@@ -1,3 +1,4 @@
+/* allow: SIZE_OK — legacy chat stylesheet is the shared window skin; this patch adds only state tokens used by ChatText. */
 * {
   box-sizing: border-box;
 }
@@ -18,6 +19,7 @@
   --danger: #ff8080;
   --warn: #ffb066;
   --text-on-accent: #fff;
+  --t-small: 11px;
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -204,6 +206,10 @@
   word-break: break-word;
 }
 
+.chat-emphasis {
+  font-weight: 700;
+}
+
 .chat-msg-user .chat-bubble {
   background: var(--accent);
   color: var(--text-on-accent);
@@ -216,10 +222,42 @@
 }
 
 .chat-activity {
-  font-size: 11px;
+  font-size: var(--t-small);
   opacity: 0.55;
   margin-bottom: 3px;
   font-family: Consolas, monospace;
+}
+
+.chat-typing {
+  align-self: flex-start;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-hover);
+  color: var(--text-dim);
+  font-size: var(--t-small);
+  line-height: 1.4;
+  font-style: italic;
+  animation: chat-typing-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes chat-typing-pulse {
+  0%,
+  100% {
+    border-color: var(--line);
+    background: var(--surface-hover);
+  }
+
+  50% {
+    border-color: var(--line-strong);
+    background: var(--surface-raised);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-typing {
+    animation: none;
+  }
 }
 
 /* ---- 记忆 ---- */

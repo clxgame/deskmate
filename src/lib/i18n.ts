@@ -113,7 +113,8 @@ const zh = {
   // chat window
   chatBooting: "正在唤醒小著…",
   chatReady: "在的,说吧",
-  chatThinking: "思考中…",
+  chatThinking: "正在思考..",
+  chatTyping: "正在输入..",
   chatError: "连接失败,AI 引擎未就绪",
   chatEmpty: "跟小著说点什么吧 (｡•̀ᴗ-)✧",
   chatInputPlaceholder: "输入消息,Enter 发送",
@@ -308,6 +309,7 @@ const en: Dict = {
   chatBooting: "Waking up Dishy…",
   chatReady: "I'm here, go ahead",
   chatThinking: "Thinking…",
+  chatTyping: "Typing..",
   chatError: "Connection failed; AI engine not ready",
   chatEmpty: "Say something to Dishy (｡•̀ᴗ-)✧",
   chatInputPlaceholder: "Type a message, Enter to send",
@@ -505,6 +507,7 @@ const ja: Dict = {
   chatBooting: "小著を起こしています…",
   chatReady: "はい、どうぞ",
   chatThinking: "考え中…",
+  chatTyping: "入力中..",
   chatError: "接続失敗。AI エンジンが準備できていません",
   chatEmpty: "小著に話しかけてみて (｡•̀ᴗ-)✧",
   chatInputPlaceholder: "メッセージを入力、Enter で送信",
@@ -698,6 +701,7 @@ const ko: Dict = {
   chatBooting: "샤오디에를 깨우는 중…",
   chatReady: "네, 말씀하세요",
   chatThinking: "생각 중…",
+  chatTyping: "입력 중..",
   chatError: "연결 실패. AI 엔진이 준비되지 않았습니다",
   chatEmpty: "샤오디에에게 말을 걸어보세요 (｡•̀ᴗ-)✧",
   chatInputPlaceholder: "메시지 입력, Enter로 전송",
@@ -807,6 +811,7 @@ export function verifyError(t: Dict, raw: string): string {
   if (msg === "bad_url") return t.verifyBadUrl;
   if (msg === "unauthorized") return t.verifyUnauthorized;
   if (msg === "not_found") return t.verifyNotFound;
+  if (msg === "no_models" || msg === "models_unavailable") return t.aiUnreachable;
   if (msg.startsWith("status:")) return t.verifyStatus(msg.slice(7));
   if (msg.startsWith("network:")) return t.verifyNetwork(msg.slice(8));
   return msg;

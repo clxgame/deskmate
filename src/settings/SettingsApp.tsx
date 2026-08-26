@@ -12,6 +12,7 @@ import {
   hideSettingsWindow,
   emitPetScalePreview,
   listModels,
+  modelsMatchVerification,
   previewPetScale,
   setSettings,
   verifyApiKey,
@@ -385,11 +386,26 @@ function AiTab({ settings, patch, t }: TabProps) {
     message: string;
   } | null>(null);
 
+  const refreshModels = useCallback(async () => {
+    try {
+      const list = await listModels();
+      setModels(list);
+      setFailed(false);
+      return list;
+    } catch (error) {
+      console.error(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+      setFailed(true);
+      throw error;
+    }
+  }, []);
+
   useEffect(() => {
     let closed = false;
     void (async () => {
       try {
-        const list = await listModels();
+        const list = await refreshModels();
         if (!closed) setModels(list);
       } catch (error) {
         console.error(
@@ -401,13 +417,17 @@ function AiTab({ settings, patch, t }: TabProps) {
     return () => {
       closed = true;
     };
-  }, []);
+  }, [refreshModels]);
 
   const verify = async () => {
     setVerifying(true);
     setVerifyResult(null);
     try {
       const count = await verifyApiKey(settings.baseUrl, settings.apiKey);
+      const refreshed = await refreshModels();
+      if (!modelsMatchVerification(refreshed, count)) {
+        throw new Error("models_unavailable");
+      }
       setVerifyResult({ ok: true, message: t.verifyOk(count) });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

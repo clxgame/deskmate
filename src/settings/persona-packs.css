@@ -51,7 +51,7 @@
 
 .set-pack-active-persona .set-select {
   background: var(--surface-raised);
-  border-color: var(--accent);
+  border-color: var(--accent-ink);
   flex: 1 1 auto;
   min-width: 0;
   width: var(--active-persona-control-w);
@@ -106,18 +106,23 @@
   transition:
     background var(--ease),
     border-color var(--ease),
+    box-shadow var(--ease),
     transform var(--ease);
 }
 
 .set-pack:hover,
 .set-pack:focus-within {
   background: var(--surface-hover);
-  border-color: var(--line-strong);
+  border-color: var(--accent-ink);
   transform: translateY(calc(var(--s-1) * -1));
 }
 
+.set-pack:focus-within {
+  box-shadow: var(--shadow-focus);
+}
+
 .set-pack-builtin {
-  border-color: var(--accent);
+  border-color: var(--accent-ink);
 }
 
 .set-pack-installed {
@@ -145,7 +150,7 @@
 
 .set-pack-builtin .set-pack-thumb {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .set-pack-installed .set-pack-thumb {
@@ -187,8 +192,7 @@
 }
 
 .set-pack-name {
-  background: var(--surface-pack-overlay);
-  border-radius: var(--r-sm);
+  color: var(--text-on-media);
   display: block;
   font-size: var(--t-pack-name);
   font-weight: 600;
@@ -197,9 +201,9 @@
   max-width: calc(100% - var(--s-2));
   margin: 0;
   overflow: hidden;
-  padding: var(--s-0-5);
   position: absolute;
   right: var(--s-0-5);
+  text-shadow: var(--shadow-pack-title);
   text-overflow: ellipsis;
   top: var(--s-0-5);
   white-space: nowrap;
@@ -222,8 +226,8 @@
 
 .set-pack-status-builtin {
   background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
 }
 
 .set-pack-status-installed {
@@ -242,24 +246,24 @@
 }
 
 .set-pack-count {
-  color: var(--accent);
-  bottom: var(--s-1);
+  color: var(--text-on-media);
+  bottom: var(--s-0-5);
   font-size: var(--t-pack-count);
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   line-height: 1;
-  left: var(--s-1);
+  left: var(--s-0-5);
   margin: 0;
   position: absolute;
   text-shadow: var(--shadow-pack-count);
 }
 
 .set-pack-available .set-pack-count {
-  color: var(--text-dim);
+  color: var(--text-on-media);
 }
 
 .set-pack-installed .set-pack-count {
-  color: var(--success);
+  color: var(--text-on-media);
 }
 
 .set-pack-action {
@@ -274,6 +278,12 @@
   right: var(--s-0-5);
   width: var(--s-6);
   z-index: 2;
+  border-radius: var(--r-sm);
+  transition:
+    background var(--ease),
+    border-color var(--ease),
+    color var(--ease),
+    transform var(--ease);
 }
 
 .set-pack .set-pack-action {
@@ -281,27 +291,37 @@
 }
 
 .set-pack .set-pack-action-primary {
-  background: transparent;
-  border: none;
-  color: var(--accent);
+  background: var(--surface-pack-action);
+  border: 1px solid var(--accent);
+  color: var(--text-on-media);
 }
 
 .set-pack .set-pack-action-primary:hover {
-  background: transparent;
-  border: none;
-  color: var(--accent-hover);
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.set-pack .set-pack-action-primary:active:not(:disabled) {
+  background: var(--accent-hover);
+  transform: translateY(1px);
 }
 
 .set-pack .set-pack-action-danger {
-  background: transparent;
-  border: none;
-  color: var(--danger);
+  background: var(--surface-pack-action);
+  border: 1px solid var(--danger);
+  color: var(--text-on-media);
 }
 
 .set-pack .set-pack-action-danger:hover {
-  background: transparent;
-  border: none;
-  color: var(--danger);
+  background: var(--surface-pack-action-hover);
+  border-color: var(--danger);
+  color: var(--text-on-media);
+}
+
+.set-pack .set-pack-action-danger:active:not(:disabled) {
+  background: var(--surface-pack-overlay);
+  transform: translateY(1px);
 }
 
 .set-pack-action-icon {
@@ -315,7 +335,12 @@
 
 .set-pack-action:disabled {
   cursor: default;
-  opacity: var(--opacity-faint);
+  opacity: var(--opacity-muted);
+}
+
+.set-pack-action:focus-visible {
+  outline: 2px solid var(--text-on-media);
+  outline-offset: 1px;
 }
 
 .set-pack-tooltip {
@@ -323,7 +348,7 @@
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
   box-shadow: var(--shadow-tooltip);
-  color: var(--text-dim);
+  color: var(--text);
   font-size: var(--t-small);
   left: var(--s-0);
   line-height: 1.5;

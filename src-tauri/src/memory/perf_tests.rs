@@ -15,10 +15,8 @@ const RETRIEVAL_P95_BUDGET_MS: u128 = 50;
 const SYNTHETIC_MEMORIES: usize = 10_000;
 
 fn temp_dir(label: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "deskmate-memory-{label}-{}",
-        uuid::Uuid::new_v4()
-    ));
+    let dir =
+        std::env::temp_dir().join(format!("deskmate-memory-{label}-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).expect("temp dir");
     dir
 }
@@ -83,8 +81,7 @@ fn retrieval_stays_under_budget_with_ten_thousand_memories() {
     for round in 0..40 {
         let query = queries[round % queries.len()];
         let started = std::time::Instant::now();
-        let context =
-            context_for_turn(&repository, "persona7", query, true).expect("retrieval");
+        let context = context_for_turn(&repository, "persona7", query, true).expect("retrieval");
         samples.push(started.elapsed().as_millis());
 
         assert!(context.memories.len() <= MAX_INJECTED_MEMORIES);

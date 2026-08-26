@@ -80,10 +80,8 @@ impl<C: Clock> MemoryRepository<C> {
     /// A stable fact with a key supersedes the previous active value instead of
     /// piling up duplicates.
     pub fn create(&self, request: &NewMemory) -> MemoryResult<Memory> {
-        let accepted = policy::accept_new(
-            request,
-            &self.clock.now_plus_hours(policy::MOOD_TTL_HOURS),
-        )?;
+        let accepted =
+            policy::accept_new(request, &self.clock.now_plus_hours(policy::MOOD_TTL_HOURS))?;
         let now = self.clock.now();
         let source_kind = request.source_kind;
         let conversation_id = request.conversation_id.clone();
@@ -294,7 +292,7 @@ impl<C: Clock> MemoryRepository<C> {
                        AND NOT EXISTS (SELECT 1 FROM memory_sources s \
                                        WHERE s.memory_id = m.id \
                                          AND IFNULL(s.conversation_id, '') <> ?1)",
-                    )
+                )
                 .map_err(storage_error)?
                 .query_map(params![conversation_id], |row| row.get(0))
                 .map_err(storage_error)?
@@ -425,8 +423,7 @@ impl<C: Clock> MemoryRepository<C> {
                 relevance.join(" OR ")
             );
 
-            let mut values: Vec<rusqlite::types::Value> =
-                vec![persona_id.to_owned().into()];
+            let mut values: Vec<rusqlite::types::Value> = vec![persona_id.to_owned().into()];
             values.extend(relevance_values);
             values.push(limit.clamp(1, MAX_LIMIT).into());
 
@@ -621,15 +618,15 @@ fn insert_source(
 }
 
 /// Audit metadata. Never called with content.
-fn record_event(tx: &Transaction<'_>, memory_id: &str, action: &str, now: &str) -> MemoryResult<()> {
+fn record_event(
+    tx: &Transaction<'_>,
+    memory_id: &str,
+    action: &str,
+    now: &str,
+) -> MemoryResult<()> {
     tx.execute(
         "INSERT INTO memory_events (id, memory_id, action, created_at) VALUES (?1, ?2, ?3, ?4)",
-        params![
-            uuid::Uuid::new_v4().to_string(),
-            memory_id,
-            action,
-            now
-        ],
+        params![uuid::Uuid::new_v4().to_string(), memory_id, action, now],
     )
     .map_err(storage_error)?;
     Ok(())
@@ -782,7 +779,9 @@ fn select_memories(
         }
         (Some(MemoryScope::Persona), None) => clauses.push("m.scope = 'persona'".to_owned()),
         (None, Some(persona)) => {
-            clauses.push("(m.scope = 'global' OR (m.scope = 'persona' AND m.persona_id = ?))".to_owned());
+            clauses.push(
+                "(m.scope = 'global' OR (m.scope = 'persona' AND m.persona_id = ?))".to_owned(),
+            );
             values.push(persona.to_owned().into());
         }
         (None, None) => {}

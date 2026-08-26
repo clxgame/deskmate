@@ -373,10 +373,7 @@ fn pack_skill_texts(pack_root: &Path, persona_id: &str) -> Vec<String> {
         .iter()
         .filter(|skill| is_safe_filename(&skill.file))
         .filter_map(|skill| {
-            let path = pack_root
-                .join("skills")
-                .join(&skill.id)
-                .join(&skill.file);
+            let path = pack_root.join("skills").join(&skill.id).join(&skill.file);
             fs::read_to_string(path).ok()
         })
         .collect()
@@ -404,11 +401,7 @@ fn builtin_skill_texts(data_dir: &Path, persona_id: &str) -> Vec<String> {
 ///
 /// Capabilities are declared by the owning pack rather than hardcoded, so a new
 /// pack can grant an ability without changing the command that guards it.
-pub fn persona_grants_skill(
-    app: &tauri::AppHandle,
-    persona_id: &str,
-    skill_file: &str,
-) -> bool {
+pub fn persona_grants_skill(app: &tauri::AppHandle, persona_id: &str, skill_file: &str) -> bool {
     if !is_safe_id(persona_id) || !is_safe_filename(skill_file) {
         return false;
     }
@@ -457,7 +450,9 @@ pub fn file_digest(path: &Path) -> Result<String, String> {
     let mut hasher = Sha256::new();
     let mut buffer = [0u8; 64 * 1024];
     loop {
-        let read = reader.read(&mut buffer).map_err(|error| error.to_string())?;
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|error| error.to_string())?;
         if read == 0 {
             break;
         }
@@ -510,7 +505,10 @@ mod tests {
 
     #[test]
     fn accepts_only_the_documented_layout() {
-        assert_eq!(safe_entry_path("pack.json"), Some(Path::new("pack.json").into()));
+        assert_eq!(
+            safe_entry_path("pack.json"),
+            Some(Path::new("pack.json").into())
+        );
         assert_eq!(
             safe_entry_path("personas/changli/figure.glb"),
             Some(Path::new("personas/changli/figure.glb").into()),
@@ -569,12 +567,9 @@ mod tests {
         let mut buffer = std::io::Cursor::new(Vec::new());
         {
             let mut writer = zip::ZipWriter::new(&mut buffer);
-            let options: zip::write::FileOptions<'_, ()> =
-                zip::write::FileOptions::default();
+            let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
             for (name, contents) in entries {
-                writer
-                    .start_file(*name, options.clone())
-                    .expect("start entry");
+                writer.start_file(*name, options).expect("start entry");
                 std::io::Write::write_all(&mut writer, contents).expect("write entry");
             }
             writer.finish().expect("finish archive");
@@ -632,8 +627,8 @@ mod tests {
         let staging = root.join("staging");
         super::fs::create_dir_all(&staging).expect("staging");
 
-        let error = super::extract_verified(&archive_path, &staging)
-            .expect_err("zip-slip must be refused");
+        let error =
+            super::extract_verified(&archive_path, &staging).expect_err("zip-slip must be refused");
         assert!(error.contains("不安全的路径"), "{error}");
         assert!(!root.join("escaped.md").exists());
 

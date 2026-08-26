@@ -19,10 +19,8 @@ const WRITER_COUNT_ENV: &str = "DESKMATE_MEMORY_WRITER_COUNT";
 const WRITER_OFFSET_ENV: &str = "DESKMATE_MEMORY_WRITER_OFFSET";
 
 fn temp_dir(label: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "deskmate-memory-{label}-{}",
-        uuid::Uuid::new_v4()
-    ));
+    let dir =
+        std::env::temp_dir().join(format!("deskmate-memory-{label}-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).expect("temp dir");
     dir
 }
@@ -93,10 +91,8 @@ fn a_second_process_can_open_the_same_database() {
     let path = dir.join(DB_FILE_NAME);
 
     // This process creates and migrates the database.
-    let repository = MemoryRepository::new(
-        MemoryStore::open(&path).expect("first open"),
-        SystemClock,
-    );
+    let repository =
+        MemoryRepository::new(MemoryStore::open(&path).expect("first open"), SystemClock);
     repository.create(&request(0)).expect("first write");
 
     // A second process opens the already-migrated file.
@@ -122,10 +118,8 @@ fn concurrent_processes_do_not_lose_writes_or_corrupt_the_database() {
     const PER_PROCESS: usize = 120;
     const CHILDREN: usize = 3;
 
-    let repository = MemoryRepository::new(
-        MemoryStore::open(&path).expect("first open"),
-        SystemClock,
-    );
+    let repository =
+        MemoryRepository::new(MemoryStore::open(&path).expect("first open"), SystemClock);
 
     // Two other processes write while this one does too, all through the same
     // file: the pet, chat, and settings windows of a second app instance.
@@ -164,7 +158,10 @@ fn concurrent_processes_do_not_lose_writes_or_corrupt_the_database() {
             let integrity: String = connection
                 .query_row("PRAGMA integrity_check", [], |row| row.get(0))
                 .expect("integrity_check");
-            assert_eq!(integrity, "ok", "database corrupted by concurrent processes");
+            assert_eq!(
+                integrity, "ok",
+                "database corrupted by concurrent processes"
+            );
             Ok(())
         })
         .expect("inspect");
@@ -204,7 +201,11 @@ fn simultaneous_first_launches_migrate_the_database_exactly_once() {
         "the schema did not settle at the current version"
     );
     let stored = repository.list(&MemoryQuery::default()).expect("list");
-    assert_eq!(stored.len(), 15, "writes were lost during the migration race");
+    assert_eq!(
+        stored.len(),
+        15,
+        "writes were lost during the migration race"
+    );
 
     std::fs::remove_dir_all(&dir).ok();
 }

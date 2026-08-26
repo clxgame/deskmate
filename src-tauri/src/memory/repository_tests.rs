@@ -111,7 +111,10 @@ fn a_changed_stable_fact_supersedes_the_previous_value() {
         .create(&global_preference("不喜欢甜食", Some("food.sweets")))
         .expect("first");
     let second = repo
-        .create(&global_preference("现在可以吃一点甜的", Some("food.sweets")))
+        .create(&global_preference(
+            "现在可以吃一点甜的",
+            Some("food.sweets"),
+        ))
         .expect("second");
 
     assert_eq!(second.supersedes_id.as_deref(), Some(first.id.as_str()));
@@ -171,13 +174,12 @@ fn sensitive_content_is_stored_only_after_confirmation() {
     let repo = repo();
     let mut request = global_preference("月薪两万三", None);
     assert_eq!(
-        repo.create(&request).expect_err("needs confirmation").code(),
+        repo.create(&request)
+            .expect_err("needs confirmation")
+            .code(),
         MemoryErrorCode::SensitiveConfirmationRequired
     );
-    assert!(repo
-        .list(&MemoryQuery::default())
-        .expect("list")
-        .is_empty());
+    assert!(repo.list(&MemoryQuery::default()).expect("list").is_empty());
 
     request.sensitive_confirmed = true;
     repo.create(&request).expect("confirmed");
@@ -241,8 +243,11 @@ fn persona_memories_never_leak_to_another_persona() {
     let repo = repo();
     repo.create(&persona_moment("aimisi", "一起看了流星雨"))
         .expect("aimisi moment");
-    repo.create(&global_preference("叫我小林", Some("identity.preferred_name")))
-        .expect("global");
+    repo.create(&global_preference(
+        "叫我小林",
+        Some("identity.preferred_name"),
+    ))
+    .expect("global");
 
     let other = repo
         .list(&MemoryQuery {
@@ -271,10 +276,7 @@ fn expired_memories_drop_out_of_active_listings() {
     assert_eq!(repo.list(&MemoryQuery::default()).expect("list").len(), 1);
 
     repo.clock_advance(13);
-    assert!(repo
-        .list(&MemoryQuery::default())
-        .expect("list")
-        .is_empty());
+    assert!(repo.list(&MemoryQuery::default()).expect("list").is_empty());
 
     let expired = repo
         .list(&MemoryQuery {
@@ -368,7 +370,9 @@ fn forget_hard_deletes_content_and_leaves_only_audit_metadata() {
         .with_connection(|connection| {
             for table in ["memories", "memory_sources", "memory_search"] {
                 let count: i64 = connection
-                    .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
+                    .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                        row.get(0)
+                    })
                     .expect("count");
                 assert_eq!(count, 0, "{table} still holds forgotten content");
             }
@@ -392,8 +396,11 @@ fn clearing_a_persona_keeps_global_and_other_personas() {
         .expect("aimisi");
     repo.create(&persona_moment("changli", "一起听了雨声"))
         .expect("changli");
-    repo.create(&global_preference("叫我小林", Some("identity.preferred_name")))
-        .expect("global");
+    repo.create(&global_preference(
+        "叫我小林",
+        Some("identity.preferred_name"),
+    ))
+    .expect("global");
 
     let removed = repo
         .clear(Some(MemoryScope::Persona), Some("aimisi"))
@@ -412,8 +419,11 @@ fn clearing_everything_empties_every_content_table() {
     let repo = repo();
     repo.create(&persona_moment("aimisi", "一起看了流星雨"))
         .expect("moment");
-    repo.create(&global_preference("叫我小林", Some("identity.preferred_name")))
-        .expect("global");
+    repo.create(&global_preference(
+        "叫我小林",
+        Some("identity.preferred_name"),
+    ))
+    .expect("global");
     repo.relationship("aimisi").expect("relationship");
 
     repo.clear(None, None).expect("clear all");
@@ -429,7 +439,9 @@ fn clearing_everything_empties_every_content_table() {
                 "memory_task_links",
             ] {
                 let count: i64 = connection
-                    .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
+                    .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                        row.get(0)
+                    })
                     .expect("count");
                 assert_eq!(count, 0, "{table} survived clear-all");
             }
@@ -465,7 +477,9 @@ fn deleting_a_conversation_removes_only_its_sole_source_memories() {
         })
         .expect("second source");
 
-    let removed = repo.forget_conversation("ses_1").expect("forget conversation");
+    let removed = repo
+        .forget_conversation("ses_1")
+        .expect("forget conversation");
     assert_eq!(removed, 1);
 
     let remaining = repo.list(&MemoryQuery::default()).expect("list");
@@ -513,7 +527,9 @@ fn task_links_are_a_relation_not_a_second_task_store() {
     repo.store()
         .with_connection(|connection| {
             let links: i64 = connection
-                .query_row("SELECT COUNT(*) FROM memory_task_links", [], |row| row.get(0))
+                .query_row("SELECT COUNT(*) FROM memory_task_links", [], |row| {
+                    row.get(0)
+                })
                 .expect("count");
             assert_eq!(links, 0);
             Ok(())
@@ -525,7 +541,9 @@ fn task_links_are_a_relation_not_a_second_task_store() {
 fn linking_an_unknown_memory_reports_not_found() {
     let repo = repo();
     assert_eq!(
-        repo.link_task("nope", "task-1").expect_err("missing").code(),
+        repo.link_task("nope", "task-1")
+            .expect_err("missing")
+            .code(),
         MemoryErrorCode::NotFound
     );
 }

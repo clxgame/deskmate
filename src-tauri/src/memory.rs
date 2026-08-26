@@ -9,9 +9,9 @@ mod cross_process_tests;
 pub mod domain;
 pub mod error;
 pub mod export;
-pub mod policy;
 #[cfg(test)]
 mod perf_tests;
+pub mod policy;
 pub mod repository;
 #[cfg(test)]
 mod repository_tests;

@@ -1,3 +1,4 @@
+// allow: SIZE_OK — legacy Tauri bootstrap root owns startup/resource wiring; this patch keeps the migration at that boundary.
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
@@ -238,8 +239,12 @@ pub(crate) fn hide_chat_impl(app: &tauri::AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
+        configure_sidecar_command, migrate_legacy_xiaozhu_intro, overwrite_builtin_xiaozhu_persona,
         should_follow_chat_on_window_event, should_hide_chat, should_restore_settings_focus,
     };
+    use std::ffi::OsStr;
+    use std::path::Path;
+    use std::process::Command;
     use tauri::{PhysicalPosition, WindowEvent};
 
     #[test]
@@ -264,6 +269,75 @@ mod tests {
         assert!(!should_follow_chat_on_window_event(&WindowEvent::Focused(
             true,
         )));
+    }
+
+    #[test]
+    fn yume_sidecar_disables_external_plugins() {
+        let mut command = Command::new("opencode");
+        configure_sidecar_command(&mut command, 47_891, Path::new("."));
+
+        assert_eq!(command.get_args().next(), Some(OsStr::new("--pure")));
+    }
+
+    #[test]
+    fn migrates_only_the_legacy_xiaozhu_intro() {
+        let legacy_mid =
+            "你好！我是**著名**当代游戏电子游戏音乐先锋——霄太郎，当然\\~您叫我**小著**就行。";
+        let legacy_runtime =
+            "你好！我是著名当代游戏电子游戏音乐先锋——霄太郎，当然~您叫我小著就行。";
+        let legacy = "你好，栋梁！我是小著，一名游戏配乐师，我会把游戏里的音乐布置到游戏中，让它们自然地流动起来，并随着游戏的状态有机地连续播放。";
+
+        let prompt = format!("---\nid: xiaozhu\n---\n\n# 我是谁\n\n{legacy_mid}\n\n其他自定义内容");
+        let migrated = migrate_legacy_xiaozhu_intro(&prompt);
+
+        assert_eq!(
+            migrated.as_deref(),
+            Some("---\nid: xiaozhu\n---\n\n# 我是谁\n\n你好！我是当代游戏电子游戏音乐先锋——小著。\n\n其他自定义内容")
+        );
+
+        let prompt =
+            format!("---\nid: xiaozhu\n---\n\n# 我是谁\n\n{legacy_runtime}\n\n其他自定义内容");
+        let migrated = migrate_legacy_xiaozhu_intro(&prompt);
+
+        assert_eq!(
+            migrated.as_deref(),
+            Some("---\nid: xiaozhu\n---\n\n# 我是谁\n\n你好！我是当代游戏电子游戏音乐先锋——小著。\n\n其他自定义内容")
+        );
+
+        let prompt = format!("---\nid: xiaozhu\n---\n\n# 我是谁\n\n{legacy}\n\n其他自定义内容");
+        let migrated = migrate_legacy_xiaozhu_intro(&prompt);
+
+        assert_eq!(
+            migrated.as_deref(),
+            Some("---\nid: xiaozhu\n---\n\n# 我是谁\n\n你好！我是当代游戏电子游戏音乐先锋——小著。\n\n其他自定义内容")
+        );
+        assert!(migrate_legacy_xiaozhu_intro("没有旧文案").is_none());
+        assert!(migrate_legacy_xiaozhu_intro(&format!("# 其他内容\n\n{legacy}")).is_none());
+    }
+
+    #[test]
+    fn overwrites_builtin_xiaozhu_persona_when_runtime_copy_is_stale() {
+        let root = std::env::temp_dir().join(format!("yume-xiaozhu-sync-{}", uuid::Uuid::new_v4()));
+        let shipped_personas = root.join("shipped-personas");
+        let data_dir = root.join("data");
+        let shipped_persona = shipped_personas.join("xiaozhu").join("persona.md");
+        let runtime_persona = data_dir.join("personas").join("xiaozhu").join("persona.md");
+
+        std::fs::create_dir_all(shipped_persona.parent().expect("shipped parent"))
+            .expect("create shipped directory");
+        std::fs::create_dir_all(runtime_persona.parent().expect("runtime parent"))
+            .expect("create runtime directory");
+        std::fs::write(&shipped_persona, "new built-in persona").expect("write shipped persona");
+        std::fs::write(&runtime_persona, "stale runtime persona").expect("write stale persona");
+
+        overwrite_builtin_xiaozhu_persona(&shipped_personas, &data_dir)
+            .expect("sync built-in persona");
+
+        assert_eq!(
+            std::fs::read_to_string(&runtime_persona).expect("read synchronized persona"),
+            "new built-in persona"
+        );
+        std::fs::remove_dir_all(root).expect("remove test directory");
     }
 }
 
@@ -576,6 +650,36 @@ fn cleanup_orphan_sidecars() {
     }
 }
 
+const CURRENT_XIAOZHU_INTRO: &str = "你好！我是当代游戏电子游戏音乐先锋——小著。";
+const LEGACY_XIAOZHU_INTROS: &[&str] = &[
+    "你好！我是**著名**当代游戏电子游戏音乐先锋——霄太郎，当然\\~您叫我**小著**就行。",
+    "你好！我是著名当代游戏电子游戏音乐先锋——霄太郎，当然~您叫我小著就行。",
+    "你好，栋梁！我是小著，一名游戏配乐师，我会把游戏里的音乐布置到游戏中，让它们自然地流动起来，并随着游戏的状态有机地连续播放。",
+];
+
+fn migrate_legacy_xiaozhu_intro(prompt: &str) -> Option<String> {
+    let identity_start = prompt.find("# 我是谁")?;
+    let identity_heading_len = "# 我是谁".len();
+    let identity_end = prompt[identity_start + identity_heading_len..]
+        .find("\n# ")
+        .map(|offset| identity_start + identity_heading_len + offset)
+        .unwrap_or(prompt.len());
+    let identity_section = &prompt[identity_start..identity_end];
+    let updated_section = LEGACY_XIAOZHU_INTROS
+        .iter()
+        .fold(identity_section.to_owned(), |current, legacy| {
+            current.replace(legacy, CURRENT_XIAOZHU_INTRO)
+        });
+    if updated_section == identity_section {
+        return None;
+    }
+    let mut updated = String::with_capacity(prompt.len() + CURRENT_XIAOZHU_INTRO.len());
+    updated.push_str(&prompt[..identity_start]);
+    updated.push_str(&updated_section);
+    updated.push_str(&prompt[identity_end..]);
+    Some(updated)
+}
+
 /// Copy ship resources (personas) into the app data dir on first run,
 /// so users can edit them without touching the install dir.
 /// Returns a human-readable reason for the first failure, if any.
@@ -584,18 +688,50 @@ fn sync_ship_resources(app: &tauri::AppHandle, data_dir: &Path) -> Result<(), St
         .path()
         .resource_dir()
         .map_err(|e| format!("无法定位安装资源目录: {e}"))?;
+    let mut shipped_personas_dir = None;
     for name in ["personas", "skills"] {
         let candidates = [res_dir.join("resources").join(name), res_dir.join(name)];
         let dst = data_dir.join(name);
         for src in candidates {
             if src.exists() {
-                copy_missing_dir_recursive(&src, &dst).map_err(|e| {
-                    format!("无法复制 {name} 资源到 {}: {e}", dst.display())
-                })?;
+                copy_missing_dir_recursive(&src, &dst)
+                    .map_err(|e| format!("无法复制 {name} 资源到 {}: {e}", dst.display()))?;
+                if name == "personas" {
+                    shipped_personas_dir = Some(src);
+                }
                 break;
             }
         }
     }
+
+    if let Some(shipped_personas_dir) = shipped_personas_dir {
+        overwrite_builtin_xiaozhu_persona(&shipped_personas_dir, data_dir)
+            .map_err(|error| format!("无法覆盖小著内置人设: {error}"))?;
+    }
+
+    let xiaozhu_persona = data_dir.join("personas").join("xiaozhu").join("persona.md");
+    if let Ok(prompt) = std::fs::read_to_string(&xiaozhu_persona) {
+        if let Some(updated) = migrate_legacy_xiaozhu_intro(&prompt) {
+            std::fs::write(&xiaozhu_persona, updated).map_err(|error| {
+                format!(
+                    "无法更新小著默认人设 {}: {error}",
+                    xiaozhu_persona.display()
+                )
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
+fn overwrite_builtin_xiaozhu_persona(
+    shipped_personas_dir: &Path,
+    data_dir: &Path,
+) -> std::io::Result<()> {
+    let source = shipped_personas_dir.join("xiaozhu").join("persona.md");
+    let target_dir = data_dir.join("personas").join("xiaozhu");
+    std::fs::create_dir_all(&target_dir)?;
+    std::fs::copy(source, target_dir.join("persona.md"))?;
     Ok(())
 }
 
@@ -616,6 +752,29 @@ fn copy_missing_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Apply the non-user-specific OpenCode launch settings for YUME's sidecar.
+///
+/// `--pure` prevents globally installed OpenCode plugins from changing YUME's
+/// behavior or producing system notifications for YUME chat replies. Provider
+/// credentials and model definitions still arrive through YUME's own
+/// environment variables below.
+fn configure_sidecar_command(cmd: &mut Command, port: u16, workspace: &Path) {
+    cmd.arg("--pure")
+        .arg("serve")
+        .arg("--port")
+        .arg(port.to_string())
+        .arg("--hostname")
+        .arg("127.0.0.1")
+        // Production WebView origin on Windows is http://tauri.localhost;
+        // localhost dev origins are allowed by default.
+        .arg("--cors")
+        .arg("http://tauri.localhost")
+        .arg("--cors")
+        .arg("tauri://localhost")
+        .arg("--print-logs")
+        .current_dir(workspace);
+}
+
 fn spawn_sidecar(app: &tauri::AppHandle, port: u16) -> std::io::Result<Child> {
     let data_dir = app.path().app_data_dir().expect("app data dir unavailable");
     std::fs::create_dir_all(&data_dir)?;
@@ -632,24 +791,14 @@ fn spawn_sidecar(app: &tauri::AppHandle, port: u16) -> std::io::Result<Child> {
 
     let bin = resolve_opencode(app);
     let mut cmd = Command::new(&bin);
-    cmd.arg("serve")
-        .arg("--port")
-        .arg(port.to_string())
-        .arg("--hostname")
-        .arg("127.0.0.1")
-        // Production WebView origin on Windows is http://tauri.localhost;
-        // localhost dev origins are allowed by default.
-        .arg("--cors")
-        .arg("http://tauri.localhost")
-        .arg("--cors")
-        .arg("tauri://localhost")
-        .arg("--print-logs")
-        .current_dir(&workspace)
-        // NOTE: we intentionally reuse the user's global opencode config +
-        // auth store so model credentials work out of the box. The persona
-        // is injected per-message via the `system` prompt field instead.
-        .env_remove("OPENCODE_SERVER_PASSWORD")
+    configure_sidecar_command(&mut cmd, port, &workspace);
+    cmd.env_remove("OPENCODE_SERVER_PASSWORD")
         .env_remove("OPENCODE_SERVER_USERNAME");
+
+    if let Some((config, auth)) = settings::sidecar_environment(app) {
+        cmd.env("OPENCODE_CONFIG_CONTENT", config)
+            .env("OPENCODE_AUTH_CONTENT", auth);
+    }
 
     #[cfg(windows)]
     {
@@ -666,6 +815,22 @@ fn spawn_sidecar(app: &tauri::AppHandle, port: u16) -> std::io::Result<Child> {
     }
 
     cmd.spawn()
+}
+
+pub(crate) fn restart_sidecar(app: &tauri::AppHandle) -> Result<(), String> {
+    let sidecar = app.state::<Sidecar>();
+    let mut previous = sidecar
+        .child
+        .lock()
+        .map_err(|_| "sidecar lock poisoned")?
+        .take();
+    if let Some(mut child) = previous.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    let child = spawn_sidecar(app, sidecar.port).map_err(|error| error.to_string())?;
+    *sidecar.child.lock().map_err(|_| "sidecar lock poisoned")? = Some(child);
+    Ok(())
 }
 
 /// Build the system tray: left-click toggles the pet, menu has show/hide + quit.
@@ -880,10 +1045,7 @@ pub fn run() {
                     settings::apply_pet_scale(&pet, loaded.pet_scale);
                 }
                 if let Some(position) = loaded.pet_position {
-                    let _ = pet.set_position(tauri::PhysicalPosition::new(
-                        position.x,
-                        position.y,
-                    ));
+                    let _ = pet.set_position(tauri::PhysicalPosition::new(position.x, position.y));
                 } else {
                     place_pet_bottom_right(&pet);
                 }

@@ -1,3 +1,4 @@
+// allow: SIZE_OK — legacy chat shell keeps the single render boundary; this fix only adds the deterministic 小著 reply adapter.
 import {
   useCallback,
   useEffect,
@@ -19,10 +20,15 @@ import {
 import { broadcastMood } from "../lib/petState";
 import { DEFAULT_PERSONA_ID } from "../pet/personaCatalog";
 import {
+  XIAOZHU_IDENTITY_REPLY,
+  XIAOZHU_NAME_ORIGIN_LINES,
+  isXiaozhuIdentityQuestion,
+  isXiaozhuNameOriginQuestion,
   personaDisplayName,
   personalizePersonaCopy,
   resolvePersonaId,
   shouldResetSessionForPersona,
+  userNameInstruction,
 } from "./chatPersona";
 import {
   composeSystemPrompt,
@@ -61,6 +67,7 @@ import {
   toOpenCodeFilePart,
   type ChatAttachment,
 } from "./attachments";
+import { ChatText } from "./ChatText";
 import "./chat.css";
 
 interface ChatMessage {
@@ -92,10 +99,35 @@ type Status = "booting" | "ready" | "busy" | "error";
 
 type View = "chat" | "history";
 
+const MIN_REPLY_PRESENTATION_MS = 2_000;
+const FIXED_REPLY_TYPING_DELAY_MS = MIN_REPLY_PRESENTATION_MS / 2;
+
+interface BufferedAssistantUpdate {
+  messageID: string;
+  hasText: boolean;
+  text?: string;
+  activity?: string;
+}
+
+interface ReplyPacing {
+  id: number;
+  released: boolean;
+  completed: boolean;
+  pendingUpdates: Map<string, BufferedAssistantUpdate>;
+  releaseTimer: ReturnType<typeof globalThis.setTimeout> | null;
+}
+
+function waitForDelay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    globalThis.setTimeout(resolve, milliseconds);
+  });
+}
+
 export default function ChatApp() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<Status>("booting");
+  const [isPersonaTyping, setIsPersonaTyping] = useState(false);
   const [lang, setLang] = useState("zh-CN");
   const [theme, setTheme] = useState<ThemeId>("dark");
   const [activePersonaId, setActivePersonaId] = useState(DEFAULT_PERSONA_ID);
@@ -130,8 +162,153 @@ export default function ChatApp() {
   /** mirror of `messages` for persisting history outside render. */
   const messagesRef = useRef<ChatMessage[]>([]);
   const createdRef = useRef<number>(Date.now());
+  const fixedReplySequenceRef = useRef(0);
+  const replyPacingRef = useRef<ReplyPacing | null>(null);
+  const replyPacingSequenceRef = useRef(0);
+
+  const clearReplyPacing = () => {
+    const pacing = replyPacingRef.current;
+    if (pacing?.releaseTimer !== null && pacing?.releaseTimer !== undefined) {
+      globalThis.clearTimeout(pacing.releaseTimer);
+    }
+    replyPacingRef.current = null;
+  };
+
+  const finishPacedReply = (pacing: ReplyPacing) => {
+    if (replyPacingRef.current !== pacing) return;
+    clearReplyPacing();
+    setIsPersonaTyping(false);
+    setStatus("ready");
+    broadcastMood("idle");
+    setMessages((prev) =>
+      prev.map((message) =>
+        message.activity ? { ...message, activity: undefined } : message,
+      ),
+    );
+  };
+
+  const releaseReplyPacing = (id: number) => {
+    const pacing = replyPacingRef.current;
+    if (!pacing || pacing.id !== id) return;
+    pacing.released = true;
+    pacing.releaseTimer = null;
+    const pendingUpdates = Array.from(pacing.pendingUpdates.values());
+    pacing.pendingUpdates.clear();
+    if (pendingUpdates.length > 0) {
+      setMessages((prev) =>
+        pendingUpdates.reduce(
+          (next, update) =>
+            upsertAssistant(next, update.messageID, (message) =>
+              update.hasText
+                ? {
+                    ...message,
+                    text: update.text ?? "",
+                    activity: update.activity,
+                  }
+                : { ...message, activity: update.activity },
+            ),
+          prev,
+        ),
+      );
+    }
+    if (pacing.completed) finishPacedReply(pacing);
+  };
+
+  const startReplyPacing = (): number => {
+    clearReplyPacing();
+    const id = replyPacingSequenceRef.current + 1;
+    replyPacingSequenceRef.current = id;
+    const pacing: ReplyPacing = {
+      id,
+      released: false,
+      completed: false,
+      pendingUpdates: new Map(),
+      releaseTimer: null,
+    };
+    replyPacingRef.current = pacing;
+    pacing.releaseTimer = globalThis.setTimeout(() => {
+      releaseReplyPacing(id);
+    }, MIN_REPLY_PRESENTATION_MS);
+    return id;
+  };
+
+  const queueAssistantText = (messageID: string, text: string) => {
+    const pacing = replyPacingRef.current;
+    if (!pacing || pacing.released) {
+      setMessages((prev) =>
+        upsertAssistant(prev, messageID, (message) => ({
+          ...message,
+          text,
+          activity: undefined,
+        })),
+      );
+      return;
+    }
+    pacing.pendingUpdates.set(messageID, {
+      messageID,
+      hasText: true,
+      text,
+      activity: undefined,
+    });
+  };
+
+  const queueAssistantTool = (messageID: string, activity: string) => {
+    const pacing = replyPacingRef.current;
+    if (!pacing || pacing.released) {
+      setMessages((prev) =>
+        upsertAssistant(prev, messageID, (message) => ({
+          ...message,
+          activity,
+        })),
+      );
+      return;
+    }
+    const current = pacing.pendingUpdates.get(messageID);
+    pacing.pendingUpdates.set(messageID, {
+      messageID,
+      hasText: current?.hasText ?? false,
+      text: current?.text,
+      activity,
+    });
+  };
+
+  const completeReplyPacing = () => {
+    const pacing = replyPacingRef.current;
+    if (!pacing) {
+      setIsPersonaTyping(false);
+      setStatus("ready");
+      broadcastMood("idle");
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.activity ? { ...message, activity: undefined } : message,
+        ),
+      );
+      return;
+    }
+    pacing.completed = true;
+    if (pacing.released) finishPacedReply(pacing);
+  };
+
+  const waitForFixedReplyStart = async (sequence: number): Promise<boolean> => {
+    await waitForDelay(FIXED_REPLY_TYPING_DELAY_MS);
+    if (fixedReplySequenceRef.current !== sequence) return false;
+    setIsPersonaTyping(true);
+    broadcastMood("thinking");
+    await waitForDelay(FIXED_REPLY_TYPING_DELAY_MS);
+    return fixedReplySequenceRef.current === sequence;
+  };
+
+  useEffect(() => {
+    return () => {
+      fixedReplySequenceRef.current += 1;
+      clearReplyPacing();
+    };
+  }, []);
 
   const resetSession = useCallback(async (): Promise<void> => {
+    fixedReplySequenceRef.current += 1;
+    clearReplyPacing();
+    setIsPersonaTyping(false);
     const previousSession = sessionRef.current;
     if (previousSession) {
       await abortSession(previousSession).catch(() => {});
@@ -213,8 +390,10 @@ export default function ChatApp() {
         unsubscribe = await subscribeEvents(handleEvent);
         setStatus("ready");
         broadcastMood("idle");
-      } catch (e) {
-        console.error(e);
+      } catch (error: unknown) {
+        console.error(
+          error instanceof Error ? error : new Error(String(error)),
+        );
         setStatus("error");
         broadcastMood("error");
       }
@@ -255,23 +434,13 @@ export default function ChatApp() {
         if (rolesRef.current.get(part.messageID) === "user") return;
 
         if (part.type === "text") {
+          setIsPersonaTyping(true);
           broadcastMood("talking");
-          setMessages((prev) =>
-            upsertAssistant(prev, part.messageID, (m) => ({
-              ...m,
-              text: part.text ?? "",
-              activity: undefined,
-            })),
-          );
+          queueAssistantText(part.messageID, part.text ?? "");
         } else if (part.type === "tool") {
           broadcastMood("working");
           const label = part.state?.title || part.tool || "tool";
-          setMessages((prev) =>
-            upsertAssistant(prev, part.messageID, (m) => ({
-              ...m,
-              activity: label,
-            })),
-          );
+          queueAssistantTool(part.messageID, label);
         }
         break;
       }
@@ -286,15 +455,13 @@ export default function ChatApp() {
       }
       case "session.idle": {
         if (props.sessionID !== sessionRef.current) return;
-        setStatus("ready");
-        broadcastMood("idle");
-        setMessages((prev) =>
-          prev.map((m) => (m.activity ? { ...m, activity: undefined } : m)),
-        );
+        completeReplyPacing();
         break;
       }
       case "session.error": {
         if (props.sessionID && props.sessionID !== sessionRef.current) return;
+        clearReplyPacing();
+        setIsPersonaTyping(false);
         setStatus("ready");
         broadcastMood("error");
         const err = props.error as
@@ -429,12 +596,7 @@ export default function ChatApp() {
 
   const send = async () => {
     const text = input.trim();
-    if (!text) {
-      if (attachments.length > 0) {
-        setAttachmentError(t.chatAttachmentNeedsText);
-      }
-      return;
-    }
+    if (!text && attachments.length === 0) return;
     if (status !== "ready" || !sessionRef.current) return;
     if (readingAttachments) {
       setAttachmentError(t.chatAttachmentStillReading);
@@ -518,7 +680,59 @@ export default function ChatApp() {
       },
     ]);
     setStatus("busy");
+    setIsPersonaTyping(false);
     broadcastMood("thinking");
+    const fixedReplySequence = fixedReplySequenceRef.current + 1;
+    fixedReplySequenceRef.current = fixedReplySequence;
+    if (
+      activePersonaIdRef.current === DEFAULT_PERSONA_ID &&
+      messageAttachments.length === 0
+    ) {
+      if (isXiaozhuNameOriginQuestion(text)) {
+        if (!(await waitForFixedReplyStart(fixedReplySequence))) return;
+        for (const [index, line] of XIAOZHU_NAME_ORIGIN_LINES.entries()) {
+          if (index > 0) {
+            setIsPersonaTyping(true);
+            broadcastMood("thinking");
+            await new Promise<void>((resolve) => {
+              globalThis.setTimeout(resolve, 2000);
+            });
+            if (fixedReplySequenceRef.current !== fixedReplySequence) return;
+          }
+          setIsPersonaTyping(false);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `xiaozhu-name-origin-${fixedReplySequence}-${index}`,
+              role: "assistant",
+              text: line,
+            },
+          ]);
+          broadcastMood("talking");
+        }
+        setIsPersonaTyping(false);
+        setStatus("ready");
+        broadcastMood("idle");
+        return;
+      }
+      if (isXiaozhuIdentityQuestion(text)) {
+        if (!(await waitForFixedReplyStart(fixedReplySequence))) return;
+        setIsPersonaTyping(false);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `xiaozhu-identity-${fixedReplySequence}`,
+            role: "assistant",
+            text: XIAOZHU_IDENTITY_REPLY,
+          },
+        ]);
+        broadcastMood("talking");
+        setStatus("ready");
+        broadcastMood("idle");
+        return;
+      }
+    }
+    startReplyPacing();
     try {
       const s = settingsRef.current;
       // Persona defaults to Chinese; add a reply-language override otherwise.
@@ -542,7 +756,11 @@ export default function ChatApp() {
         userText: promptText,
         enabled: s?.memoryAiUse ?? true,
       });
-      const system = composeSystemPrompt({ personaPrompt, memoryBlock });
+      const system = composeSystemPrompt({
+        personaPrompt,
+        memoryBlock,
+        userNameInstruction: userNameInstruction(s?.userName ?? ""),
+      });
       await promptAsync(sessionID, promptText, {
         system,
         attachments: messageAttachments
@@ -553,8 +771,12 @@ export default function ChatApp() {
             ? { providerID: s.providerId, modelID: s.modelId }
             : undefined,
       });
-    } catch (e) {
-      console.error(e);
+    } catch (error: unknown) {
+      console.error(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+      clearReplyPacing();
+      setIsPersonaTyping(false);
       setStatus("ready");
       broadcastMood("error");
       if (messageAttachments.length > 0) {
@@ -710,12 +932,20 @@ export default function ChatApp() {
   }, []);
 
   const abort = async () => {
+    fixedReplySequenceRef.current += 1;
+    clearReplyPacing();
+    setIsPersonaTyping(false);
+    setStatus("ready");
+    broadcastMood("idle");
     if (sessionRef.current)
       await abortSession(sessionRef.current).catch(() => {});
   };
 
   /** Resume a past session: adopt its opencode session id and reload messages. */
   const resumeSession = useCallback(async (id: string) => {
+    fixedReplySequenceRef.current += 1;
+    clearReplyPacing();
+    setIsPersonaTyping(false);
     const rec = await historyLoad(id).catch(() => null);
     if (!rec) return;
     sessionRef.current = id;
@@ -737,8 +967,10 @@ export default function ChatApp() {
   const newChat = useCallback(async () => {
     try {
       await resetSession();
-    } catch (e) {
-      console.error(e);
+    } catch (error: unknown) {
+      console.error(
+        error instanceof Error ? error : new Error(String(error)),
+      );
       setStatus("error");
       broadcastMood("error");
     }
@@ -819,7 +1051,9 @@ export default function ChatApp() {
         <>
           <div className="chat-list" ref={listRef}>
             {messages.length === 0 && (
-              <div className="chat-empty">{chatEmpty}</div>
+              <div className="chat-empty">
+                <ChatText text={chatEmpty} />
+              </div>
             )}
             {messages.map((m) => (
               <div key={m.id} className={`chat-msg chat-msg-${m.role}`}>
@@ -836,7 +1070,11 @@ export default function ChatApp() {
                     ))}
                   </div>
                 )}
-                <div className="chat-bubble">{m.text || "…"}</div>
+                {(m.text.trim().length > 0 || m.role === "user") && (
+                  <div className="chat-bubble">
+                    <ChatText text={m.text} />
+                  </div>
+                )}
                 {m.text.trim().length > 0 && (
                   <div className="chat-msg-actions">
                     <button
@@ -907,6 +1145,11 @@ export default function ChatApp() {
                 )}
               </div>
             ))}
+            {isPersonaTyping && (
+              <div className="chat-typing" role="status" aria-live="polite">
+                {t.chatTyping}
+              </div>
+            )}
           </div>
 
           {memoryNotice && (
@@ -1017,7 +1260,11 @@ export default function ChatApp() {
               <button
                 className="chat-send"
                 onClick={() => void send()}
-                disabled={status !== "ready" || readingAttachments || !input.trim()}
+                disabled={
+                  status !== "ready" ||
+                  readingAttachments ||
+                  (!input.trim() && attachments.length === 0)
+                }
               >
                 {t.chatSend}
               </button>

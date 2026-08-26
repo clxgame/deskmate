@@ -52,7 +52,15 @@ const SECRET_MARKERS: &[&str] = &[
 ];
 
 /// High-entropy credential shapes that carry no keyword at all.
-const SECRET_PREFIXES: &[&str] = &["sk-", "ghp_", "gho_", "github_pat_", "xoxb-", "xoxp-", "AKIA"];
+const SECRET_PREFIXES: &[&str] = &[
+    "sk-",
+    "ghp_",
+    "gho_",
+    "github_pat_",
+    "xoxb-",
+    "xoxp-",
+    "AKIA",
+];
 
 /// Categories that may be stored only after an explicit confirmation.
 const SENSITIVE_MARKERS: &[&str] = &[
@@ -133,7 +141,10 @@ pub fn classify(content: &str) -> Sensitivity {
     {
         return Sensitivity::Secret;
     }
-    if SENSITIVE_MARKERS.iter().any(|marker| lower.contains(marker)) {
+    if SENSITIVE_MARKERS
+        .iter()
+        .any(|marker| lower.contains(marker))
+    {
         return Sensitivity::Sensitive;
     }
     Sensitivity::Normal
@@ -345,7 +356,12 @@ mod tests {
 
     #[test]
     fn classifies_ordinary_preferences_as_normal() {
-        let cases = ["不喜欢甜食", "叫我小林", "每天七点起床", "prefers dark mode"];
+        let cases = [
+            "不喜欢甜食",
+            "叫我小林",
+            "每天七点起床",
+            "prefers dark mode",
+        ];
         for case in cases {
             assert_eq!(classify(case), Sensitivity::Normal, "not normal: {case}");
         }

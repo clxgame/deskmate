@@ -67,8 +67,12 @@ pub fn context_for_turn<C: Clock>(
     let anchors = [MemoryType::Identity, MemoryType::Boundary];
     // Over-fetch a little so the character budget has candidates to choose from
     // after the cheap rows are taken.
-    let mut selected =
-        repository.retrieve(persona_id, &keywords, &anchors, (MAX_INJECTED_MEMORIES * 3) as i64)?;
+    let mut selected = repository.retrieve(
+        persona_id,
+        &keywords,
+        &anchors,
+        (MAX_INJECTED_MEMORIES * 3) as i64,
+    )?;
 
     // Anchors first, then importance, then recency; ids break remaining ties so
     // the same input always produces the same prompt.

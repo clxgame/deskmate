@@ -125,27 +125,46 @@ export interface ProviderModel {
   modelName: string;
 }
 
+export function modelsMatchVerification(
+  models: ProviderModel[],
+  _count: number | null,
+): boolean {
+  return models.some((model) => model.providerId === "yume");
+}
+
 export async function listModels(): Promise<ProviderModel[]> {
   const base = await invoke<string>("sidecar_base_url");
-  const res = await fetch(`${base}/config/providers`);
-  if (!res.ok) throw new Error(`providers -> ${res.status}`);
-  const data = (await res.json()) as {
-    providers: {
-      id: string;
-      name: string;
-      models: Record<string, { id?: string; name?: string }>;
-    }[];
-  };
-  const out: ProviderModel[] = [];
-  for (const p of data.providers) {
-    for (const [id, m] of Object.entries(p.models)) {
-      out.push({
-        providerId: p.id,
-        providerName: p.name,
-        modelId: id,
-        modelName: m.name ?? id,
-      });
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      const res = await fetch(`${base}/config/providers`);
+      if (!res.ok) throw new Error(`providers -> ${res.status}`);
+      const data = (await res.json()) as {
+        providers?: {
+          id: string;
+          name: string;
+          models?: Record<string, { id?: string; name?: string }>;
+        }[];
+      };
+      const out: ProviderModel[] = [];
+      for (const p of data.providers ?? []) {
+        for (const [id, m] of Object.entries(p.models ?? {})) {
+          out.push({
+            providerId: p.id,
+            providerName: p.name,
+            modelId: id,
+            modelName: m.name ?? id,
+          });
+        }
+      }
+      return out;
+    } catch (error) {
+      lastError =
+        error instanceof Error ? error : new Error(String(error));
+      if (attempt < 19) {
+        await new Promise((resolve) => window.setTimeout(resolve, 250));
+      }
     }
   }
-  return out;
+  throw lastError ?? new Error("providers unavailable");
 }

@@ -9,6 +9,7 @@ use std::sync::{
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
+use sha2::{Digest, Sha256};
 use tauri::{Emitter, Manager, RunEvent, State};
 
 mod ai_usage;
@@ -24,6 +25,8 @@ mod window_layout;
 use ai_usage::fetch_ai_usage;
 use history::HistoryState;
 use settings::{get_settings, set_settings, verify_api_key, SettingsState};
+
+const RESOURCE_ERROR_EVENT: &str = "deskmate://resource-error";
 
 /// Sidecar state: the spawned `opencode serve` process and its base URL.
 struct Sidecar {
@@ -248,12 +251,18 @@ pub(crate) fn hide_chat_impl(app: &tauri::AppHandle) -> Result<(), String> {
 mod tests {
     use super::{
         configure_sidecar_command, migrate_legacy_xiaozhu_intro, overwrite_builtin_xiaozhu_persona,
-        should_follow_chat_on_window_event, should_hide_chat, should_restore_settings_focus,
+        overwrite_yume_opencode_tool, resource_error_event, should_follow_chat_on_window_event,
+        should_hide_chat, should_restore_settings_focus, RESOURCE_ERROR_EVENT,
     };
+    use crate::settings::{self, ApiModel, ModelCatalog};
     use std::ffi::OsStr;
     use std::path::Path;
     use std::process::Command;
     use tauri::{PhysicalPosition, WindowEvent};
+
+    fn valid_yume_opencode_tool_source() -> &'static str {
+        include_str!("../resources/opencode-tools/ccswitch_prepare_opencode_provider.ts")
+    }
 
     #[test]
     fn stale_shown_state_does_not_hide_an_already_hidden_chat_window() {
@@ -345,6 +354,110 @@ mod tests {
             std::fs::read_to_string(&runtime_persona).expect("read synchronized persona"),
             "new built-in persona"
         );
+        std::fs::remove_dir_all(root).expect("remove test directory");
+    }
+
+    #[test]
+    fn refreshes_only_the_yume_owned_opencode_tool_when_runtime_copy_is_stale() {
+        let root =
+            std::env::temp_dir().join(format!("yume-opencode-tool-sync-{}", uuid::Uuid::new_v4()));
+        let shipped_tools = root.join("shipped-opencode-tools");
+        let data_dir = root.join("data");
+        let shipped_tool = shipped_tools.join("ccswitch_prepare_opencode_provider.ts");
+        let runtime_tools = data_dir.join("workspace").join(".opencode").join("tools");
+        let runtime_tool = runtime_tools.join("ccswitch_prepare_opencode_provider.ts");
+        let sentinel = runtime_tools.join("keep-me.ts");
+
+        std::fs::create_dir_all(&shipped_tools).expect("create shipped tools directory");
+        std::fs::create_dir_all(&runtime_tools).expect("create runtime tools directory");
+        std::fs::write(&shipped_tool, valid_yume_opencode_tool_source())
+            .expect("write shipped tool");
+        std::fs::write(&runtime_tool, "stale yume tool").expect("write stale runtime tool");
+        std::fs::write(&sentinel, "sentinel").expect("write unrelated runtime tool");
+
+        overwrite_yume_opencode_tool(&shipped_tools, &data_dir)
+            .expect("refresh YUME-owned OpenCode tool");
+
+        assert_eq!(
+            std::fs::read_to_string(&runtime_tool).expect("read refreshed runtime tool"),
+            valid_yume_opencode_tool_source()
+        );
+        assert_eq!(
+            std::fs::read_to_string(&sentinel).expect("read unrelated runtime tool"),
+            "sentinel"
+        );
+        std::fs::remove_dir_all(root).expect("remove test directory");
+    }
+
+    #[test]
+    fn corrupt_yume_owned_opencode_tool_resource_fails_closed_with_default_deny_permissions() {
+        let root = std::env::temp_dir().join(format!(
+            "yume-opencode-tool-corrupt-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let shipped_tools = root.join("shipped-opencode-tools");
+        let data_dir = root.join("data");
+        let shipped_tool = shipped_tools.join("ccswitch_prepare_opencode_provider.ts");
+        std::fs::create_dir_all(&shipped_tools).expect("create shipped tools directory");
+        let corrupt_source = valid_yume_opencode_tool_source()
+            .replace("secureEntryRequired", "secureEntryStillRequired");
+        std::fs::write(&shipped_tool, corrupt_source).expect("write corrupt shipped tool");
+
+        let error = overwrite_yume_opencode_tool(&shipped_tools, &data_dir)
+            .expect_err("corrupt shipped tool must fail resource synchronization");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        let (event, payload) = resource_error_event("无法刷新内置 OpenCode 工具: bad".into());
+        assert_eq!(event, RESOURCE_ERROR_EVENT);
+        assert_eq!(payload, "无法刷新内置 OpenCode 工具: bad");
+
+        let catalog = ModelCatalog {
+            base_url: "https://models.example.test".into(),
+            models: vec![ApiModel {
+                id: "model-a".into(),
+                name: "Model A".into(),
+            }],
+        };
+        let (config, _) = settings::build_sidecar_environment(&catalog, "test-api-key")
+            .expect("sidecar config should still be produced after resource sync failure");
+        let config: serde_json::Value =
+            serde_json::from_str(&config).expect("sidecar config should be JSON");
+        let permission = config
+            .get("permission")
+            .expect("config should include permissions");
+        assert_eq!(permission.get("*"), Some(&serde_json::json!("deny")));
+        assert_eq!(
+            permission.get("ccswitch_prepare_opencode_provider"),
+            Some(&serde_json::json!("allow"))
+        );
+        assert_eq!(permission.get("bash"), Some(&serde_json::json!("deny")));
+        assert_eq!(permission.get("edit"), Some(&serde_json::json!("deny")));
+        assert_eq!(permission.get("write"), Some(&serde_json::json!("deny")));
+        assert_eq!(permission.get("patch"), Some(&serde_json::json!("deny")));
+        assert_eq!(
+            permission.get("external_directory"),
+            Some(&serde_json::json!("deny"))
+        );
+        assert_eq!(permission.get("task"), Some(&serde_json::json!("deny")));
+        std::fs::remove_dir_all(root).expect("remove test directory");
+    }
+
+    #[test]
+    fn missing_yume_owned_opencode_tool_resource_is_an_error() {
+        let root = std::env::temp_dir().join(format!(
+            "yume-opencode-tool-missing-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let shipped_tools = root.join("shipped-opencode-tools");
+        let data_dir = root.join("data");
+        std::fs::create_dir_all(&shipped_tools).expect("create empty shipped tools directory");
+
+        let error = overwrite_yume_opencode_tool(&shipped_tools, &data_dir)
+            .expect_err("missing shipped tool must fail resource synchronization");
+
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+        let (event, payload) = resource_error_event("找不到内置 OpenCode 工具资源".into());
+        assert_eq!(event, RESOURCE_ERROR_EVENT);
+        assert_eq!(payload, "找不到内置 OpenCode 工具资源");
         std::fs::remove_dir_all(root).expect("remove test directory");
     }
 }
@@ -729,6 +842,16 @@ fn sync_ship_resources(app: &tauri::AppHandle, data_dir: &Path) -> Result<(), St
         }
     }
 
+    let shipped_opencode_tools = [
+        res_dir.join("resources").join("opencode-tools"),
+        res_dir.join("opencode-tools"),
+    ]
+    .into_iter()
+    .find(|path| path.is_dir())
+    .ok_or_else(|| "找不到内置 OpenCode 工具资源".to_string())?;
+    overwrite_yume_opencode_tool(&shipped_opencode_tools, data_dir)
+        .map_err(|error| format!("无法刷新内置 OpenCode 工具: {error}"))?;
+
     Ok(())
 }
 
@@ -740,6 +863,69 @@ fn overwrite_builtin_xiaozhu_persona(
     let target_dir = data_dir.join("personas").join("xiaozhu");
     std::fs::create_dir_all(&target_dir)?;
     std::fs::copy(source, target_dir.join("persona.md"))?;
+    Ok(())
+}
+
+fn overwrite_yume_opencode_tool(shipped_tools_dir: &Path, data_dir: &Path) -> std::io::Result<()> {
+    const TOOL_FILE: &str = "ccswitch_prepare_opencode_provider.ts";
+
+    let source = std::fs::read_to_string(shipped_tools_dir.join(TOOL_FILE))?;
+    validate_yume_opencode_tool_source(&source)?;
+    let target_dir = data_dir.join("workspace").join(".opencode").join("tools");
+    std::fs::create_dir_all(&target_dir)?;
+    std::fs::write(target_dir.join(TOOL_FILE), source)?;
+    Ok(())
+}
+
+fn validate_yume_opencode_tool_source(source: &str) -> std::io::Result<()> {
+    const EXPECTED_SHA256: &str =
+        "bc44f41a1995a0f12a1912bc0913397da72eb0a6ed2b3f8a1899d0e83bfa0f87";
+    const REQUIRED_MARKERS: &[&str] = &[
+        "export default",
+        "args: draftArgs",
+        "async execute(args: DraftArgs): Promise<string>",
+        "yume.ccswitch.opencode_provider_draft",
+        "buildProviderDraft",
+        "safeTextOrUndefined",
+        "secureEntryRequired",
+    ];
+    const FORBIDDEN_MARKERS: &[&str] = &[
+        "from \"zod\"",
+        "@opencode-ai/plugin",
+        concat!("api", "Key:"),
+        concat!("api", "_key:"),
+        concat!("sec", "ret:"),
+        concat!("tok", "en:"),
+        concat!("cre", "dential:"),
+        concat!("pass", "word:"),
+    ];
+
+    if !REQUIRED_MARKERS
+        .iter()
+        .all(|marker| source.contains(marker))
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "YUME OpenCode tool resource failed integrity validation",
+        ));
+    }
+    if FORBIDDEN_MARKERS
+        .iter()
+        .any(|marker| source.contains(marker))
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "YUME OpenCode tool resource contains a forbidden credential marker",
+        ));
+    }
+    let normalized_source = source.replace("\r\n", "\n");
+    let hash = Sha256::digest(normalized_source.as_bytes());
+    if format!("{hash:x}") != EXPECTED_SHA256 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "YUME OpenCode tool resource hash mismatch",
+        ));
+    }
     Ok(())
 }
 
@@ -783,6 +969,10 @@ fn configure_sidecar_command(cmd: &mut Command, port: u16, workspace: &Path) {
         .current_dir(workspace);
 }
 
+fn resource_error_event(reason: String) -> (&'static str, String) {
+    (RESOURCE_ERROR_EVENT, reason)
+}
+
 fn spawn_sidecar(app: &tauri::AppHandle, port: u16) -> std::io::Result<Child> {
     let data_dir = app.path().app_data_dir().expect("app data dir unavailable");
     std::fs::create_dir_all(&data_dir)?;
@@ -790,7 +980,8 @@ fn spawn_sidecar(app: &tauri::AppHandle, port: u16) -> std::io::Result<Child> {
     // otherwise shows up as an unexplained empty persona list. Report it.
     if let Err(reason) = sync_ship_resources(app, &data_dir) {
         eprintln!("ship resource sync failed: {reason}");
-        let _ = app.emit("deskmate://resource-error", &reason);
+        let (event, payload) = resource_error_event(reason);
+        let _ = app.emit(event, &payload);
     }
 
     // Sessions live in a dedicated workspace dir under app data.

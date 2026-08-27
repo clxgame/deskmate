@@ -147,6 +147,15 @@ pub struct SettingsState(pub Mutex<Settings>);
 
 const MODEL_CATALOG_FILE: &str = "model-catalog.json";
 const YUME_PROVIDER_ID: &str = "yume";
+const CCSWITCH_PREPARE_OPENCODE_PROVIDER_TOOL: &str = "ccswitch_prepare_opencode_provider";
+const DENIED_OPENCODE_PERMISSIONS: &[&str] = &[
+    "bash",
+    "edit",
+    "write",
+    "patch",
+    "external_directory",
+    "task",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -399,7 +408,10 @@ pub(crate) fn sidecar_environment(app: &tauri::AppHandle) -> Option<(String, Str
     build_sidecar_environment(&catalog, &api_key)
 }
 
-fn build_sidecar_environment(catalog: &ModelCatalog, api_key: &str) -> Option<(String, String)> {
+pub(crate) fn build_sidecar_environment(
+    catalog: &ModelCatalog,
+    api_key: &str,
+) -> Option<(String, String)> {
     if api_key.trim().is_empty() || catalog.models.is_empty() {
         return None;
     }
@@ -409,8 +421,18 @@ fn build_sidecar_environment(catalog: &ModelCatalog, api_key: &str) -> Option<(S
         .iter()
         .map(|model| (model.id.clone(), serde_json::json!({ "name": model.name })))
         .collect::<serde_json::Map<String, serde_json::Value>>();
+    let mut permission = serde_json::Map::new();
+    permission.insert("*".to_string(), serde_json::json!("deny"));
+    permission.insert(
+        CCSWITCH_PREPARE_OPENCODE_PROVIDER_TOOL.to_string(),
+        serde_json::json!("allow"),
+    );
+    for permission_id in DENIED_OPENCODE_PERMISSIONS {
+        permission.insert((*permission_id).to_string(), serde_json::json!("deny"));
+    }
     let config = serde_json::json!({
         "$schema": "https://opencode.ai/config.json",
+        "permission": permission,
         "provider": {
             YUME_PROVIDER_ID: {
                 "npm": "@ai-sdk/openai-compatible",
@@ -706,6 +728,41 @@ mod tests {
         );
         assert_eq!(auth["yume"]["type"], "api");
         assert_eq!(auth["yume"]["key"], "secret-key");
+    }
+
+    #[test]
+    fn generated_sidecar_environment_denies_generic_opencode_tools() {
+        let catalog = ModelCatalog {
+            base_url: "https://models.example.test".into(),
+            models: vec![ApiModel {
+                id: "model-a".into(),
+                name: "Model A".into(),
+            }],
+        };
+
+        let (config, _) =
+            build_sidecar_environment(&catalog, "secret-key").expect("configured provider");
+        let config = serde_json::from_str::<serde_json::Value>(&config).expect("valid config");
+        let permission = config["permission"].as_object().expect("permission map");
+
+        assert_eq!(permission["*"], "deny");
+        assert_eq!(permission["ccswitch_prepare_opencode_provider"], "allow");
+        for denied in [
+            "bash",
+            "edit",
+            "write",
+            "patch",
+            "external_directory",
+            "task",
+        ] {
+            assert_eq!(permission[denied], "deny");
+        }
+        let allowed = permission
+            .iter()
+            .filter(|(_, value)| **value == "allow")
+            .map(|(tool, _)| tool.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(allowed, vec!["ccswitch_prepare_opencode_provider"]);
     }
 
     #[test]

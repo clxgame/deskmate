@@ -216,20 +216,28 @@ impl CcSwitchSetupState {
         request: TicketConsumeRequest,
         now: MillisSinceEpoch,
     ) -> Result<PreparedHandoff, CcSwitchContractError> {
-        let endpoint = normalize_endpoint(&request.endpoint)?;
         let mut tickets = self
             .tickets
             .lock()
             .map_err(|_| CcSwitchContractError::TicketMissing)?;
         let ticket = tickets
-            .get(&request.ticket_id)
-            .ok_or(CcSwitchContractError::TicketMissing)?;
-        ticket.ensure_fresh(now)?;
-        ticket.ensure_matches(&request.provider_name, &endpoint, &request)?;
-        let ticket = tickets
             .remove(&request.ticket_id)
             .ok_or(CcSwitchContractError::TicketMissing)?;
+        if ticket.is_expired(now) {
+            return Err(CcSwitchContractError::TicketExpired);
+        }
+        let endpoint = normalize_endpoint(&request.endpoint)?;
+        ticket.ensure_matches(&request.provider_name, &endpoint, &request)?;
         Ok(PreparedHandoff { ticket })
+    }
+
+    pub fn cancel_ticket(&self, ticket_id: &str) -> Result<(), CcSwitchContractError> {
+        let ticket_id = normalize_bounded(ticket_id, 128, CcSwitchContractError::TicketMissing)?;
+        self.tickets
+            .lock()
+            .map_err(|_| CcSwitchContractError::TicketMissing)?
+            .remove(&ticket_id);
+        Ok(())
     }
 }
 
@@ -257,11 +265,8 @@ impl StoredTicket {
         }
     }
 
-    fn ensure_fresh(&self, now: MillisSinceEpoch) -> Result<(), CcSwitchContractError> {
-        if now >= self.expires_at {
-            return Err(CcSwitchContractError::TicketExpired);
-        }
-        Ok(())
+    fn is_expired(&self, now: MillisSinceEpoch) -> bool {
+        now >= self.expires_at
     }
 
     fn ensure_matches(
@@ -478,34 +483,85 @@ mod tests {
     }
 
     #[test]
-    fn fails_closed_for_expired_wrong_model_and_stale_tickets() {
+    fn destroys_expired_wrong_model_and_stale_tickets() {
         let state = CcSwitchSetupState::default();
-        let result = stage(&state, "sk-secret");
-        let base = |model: &str, hash: &str| TicketConsumeRequest {
+        let cases = [
+            (
+                "model-b",
+                "hash-before",
+                MillisSinceEpoch(2_000),
+                CcSwitchContractError::InvalidModel,
+            ),
+            (
+                "model-a",
+                "hash-after",
+                MillisSinceEpoch(2_000),
+                CcSwitchContractError::TicketStale,
+            ),
+            (
+                "model-a",
+                "hash-before",
+                MillisSinceEpoch(601_000),
+                CcSwitchContractError::TicketExpired,
+            ),
+        ];
+
+        for (model, hash, now, expected) in cases {
+            let result = stage(&state, "sk-secret");
+            let request = TicketConsumeRequest {
+                ticket_id: result.receipt.ticket_id.clone(),
+                provider_name: "Test Provider".into(),
+                endpoint: "https://api.example.test".into(),
+                selected_model: model.into(),
+                pre_import_hash: hash.into(),
+            };
+            assert_eq!(state.consume_ticket(request, now).err(), Some(expected));
+
+            let replay = TicketConsumeRequest {
+                ticket_id: result.receipt.ticket_id,
+                provider_name: "Test Provider".into(),
+                endpoint: "https://api.example.test".into(),
+                selected_model: "model-a".into(),
+                pre_import_hash: "hash-before".into(),
+            };
+            assert_eq!(
+                state.consume_ticket(replay, MillisSinceEpoch(2_000)).err(),
+                Some(CcSwitchContractError::TicketMissing)
+            );
+        }
+    }
+
+    #[test]
+    fn removes_expired_ticket_before_returning_expired_error() {
+        let state = CcSwitchSetupState::default();
+        let result = stage(&state, "sk-expiring-secret");
+        let request = TicketConsumeRequest {
             ticket_id: result.receipt.ticket_id.clone(),
             provider_name: "Test Provider".into(),
             endpoint: "https://api.example.test".into(),
-            selected_model: model.into(),
-            pre_import_hash: hash.into(),
+            selected_model: "model-a".into(),
+            pre_import_hash: "hash-before".into(),
         };
 
         assert_eq!(
             state
-                .consume_ticket(base("model-b", "hash-before"), MillisSinceEpoch(2_000))
-                .err(),
-            Some(CcSwitchContractError::InvalidModel)
-        );
-        assert_eq!(
-            state
-                .consume_ticket(base("model-a", "hash-after"), MillisSinceEpoch(2_000))
-                .err(),
-            Some(CcSwitchContractError::TicketStale)
-        );
-        assert_eq!(
-            state
-                .consume_ticket(base("model-a", "hash-before"), MillisSinceEpoch(601_000))
+                .consume_ticket(request, MillisSinceEpoch(601_000))
                 .err(),
             Some(CcSwitchContractError::TicketExpired)
+        );
+
+        let replay = TicketConsumeRequest {
+            ticket_id: result.receipt.ticket_id,
+            provider_name: "Test Provider".into(),
+            endpoint: "https://api.example.test".into(),
+            selected_model: "model-a".into(),
+            pre_import_hash: "hash-before".into(),
+        };
+        assert_eq!(
+            state
+                .consume_ticket(replay, MillisSinceEpoch(602_000))
+                .err(),
+            Some(CcSwitchContractError::TicketMissing)
         );
     }
 

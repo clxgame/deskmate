@@ -218,6 +218,11 @@ fn hide_chat(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn show_chat_window(app: tauri::AppHandle) -> Result<(), String> {
+    show_chat(&app)
+}
+
+#[tauri::command]
 fn preview_pet_scale(app: tauri::AppHandle, scale: f64) {
     if let Some(pet) = app.get_webview_window("pet") {
         settings::apply_pet_scale(&pet, scale);
@@ -989,6 +994,7 @@ pub fn run() {
             convert_ncm,
             toggle_chat,
             hide_chat,
+            show_chat_window,
             preview_pet_scale,
             get_settings,
             set_settings,

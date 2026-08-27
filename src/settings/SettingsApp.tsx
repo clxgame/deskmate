@@ -6,6 +6,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   getAppVersion,
   getSettings,
@@ -19,10 +20,15 @@ import {
   type ProviderModel,
   type Settings,
 } from "../lib/settings";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { dict, verifyError, LANGS, type Dict } from "../lib/i18n";
 import { UpdateFooter } from "./UpdateFooter";
 import { AiUsage } from "./AiUsage";
+import {
+  CcSwitchStatus,
+  normalizeCcSwitchCapabilityStatus,
+  type CcSwitchCapabilityStatus,
+} from "./CcSwitchStatus";
 import { MemoryTab } from "./MemoryTab";
 import { PersonaPacks } from "./PersonaPacks";
 import type { InstalledPack } from "../lib/packs";
@@ -86,6 +92,7 @@ function themeLabel(t: Dict, id: ThemeId): string {
 }
 
 const SAVE_DELAY_MS = 400;
+const CC_SWITCH_SETUP_REQUEST_EVENT = "deskmate://ccswitch-setup-request";
 
 // allow: SIZE_OK — this existing module is the settings composition root; extracting tabs is outside the UI-only patch.
 export default function SettingsApp() {
@@ -382,10 +389,50 @@ function AiTab({ settings, patch, t }: TabProps) {
   const [models, setModels] = useState<ProviderModel[]>([]);
   const [failed, setFailed] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  const [ccSwitchStatus, setCcSwitchStatus] =
+    useState<CcSwitchCapabilityStatus>({ kind: "checking" });
   const [verifyResult, setVerifyResult] = useState<{
     ok: boolean;
     message: string;
   } | null>(null);
+  const ccSwitchRequest = useRef(0);
+
+  const refreshCcSwitchStatus = useCallback(async () => {
+    const requestId = ccSwitchRequest.current + 1;
+    ccSwitchRequest.current = requestId;
+    setCcSwitchStatus({ kind: "checking" });
+    try {
+      const status = await invoke<unknown>(
+        "ccswitch_capability_status",
+      );
+      if (ccSwitchRequest.current === requestId) {
+        setCcSwitchStatus(normalizeCcSwitchCapabilityStatus(status));
+      }
+    } catch {
+      if (ccSwitchRequest.current === requestId) {
+        setCcSwitchStatus({ kind: "unavailable", reason: "missing-handler" });
+      }
+    }
+  }, []);
+
+  const openCcSwitchSetup = useCallback(() => {
+    void (async () => {
+      try {
+        await invoke<void>("show_chat_window");
+      } catch (error) {
+        console.error(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
+      try {
+        await emit(CC_SWITCH_SETUP_REQUEST_EVENT, { source: "settings" });
+      } catch (error) {
+        console.error(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
+    })();
+  }, []);
 
   const refreshModels = useCallback(async () => {
     try {
@@ -419,6 +466,13 @@ function AiTab({ settings, patch, t }: TabProps) {
       closed = true;
     };
   }, [refreshModels]);
+
+  useEffect(() => {
+    void refreshCcSwitchStatus();
+    return () => {
+      ccSwitchRequest.current += 1;
+    };
+  }, [refreshCcSwitchStatus]);
 
   const verify = async () => {
     setVerifying(true);
@@ -539,6 +593,12 @@ function AiTab({ settings, patch, t }: TabProps) {
         />
       </Row>
       <p className="set-note set-note-warn">{t.yoloWarn}</p>
+      <CcSwitchStatus
+        status={ccSwitchStatus}
+        t={t}
+        onOpenSetup={openCcSwitchSetup}
+        onRefresh={refreshCcSwitchStatus}
+      />
       <AiUsage baseUrl={settings.baseUrl} apiKey={settings.apiKey} t={t} />
     </>
   );

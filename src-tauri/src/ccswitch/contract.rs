@@ -285,7 +285,11 @@ impl CcSwitchSetupState {
             MAX_MODEL_ID_LEN,
             CcSwitchContractError::InvalidModel,
         )?;
-        if !selection.models.iter().any(|model| model.id == selected_model) {
+        if !selection
+            .models
+            .iter()
+            .any(|model| model.id == selected_model)
+        {
             return Err(CcSwitchContractError::InvalidModel);
         }
         let pre_import_hash = normalize_bounded(
@@ -534,10 +538,7 @@ mod tests {
         }]
     }
 
-    fn stage_selection(
-        state: &CcSwitchSetupState,
-        canary: &str,
-    ) -> ProviderSelectionResult {
+    fn stage_selection(state: &CcSwitchSetupState, canary: &str) -> ProviderSelectionResult {
         let provider = CcSwitchSetupState::validate_provider_input(valid_input(canary))
             .expect("valid provider input");
         state
@@ -591,15 +592,12 @@ mod tests {
         let state = CcSwitchSetupState::default();
         let mut input = valid_input("sk-loopback");
         input.endpoint = "http://127.0.0.1:47892/v1-compatible/".into();
-        let provider = CcSwitchSetupState::validate_provider_input(input)
-            .expect("loopback input is valid");
+        let provider =
+            CcSwitchSetupState::validate_provider_input(input).expect("loopback input is valid");
         let result = state
             .stage_validated_provider(provider, models(), MillisSinceEpoch(1_000))
             .expect("loopback http is allowed");
-        assert_eq!(
-            result.endpoint,
-            "http://127.0.0.1:47892/v1-compatible"
-        );
+        assert_eq!(result.endpoint, "http://127.0.0.1:47892/v1-compatible");
 
         for endpoint in [
             "ftp://api.example.test",
@@ -763,6 +761,56 @@ mod tests {
                 .consume_ticket(replay, MillisSinceEpoch(602_000))
                 .err(),
             Some(CcSwitchContractError::TicketMissing)
+        );
+    }
+
+    #[test]
+    fn selections_expire_consume_once_and_cancel_without_creating_tickets() {
+        let state = CcSwitchSetupState::default();
+        let expired = stage_selection(&state, "selection-expiry-secret");
+        assert_eq!(
+            state
+                .select_model(
+                    ProviderSelectionInput {
+                        selection_id: expired.selection_id.clone(),
+                        selected_model: "model-a".into(),
+                    },
+                    "hash-before",
+                    MillisSinceEpoch(301_000),
+                )
+                .err(),
+            Some(CcSwitchContractError::SelectionExpired)
+        );
+        assert_eq!(
+            state
+                .select_model(
+                    ProviderSelectionInput {
+                        selection_id: expired.selection_id,
+                        selected_model: "model-a".into(),
+                    },
+                    "hash-before",
+                    MillisSinceEpoch(2_000),
+                )
+                .err(),
+            Some(CcSwitchContractError::SelectionMissing)
+        );
+
+        let cancelled = stage_selection(&state, "selection-cancel-secret");
+        state
+            .cancel_setup(&cancelled.selection_id)
+            .expect("selection cancellation succeeds");
+        assert_eq!(
+            state
+                .select_model(
+                    ProviderSelectionInput {
+                        selection_id: cancelled.selection_id,
+                        selected_model: "model-a".into(),
+                    },
+                    "hash-before",
+                    MillisSinceEpoch(2_000),
+                )
+                .err(),
+            Some(CcSwitchContractError::SelectionMissing)
         );
     }
 

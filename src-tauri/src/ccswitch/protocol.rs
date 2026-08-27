@@ -154,7 +154,11 @@ pub fn complete_ccswitch_recovery(
     app: tauri::AppHandle,
     completion: CcSwitchRecoveryCompletionRequest,
 ) -> Result<RecoveryRetention, CcSwitchCommandError> {
-    complete_recovery_at_locations(recovery_locations(&app)?, SystemRecoveryKeyStore, completion)
+    complete_recovery_at_locations(
+        recovery_locations(&app)?,
+        SystemRecoveryKeyStore,
+        completion,
+    )
 }
 
 #[tauri::command]
@@ -389,10 +393,13 @@ fn recovery_locations(app: &tauri::AppHandle) -> Result<RecoveryLocations, CcSwi
         code: "ccswitch_recovery_path_rejected",
         message: "Unable to resolve the OpenCode home directory safely.",
     })?;
-    let app_data = app.path().app_data_dir().map_err(|_| CcSwitchCommandError {
-        code: "ccswitch_recovery_path_rejected",
-        message: "Unable to resolve the YUME recovery directory safely.",
-    })?;
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| CcSwitchCommandError {
+            code: "ccswitch_recovery_path_rejected",
+            message: "Unable to resolve the YUME recovery directory safely.",
+        })?;
     Ok(RecoveryLocations::new(home, app_data))
 }
 
@@ -488,8 +495,11 @@ mod recovery_bridge_tests {
                 br#"{"provider":{"old":{"options":{"baseURL":"https://old.example.test"}}}}"#,
             )
             .expect("write config");
-            fs::write(home.join(".local/share/opencode/auth.json"), br#"{"old":true}"#)
-                .expect("write auth");
+            fs::write(
+                home.join(".local/share/opencode/auth.json"),
+                br#"{"old":true}"#,
+            )
+            .expect("write auth");
             Self {
                 root,
                 home,
@@ -540,8 +550,11 @@ mod recovery_bridge_tests {
         let tree = TestTree::new();
         let keys = FakeKeyStore::default();
         let canary = format!("bridge-secret-{}", uuid::Uuid::new_v4());
-        fs::write(tree.home.join(".config/opencode/opencode.json"), canary.as_bytes())
-            .expect("write canary config");
+        fs::write(
+            tree.home.join(".config/opencode/opencode.json"),
+            canary.as_bytes(),
+        )
+        .expect("write canary config");
 
         let handle = create_recovery_snapshot_at_locations(tree.locations(), keys)
             .expect("snapshot is created");
@@ -644,7 +657,9 @@ mod recovery_bridge_tests {
             let mut request = [0_u8; 2_048];
             let _ = stream.read(&mut request).expect("read validation request");
             stream
-                .write_all(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .write_all(
+                    b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
                 .expect("write unauthorized response");
         });
         let canary = format!("rejected-secret-{}", uuid::Uuid::new_v4());

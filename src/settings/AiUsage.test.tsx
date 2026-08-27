@@ -45,7 +45,7 @@ describe("AI usage", () => {
       />,
     );
 
-    expect(await screen.findByRole("heading", { name: "ai-usage" })).toBeDefined();
+    expect(await screen.findByRole("heading", { name: "AI 用量" })).toBeDefined();
     expect(await screen.findByText("¥2726 / ¥3000")).toBeDefined();
     expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("91");
     expect(screen.getByText("6 天后重置")).toBeDefined();
@@ -64,6 +64,34 @@ describe("AI usage", () => {
 
     expect(await screen.findByText("填写 API Key 后即可查看用量")).toBeDefined();
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  test("explains a usage-permission rejection in the active language", async () => {
+    invoke.mockImplementation(() => Promise.reject("Error: status:401"));
+    render(
+      <AiUsage
+        baseUrl="https://ai-gateway.kurogames.com"
+        apiKey="gateway-key"
+        t={dict("en-US")}
+      />,
+    );
+
+    expect(
+      await screen.findByText("This API key cannot access usage details"),
+    ).toBeDefined();
+  });
+
+  test("localizes the ai-usage title", async () => {
+    invoke.mockImplementation(() => Promise.reject(new Error("status:401")));
+    render(
+      <AiUsage
+        baseUrl="https://ai-gateway.kurogames.com"
+        apiKey="gateway-key"
+        t={dict("ko-KR")}
+      />,
+    );
+
+    expect(await screen.findByRole("heading", { name: "AI 사용량" })).toBeDefined();
   });
 
   test("reloads the summary from its refresh action", async () => {

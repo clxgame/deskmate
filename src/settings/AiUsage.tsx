@@ -9,6 +9,7 @@ const CNY_UNIT_DIVISOR = 10000;
 type AiUsageView =
   | { readonly kind: "loading" }
   | { readonly kind: "missing-key" }
+  | { readonly kind: "unauthorized" }
   | { readonly kind: "unavailable" }
   | { readonly kind: "ready"; readonly usage: AiUsageData };
 
@@ -39,8 +40,18 @@ export function AiUsage({ baseUrl, apiKey, t }: AiUsageProps) {
       try {
         const usage = await getAiUsage(baseUrl, key);
         if (active) setView({ kind: "ready", usage });
-      } catch {
-        if (active) setView({ kind: "unavailable" });
+      } catch (error) {
+        const message = (error instanceof Error ? error.message : String(error)).replace(
+          /^Error:?\s*/i,
+          "",
+        );
+        const isUnauthorized =
+          message === "unauthorized" ||
+          message === "status:401" ||
+          message === "status:403";
+        if (active) {
+          setView({ kind: isUnauthorized ? "unauthorized" : "unavailable" });
+        }
       }
     };
 
@@ -57,7 +68,7 @@ export function AiUsage({ baseUrl, apiKey, t }: AiUsageProps) {
     <section className="set-ai-usage" aria-labelledby="ai-usage-title">
       <div className="set-ai-usage-head">
         <h3 id="ai-usage-title" className="set-section-head">
-          ai-usage
+          {t.aiUsageTitle}
         </h3>
         <button
           className="set-ai-usage-refresh"
@@ -77,6 +88,8 @@ export function AiUsage({ baseUrl, apiKey, t }: AiUsageProps) {
             ? t.aiUsageLoading
             : view.kind === "missing-key"
               ? t.aiUsageMissingKey
+              : view.kind === "unauthorized"
+                ? t.aiUsageUnauthorized
               : t.aiUsageUnavailable}
         </p>
       )}

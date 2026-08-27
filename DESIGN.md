@@ -18,7 +18,7 @@ YUME is a quiet floating companion: compact, lightly playful, and calm enough to
 | Text dim / disabled | `--text-dim`, `--text-disabled` | Theme-specific readable secondary steps | Secondary and disabled copy |
 | Accent | `--accent` | `#819ff7` | Filled controls, toggles, and slider thumbs |
 | Accent ink | `--accent-ink` | `#c4d3ff` | Accent text, icons, and focus borders on normal surfaces |
-| Text on accent | `--text-on-accent` | `#17203b` | Text on filled accents; dark in the three light themes |
+| Text on accent / danger | `--text-on-accent`, `--text-on-danger` | Theme-specific | Text on filled accent and destructive controls; selected separately for each palette |
 | Accent soft / hover | `--accent-soft`, `--accent-hover` | Theme-specific tonal steps | Selected surfaces and filled-control hover |
 | Media overlay text | `--text-on-media`, `--shadow-pack-title`, `--shadow-pack-count` | Light text with a high-contrast shadow, no label backing | Persona thumbnail title and count, independent of page theme |
 | Focus | `--focus-ring` | Theme-specific translucent ring | Keyboard focus around every interactive control |
@@ -37,7 +37,7 @@ Theme variants keep the same semantic roles and only swap their palette:
 
 Rules: filled interactive accents use `--accent`, while accent copy, icons, and normal-surface focus use `--accent-ink`; never use one for both roles by default. `--text-on-accent` is selected per palette instead of assuming white. Every theme preserves readable contrast for normal, secondary, disabled, hover, active, selected, focus, menu, and tooltip states. Persona-thumbnail labels use `--text-on-media` on their dedicated dark overlay, never ordinary page text. The settings document and root are transparent outside `--r-window` and clip their contents to the rounded window; native window shadows are disabled so no square corner artifact remains. The 3D model uses the glb-viewer toon shader's authored light ramp rather than UI colors.
 
-Theme scope: `.set-root`, `.chat-root`, and `.pet-root` carry the same `data-theme` value so a selected palette applies to settings, conversation/history surfaces, and the desktop pet shell together.
+Theme scope: `.set-root` and `.chat-root` receive the same palette from `src/theme.css` through their shared `data-theme` value. Settings-only tokens extend that palette locally; conversation/history surfaces therefore use the exact same semantic surface, text, accent, border, focus, disabled, and destructive colors as the settings window.
 
 ## 3. Typography
 
@@ -74,7 +74,7 @@ All spacing uses a 4px base: `--s-0-5` 2px, `--s-1` 4px, `--s-2` 8px, `--s-3` 12
 - Pack tiles prioritize the supplied transparent thumbnail, pack name, status, and one numeric character count. Loaded thumbnails render at normal brightness; not-installed thumbnails are dimmed. Descriptions and import-format guidance are not persistent copy; they appear in a delayed tooltip on hover or focus.
 
 ### Persona pack card
-- Structure: a 60px square tile with a full-bleed transparent PNG thumbnail, pack name, semantic status badge, one numeric character count, and one contextual action layered inside the tile. Name and count use `--text-on-media` plus their dedicated text shadows with no border, padding, or background. Labels remain available through each button's accessible name and title.
+- Structure: a 60px square tile with a full-bleed transparent PNG thumbnail, pack name, semantic status badge, one numeric character count, and one contextual action layered inside the tile. Name and count use `--text-on-media` plus their dedicated text shadows with no border, padding, or background; import/remove icons are likewise unbacked so the thumbnail stays visually clear. Labels remain available through each button's accessible name and title.
 - Variants: `builtin`, `installed`, and `available`; only installed removable packs expose the destructive action.
 - Counts for installed packs use the backend's actual `personaIds`, never the static manifest total. Each tile shows only the total character count; detailed descriptions and import guidance remain available through the delayed tooltip.
 - States: default, import busy, uninstall busy, keyboard focus, delayed hover tooltip, success, and error. Motion is limited to action affordances, status changes, and the tooltip reveal.
@@ -86,7 +86,7 @@ All spacing uses a 4px base: `--s-0-5` 2px, `--s-1` 4px, `--s-2` 8px, `--s-3` 12
 
 ### AI usage card
 - Structure: a compact `ai-usage` section immediately below the YOLO warning in the AI tab. It contains a title with a refresh action, weekly remaining versus total, a semantic progress meter, reset timing, today's consumption, and up to three most expensive models.
-- States: loading, missing API key, unavailable, ready, refresh in progress, and keyboard focus. It uses existing raised, sunken, line, text, success, warning, danger, and focus tokens; only the 6px meter-height token is introduced.
+- States: loading, missing API key, usage-permission unavailable, unavailable, ready, refresh in progress, and keyboard focus. The permission state clearly distinguishes a valid model key that the usage service does not authorize, without exposing the key or server detail. It uses existing raised, sunken, line, text, success, warning, danger, and focus tokens; only the 6px meter-height token is introduced.
 - Accessibility: the meter exposes `role="progressbar"` with the numeric percentage, refresh is a native labelled button, and the status is a polite live region. No API key or server error detail is rendered in the UI.
 
 ### Mouse-follow interaction

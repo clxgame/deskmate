@@ -1,4 +1,5 @@
 import "../devtools";
+import "../theme.css";
 import { createRoot } from "react-dom/client";
 import SettingsApp from "./SettingsApp";
 

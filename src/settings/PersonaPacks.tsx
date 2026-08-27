@@ -54,6 +54,9 @@ export function PersonaPacks({
   activePersonaId,
 }: PersonaPacksProps) {
   const [activity, setActivity] = useState<PackActivity>("idle");
+  const [pendingUninstall, setPendingUninstall] = useState<PackManifest | null>(
+    null,
+  );
   const [notice, setNotice] = useState<Notice | null>(null);
 
   const refresh = useCallback(async () => {
@@ -95,8 +98,17 @@ export function PersonaPacks({
     }
   };
 
-  const onUninstall = async (pack: PackManifest) => {
-    if (!window.confirm(t.packUninstallConfirm)) return;
+  const requestUninstall = (pack: PackManifest) => {
+    if (activity !== "idle") return;
+    setNotice(null);
+    setPendingUninstall(pack);
+  };
+
+  const onUninstall = async () => {
+    const pack = pendingUninstall;
+    if (pack === null || activity !== "idle") return;
+
+    setPendingUninstall(null);
     const ownsActive = personaById(activePersonaId).packId === pack.packId;
 
     setActivity("uninstall");
@@ -164,11 +176,41 @@ export function PersonaPacks({
               language={language}
               t={t}
               onImport={() => void onImport()}
-              onUninstall={(target) => void onUninstall(target)}
+              onUninstall={() => requestUninstall(pack)}
             />
           </li>
         ))}
       </ul>
+
+      {pendingUninstall !== null && (
+        <>
+          <div
+            className="set-confirm-backdrop"
+            onClick={() => setPendingUninstall(null)}
+          />
+          <div className="set-confirm" role="alertdialog" aria-modal="true">
+            <p className="set-confirm-body">{t.packUninstallConfirm}</p>
+            <div className="set-confirm-actions set-memory-actions">
+              <button
+                type="button"
+                className="set-btn set-btn-danger"
+                onClick={() => void onUninstall()}
+                disabled={activity !== "idle"}
+              >
+                {t.memoryConfirmDelete}
+              </button>
+              <button
+                type="button"
+                className="set-btn"
+                onClick={() => setPendingUninstall(null)}
+                disabled={activity !== "idle"}
+              >
+                {t.memoryCancelEdit}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="set-pack-active-persona">
         <div className="set-pack-active-persona-field">

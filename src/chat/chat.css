@@ -4,21 +4,6 @@
 }
 
 .chat-root {
-  color-scheme: dark;
-  --surface: #1c1c26;
-  --surface-raised: #252531;
-  --surface-sunken: #12121a;
-  --surface-hover: rgba(255, 255, 255, 0.07);
-  --line: rgba(255, 255, 255, 0.08);
-  --line-strong: rgba(255, 255, 255, 0.12);
-  --text: #eee;
-  --text-dim: #aaa;
-  --accent: #4a7dff;
-  --accent-soft: rgba(74, 125, 255, 0.16);
-  --accent-hover: #6b93ff;
-  --danger: #ff8080;
-  --warn: #ffb066;
-  --text-on-accent: #fff;
   --t-small: 11px;
   display: flex;
   flex-direction: column;
@@ -46,64 +31,10 @@
   border: 1px dashed var(--accent);
   border-radius: 12px;
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
   font-size: 13px;
   font-weight: 600;
   pointer-events: none;
-}
-
-.chat-root[data-theme="mint"] {
-  color-scheme: light;
-  --surface: #f6fcf9;
-  --surface-raised: #ffffff;
-  --surface-sunken: #e4f5ee;
-  --surface-hover: rgba(87, 184, 154, 0.14);
-  --line: rgba(68, 123, 98, 0.15);
-  --line-strong: rgba(68, 123, 98, 0.24);
-  --text: #244338;
-  --text-dim: #6b8d7e;
-  --accent: #57b89a;
-  --accent-soft: rgba(87, 184, 154, 0.18);
-  --accent-hover: #3e9c7b;
-  --danger: #c96a76;
-  --warn: #b77a32;
-  --text-on-accent: #fff;
-}
-
-.chat-root[data-theme="peach"] {
-  color-scheme: light;
-  --surface: #fff8f5;
-  --surface-raised: #ffffff;
-  --surface-sunken: #fbe8df;
-  --surface-hover: rgba(232, 154, 125, 0.14);
-  --line: rgba(166, 102, 84, 0.15);
-  --line-strong: rgba(166, 102, 84, 0.24);
-  --text: #4e2f2b;
-  --text-dim: #956d66;
-  --accent: #e89a7d;
-  --accent-soft: rgba(232, 154, 125, 0.18);
-  --accent-hover: #d98062;
-  --danger: #c96a76;
-  --warn: #b77a32;
-  --text-on-accent: #fff;
-}
-
-.chat-root[data-theme="lavender"] {
-  color-scheme: light;
-  --surface: #faf8ff;
-  --surface-raised: #ffffff;
-  --surface-sunken: #efeafb;
-  --surface-hover: rgba(165, 139, 224, 0.14);
-  --line: rgba(113, 94, 161, 0.16);
-  --line-strong: rgba(113, 94, 161, 0.25);
-  --text: #352c4f;
-  --text-dim: #7c6f96;
-  --accent: #a58be0;
-  --accent-soft: rgba(165, 139, 224, 0.18);
-  --accent-hover: #8e72cf;
-  --danger: #c96a76;
-  --warn: #b77a32;
-  --text-on-accent: #fff;
 }
 
 .chat-header {
@@ -149,6 +80,7 @@
 }
 
 .chat-settings:hover {
+  background: var(--surface-hover);
   color: var(--text);
 }
 
@@ -163,6 +95,7 @@
 }
 
 .chat-close:hover {
+  background: var(--surface-hover);
   color: var(--text);
 }
 
@@ -296,8 +229,8 @@
 }
 
 .chat-memory-action:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  box-shadow: var(--shadow-focus);
+  outline: none;
   opacity: 1;
 }
 
@@ -326,7 +259,7 @@
 .chat-memory-undo {
   background: transparent;
   border: none;
-  color: var(--accent);
+  color: var(--accent-ink);
   cursor: pointer;
   flex-shrink: 0;
   font-size: 11px;
@@ -425,11 +358,11 @@
 }
 
 .chat-attach:hover {
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .chat-attach:disabled {
-  opacity: 0.45;
+  color: var(--text-disabled);
   cursor: default;
 }
 
@@ -464,7 +397,8 @@
 }
 
 .chat-input:focus {
-  border-color: var(--accent);
+  border-color: var(--accent-ink);
+  box-shadow: var(--shadow-focus);
 }
 
 .chat-send {
@@ -476,15 +410,35 @@
   padding: 9px 16px;
   font-size: 13px;
   cursor: pointer;
+  transition:
+    background 140ms ease,
+    color 140ms ease,
+    transform 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.chat-send:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.chat-send:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.chat-send:focus-visible {
+  box-shadow: var(--shadow-focus);
+  outline: none;
 }
 
 .chat-send:disabled {
-  opacity: 0.4;
+  background: var(--surface-disabled);
+  color: var(--text-disabled);
   cursor: default;
 }
 
 .chat-abort {
   background: var(--danger);
+  color: var(--text-on-danger);
 }
 
 .chat-attachment-tray {
@@ -523,7 +477,7 @@
 }
 
 .chat-attachment-kind {
-  color: var(--accent);
+  color: var(--accent-ink);
   font-weight: 700;
 }
 
@@ -545,7 +499,7 @@
 }
 
 .chat-attachment-status-pending {
-  color: var(--accent);
+  color: var(--accent-ink);
   font-weight: 600;
 }
 
@@ -579,7 +533,7 @@
 }
 
 .chat-attachment-remove:disabled {
-  opacity: 0.45;
+  color: var(--text-disabled);
   cursor: default;
 }
 
@@ -632,11 +586,12 @@
 }
 
 .chat-iconbtn:hover {
+  background: var(--surface-hover);
   color: var(--text);
 }
 
 .chat-iconbtn-active {
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 /* ---------- history panel ---------- */

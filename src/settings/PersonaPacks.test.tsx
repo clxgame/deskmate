@@ -53,16 +53,11 @@ function renderPacks(
   return { onInstalledChange, onActivePersonaRemoved, onActivePersonaChange };
 }
 
-const confirmSpy = mock((_message?: string) => true);
-
 beforeEach(() => {
   invoke.mockReset();
   invoke.mockImplementation(() => Promise.resolve([]));
   open.mockReset();
   open.mockImplementation(() => Promise.resolve(null));
-  confirmSpy.mockReset();
-  confirmSpy.mockImplementation(() => true);
-  globalThis.window.confirm = (message) => confirmSpy(message);
 });
 
 afterEach(() => {
@@ -199,6 +194,8 @@ describe("persona pack management", () => {
 
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "卸载" }));
+    expect(await screen.findByText(t.packUninstallConfirm)).toBeDefined();
+    await user.click(await screen.findByRole("button", { name: "确认删除" }));
 
     await waitFor(() => {
       const call = invoke.mock.calls.find(([command]) => command === "uninstall_pack");
@@ -210,13 +207,14 @@ describe("persona pack management", () => {
   });
 
   test("keeps the pack when the confirmation is declined", async () => {
-    confirmSpy.mockImplementation(() => false);
     renderPacks({
       installed: [{ packId: "aki", version: "1.0.0", personaIds: ["changli"] }],
     });
 
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "卸载" }));
+    expect(await screen.findByText(t.packUninstallConfirm)).toBeDefined();
+    await user.click(await screen.findByRole("button", { name: "取消" }));
 
     await waitFor(() => {
       expect(
@@ -238,6 +236,8 @@ describe("persona pack management", () => {
 
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "卸载" }));
+    expect(await screen.findByText(t.packUninstallConfirm)).toBeDefined();
+    await user.click(await screen.findByRole("button", { name: "确认删除" }));
 
     await waitFor(() => {
       expect(harness.onActivePersonaRemoved).toHaveBeenCalled();
@@ -257,6 +257,8 @@ describe("persona pack management", () => {
 
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "卸载" }));
+    expect(await screen.findByText(t.packUninstallConfirm)).toBeDefined();
+    await user.click(await screen.findByRole("button", { name: "确认删除" }));
 
     await waitFor(() => {
       expect(

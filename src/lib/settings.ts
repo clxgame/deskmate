@@ -75,6 +75,26 @@ export function verifyApiKey(
   return invoke<number | null>("verify_api_key", { baseUrl, apiKey });
 }
 
+export interface AiUsageModel {
+  readonly name: string;
+  readonly costCny: number;
+  readonly requests: number;
+}
+
+export interface AiUsage {
+  readonly remainingCny: number;
+  readonly limitCny: number;
+  readonly remainingPct: number;
+  readonly daysUntilReset: number;
+  readonly todayCostCny: number;
+  readonly todayRequests: number;
+  readonly topModels: readonly AiUsageModel[];
+}
+
+export function getAiUsage(baseUrl: string, apiKey: string): Promise<AiUsage> {
+  return invoke<AiUsage>("fetch_ai_usage", { baseUrl, apiKey });
+}
+
 /** Fires in every window whenever settings are saved. */
 export function onSettingsChanged(
   cb: (s: Settings) => void,

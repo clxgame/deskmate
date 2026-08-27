@@ -54,7 +54,7 @@ Primary font: `"Segoe UI", "Microsoft YaHei", system-ui, sans-serif`.
 
 ## 4. Spacing & Layout
 
-All spacing uses a 4px base: `--s-0-5` 2px, `--s-1` 4px, `--s-2` 8px, `--s-3` 12px, `--s-4` 16px, `--s-5` 20px, `--s-6` 24px, `--s-8` 32px, `--s-14` 56px. Persona pack tiles use the explicit `--pack-tile-size` metric at `60px`; the Desktop pet control group uses `--pet-slider-w` at `140px`, and the lower active-persona selector uses `--active-persona-control-w` at `180px` so labels remain readable in the compact settings panel. The settings sidebar is `160px`; controls are `240px`; the titlebar is `44px`.
+All spacing uses a 4px base: `--s-0-5` 2px, `--s-1` 4px, `--s-2` 8px, `--s-3` 12px, `--s-4` 16px, `--s-5` 20px, `--s-6` 24px, `--s-8` 32px, `--s-14` 56px. Persona pack tiles use the explicit `--pack-tile-size` metric at `60px`; the Desktop pet control group uses `--pet-slider-w` at `140px`, and the lower active-persona selector uses `--active-persona-control-w` at `180px` so labels remain readable in the compact settings panel. The AI usage meter uses `--ai-usage-progress-h` at `6px`. The settings sidebar is `160px`; controls are `240px`; the titlebar is `44px`.
 
 ## 5. Components
 
@@ -83,6 +83,11 @@ All spacing uses a 4px base: `--s-0-5` 2px, `--s-1` 4px, `--s-2` 8px, `--s-3` 12
 - The Desktop pet tab exposes native sliders for outline width (`0..0.03`, default `0.0008`), rim-light width (`0..1`, default `0.1`), rim-light intensity (`0..2`, default `0.3`), and toon specular (`0..2`, default `0.05`).
 - Values are persisted with the persona settings and pushed to the active glb-viewer toon shader immediately after a debounced save; switching personas reapplies the saved tuning.
 - Slider values show a compact numeric readout and retain keyboard/native range-input accessibility.
+
+### AI usage card
+- Structure: a compact `ai-usage` section immediately below the YOLO warning in the AI tab. It contains a title with a refresh action, weekly remaining versus total, a semantic progress meter, reset timing, today's consumption, and up to three most expensive models.
+- States: loading, missing API key, unavailable, ready, refresh in progress, and keyboard focus. It uses existing raised, sunken, line, text, success, warning, danger, and focus tokens; only the 6px meter-height token is introduced.
+- Accessibility: the meter exposes `role="progressbar"` with the numeric percentage, refresh is a native labelled button, and the status is a polite live region. No API key or server error detail is rendered in the UI.
 
 ### Mouse-follow interaction
 - The Desktop pet tab includes an independent `mouseFollow` switch. When enabled, the desktop pet turns toward the global cursor with a bounded yaw/pitch response; when disabled, it eases back to its authored forward pose.

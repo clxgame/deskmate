@@ -11,6 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use base64::Engine;
 use tauri::{Emitter, Manager, RunEvent, State};
 
+mod ai_usage;
 mod history;
 /// Local memory: storage, policy, retrieval, and the frontend command surface.
 mod memory;
@@ -19,6 +20,7 @@ mod packs;
 mod settings;
 mod updater;
 mod window_layout;
+use ai_usage::fetch_ai_usage;
 use history::HistoryState;
 use settings::{get_settings, set_settings, verify_api_key, SettingsState};
 
@@ -989,6 +991,7 @@ pub fn run() {
             get_settings,
             set_settings,
             verify_api_key,
+            fetch_ai_usage,
             open_settings,
             open_widget_settings,
             hide_settings,

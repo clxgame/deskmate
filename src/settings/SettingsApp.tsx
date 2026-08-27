@@ -22,6 +22,7 @@ import {
 import { listen } from "@tauri-apps/api/event";
 import { dict, verifyError, LANGS, type Dict } from "../lib/i18n";
 import { UpdateFooter } from "./UpdateFooter";
+import { AiUsage } from "./AiUsage";
 import { MemoryTab } from "./MemoryTab";
 import { PersonaPacks } from "./PersonaPacks";
 import type { InstalledPack } from "../lib/packs";
@@ -538,6 +539,7 @@ function AiTab({ settings, patch, t }: TabProps) {
         />
       </Row>
       <p className="set-note set-note-warn">{t.yoloWarn}</p>
+      <AiUsage baseUrl={settings.baseUrl} apiKey={settings.apiKey} t={t} />
     </>
   );
 }

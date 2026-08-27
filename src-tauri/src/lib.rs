@@ -12,6 +12,7 @@ use base64::Engine;
 use tauri::{Emitter, Manager, RunEvent, State};
 
 mod ai_usage;
+pub mod ccswitch;
 mod history;
 /// Local memory: storage, policy, retrieval, and the frontend command surface.
 mod memory;
@@ -979,6 +980,7 @@ pub fn run() {
             child: Mutex::new(None),
             port,
         })
+        .manage(ccswitch::contract::CcSwitchSetupState::default())
         .manage(ChatShown(Mutex::new(false)))
         .manage(Arc::new(ChatMotion::default()))
         .invoke_handler(tauri::generate_handler![

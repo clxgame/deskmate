@@ -68,6 +68,14 @@ import {
   type ChatAttachment,
 } from "./attachments";
 import { ChatText } from "./ChatText";
+import {
+  CCSWITCH_PREPARE_OPENCODE_PROVIDER_TOOL,
+  createCcSwitchToolResultTracker,
+  recoverCcSwitchToolResultsFromMessages,
+  toOpenCodeToolPart,
+  type CcSwitchProviderDraft,
+  type CcSwitchToolResult,
+} from "./ccSwitchSetup";
 import "./chat.css";
 
 interface ChatMessage {
@@ -165,6 +173,8 @@ export default function ChatApp() {
   const fixedReplySequenceRef = useRef(0);
   const replyPacingRef = useRef<ReplyPacing | null>(null);
   const replyPacingSequenceRef = useRef(0);
+  const ccSwitchDraftRef = useRef<CcSwitchProviderDraft | null>(null);
+  const ccSwitchToolTrackerRef = useRef(createCcSwitchToolResultTracker());
 
   const clearReplyPacing = () => {
     const pacing = replyPacingRef.current;
@@ -194,9 +204,12 @@ export default function ChatApp() {
     pacing.releaseTimer = null;
     const pendingUpdates = Array.from(pacing.pendingUpdates.values());
     pacing.pendingUpdates.clear();
-    if (pendingUpdates.length > 0) {
+    const visibleUpdates = pendingUpdates.filter(
+      (update) => update.hasText || update.activity !== undefined,
+    );
+    if (visibleUpdates.length > 0) {
       setMessages((prev) =>
-        pendingUpdates.reduce(
+        visibleUpdates.reduce(
           (next, update) =>
             upsertAssistant(next, update.messageID, (message) =>
               update.hasText
@@ -272,6 +285,29 @@ export default function ChatApp() {
     });
   };
 
+  const clearAssistantTool = (messageID: string) => {
+    const pacing = replyPacingRef.current;
+    if (!pacing || pacing.released) {
+      setMessages((prev) =>
+        prev.flatMap((message) => {
+          if (message.id !== messageID) return [message];
+          const next = { ...message, activity: undefined };
+          return next.role === "assistant" && !hasVisibleMessageContent(next)
+            ? []
+            : [next];
+        }),
+      );
+      return;
+    }
+    const current = pacing.pendingUpdates.get(messageID);
+    if (!current) return;
+    if (!current.hasText) {
+      pacing.pendingUpdates.delete(messageID);
+      return;
+    }
+    pacing.pendingUpdates.set(messageID, { ...current, activity: undefined });
+  };
+
   const completeReplyPacing = () => {
     const pacing = replyPacingRef.current;
     if (!pacing) {
@@ -317,6 +353,8 @@ export default function ChatApp() {
     const session = await createSession("YUME chat");
     sessionRef.current = session.id;
     rolesRef.current.clear();
+    ccSwitchDraftRef.current = null;
+    ccSwitchToolTrackerRef.current = createCcSwitchToolResultTracker();
     createdRef.current = Date.now();
     setMessages([]);
     setView("chat");
@@ -343,6 +381,66 @@ export default function ChatApp() {
     personaLoadRef.current = request;
     return request;
   }, []);
+
+  const noticeForCcSwitchResult = useCallback(
+    (result: CcSwitchToolResult): string | null => {
+      const dict = tRef.current;
+      switch (result.kind) {
+        case "draft":
+          return `${dict.ccSwitchStatusTitle}: ${dict.ccSwitchSetupOpen}`;
+        case "notice":
+          return result.reason === "secret_field"
+            ? dict.memorySecretRejected
+            : `${dict.chatErrorPrefix}: ${dict.ccSwitchStatusTitle}`;
+        case "ordinary_tool":
+        case "ignored":
+          return null;
+      }
+    },
+    [],
+  );
+
+  const applyCcSwitchToolResult = useCallback(
+    (messageID: string, result: CcSwitchToolResult) => {
+      switch (result.kind) {
+        case "draft":
+          ccSwitchDraftRef.current = result.draft;
+          clearAssistantTool(messageID);
+          setMemoryNotice(noticeForCcSwitchResult(result));
+          return;
+        case "notice":
+          clearAssistantTool(messageID);
+          setMemoryNotice(noticeForCcSwitchResult(result));
+          return;
+        case "ordinary_tool":
+          broadcastMood("working");
+          queueAssistantTool(messageID, result.label);
+          return;
+        case "ignored":
+          return;
+      }
+    },
+    [noticeForCcSwitchResult],
+  );
+
+  const recoverCcSwitchToolResultsOnIdle = useCallback(
+    async (sessionID: string) => {
+      try {
+        const opencode = await import("../lib/opencode");
+        if (typeof opencode.getSessionMessages !== "function") return;
+        const results = recoverCcSwitchToolResultsFromMessages(
+          await opencode.getSessionMessages(sessionID),
+          ccSwitchToolTrackerRef.current,
+        );
+        results.forEach((result, index) => {
+          applyCcSwitchToolResult(`ccswitch-recovery-${index}`, result);
+        });
+      } catch {
+        setMemoryNotice(`${tRef.current.chatErrorPrefix}: ${tRef.current.ccSwitchStatusTitle}`);
+      }
+    },
+    [applyCcSwitchToolResult],
+  );
 
   // Boot: wait for sidecar, load persona, create session, subscribe SSE.
   useEffect(() => {
@@ -438,9 +536,23 @@ export default function ChatApp() {
           broadcastMood("talking");
           queueAssistantText(part.messageID, part.text ?? "");
         } else if (part.type === "tool") {
-          broadcastMood("working");
-          const label = part.state?.title || part.tool || "tool";
-          queueAssistantTool(part.messageID, label);
+          const toolPart = toOpenCodeToolPart(part);
+          if (!toolPart) {
+            if (part.tool === CCSWITCH_PREPARE_OPENCODE_PROVIDER_TOOL) {
+              clearAssistantTool(part.messageID);
+              setMemoryNotice(`${tRef.current.chatErrorPrefix}: ${tRef.current.ccSwitchStatusTitle}`);
+              return;
+            }
+            broadcastMood("working");
+            queueAssistantTool(part.messageID, part.state?.title || part.tool || "tool");
+            return;
+          }
+          applyCcSwitchToolResult(
+            toolPart.messageID,
+            ccSwitchToolTrackerRef.current.acceptToolPart(toolPart, {
+              role: rolesRef.current.get(toolPart.messageID),
+            }),
+          );
         }
         break;
       }
@@ -455,6 +567,9 @@ export default function ChatApp() {
       }
       case "session.idle": {
         if (props.sessionID !== sessionRef.current) return;
+        if (typeof props.sessionID === "string") {
+          void recoverCcSwitchToolResultsOnIdle(props.sessionID);
+        }
         completeReplyPacing();
         break;
       }
@@ -1310,6 +1425,13 @@ function AttachmentPreview({
     );
   }
   return <div className="chat-attachment-document">文档 · {attachment.name}</div>;
+}
+
+function hasVisibleMessageContent(message: ChatMessage): boolean {
+  return (
+    message.text.trim().length > 0 ||
+    (message.attachments !== undefined && message.attachments.length > 0)
+  );
 }
 
 /** Update the assistant message with the given id, creating it if missing. */

@@ -83,7 +83,8 @@ pub enum RecoveryCompletion {
     ReadFailed(Option<ObservedFiles>),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum RecoveryRetention {
     Destroyed,
     Retained,

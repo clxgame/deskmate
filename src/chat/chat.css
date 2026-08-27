@@ -309,6 +309,140 @@
   padding: 6px 12px;
 }
 
+.ccswitch-card {
+  background: var(--surface-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  color: var(--text);
+  margin: 8px 12px;
+  padding: 12px;
+}
+
+.ccswitch-card-head,
+.ccswitch-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.ccswitch-card-title {
+  font-size: var(--t-head);
+  font-weight: 600;
+}
+
+.ccswitch-card-status,
+.ccswitch-state-panel,
+.ccswitch-form {
+  font-size: var(--t-small);
+}
+
+.ccswitch-card-status {
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.ccswitch-close,
+.ccswitch-secondary,
+.ccswitch-primary {
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  min-height: 28px;
+  padding: 4px 8px;
+}
+
+.ccswitch-close,
+.ccswitch-secondary {
+  background: var(--surface-sunken);
+  border: 1px solid var(--line-strong);
+  color: var(--text-dim);
+}
+
+.ccswitch-primary {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: var(--text-on-accent);
+}
+
+.ccswitch-close:hover,
+.ccswitch-secondary:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.ccswitch-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.ccswitch-close:focus-visible,
+.ccswitch-secondary:focus-visible,
+.ccswitch-primary:focus-visible,
+.ccswitch-form input:focus-visible,
+.ccswitch-state-panel select:focus-visible {
+  box-shadow: var(--shadow-focus);
+  outline: none;
+}
+
+.ccswitch-primary:disabled {
+  background: var(--surface-disabled);
+  border-color: var(--surface-disabled);
+  color: var(--text-disabled);
+  cursor: default;
+}
+
+.ccswitch-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.ccswitch-form label {
+  display: grid;
+  gap: 4px;
+}
+
+.ccswitch-form input,
+.ccswitch-state-panel select {
+  background: var(--surface-sunken);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  min-height: 28px;
+  padding: 4px 8px;
+}
+
+.ccswitch-state-panel select {
+  width: 100%;
+}
+
+.ccswitch-state-panel {
+  display: grid;
+  gap: 8px;
+  line-height: 1.5;
+  margin-top: 12px;
+}
+
+.ccswitch-state-panel p {
+  margin: 0;
+}
+
+.ccswitch-check {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.ccswitch-error {
+  color: var(--danger);
+  margin: 0;
+}
+
+.ccswitch-good {
+  color: var(--success);
+}
+
 
 .chat-input-row {
   display: flex;

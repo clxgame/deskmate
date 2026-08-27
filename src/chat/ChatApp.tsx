@@ -9,6 +9,7 @@ import {
   type DragEvent,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   abortSession,
   createSession,
@@ -68,6 +69,7 @@ import {
   type ChatAttachment,
 } from "./attachments";
 import { ChatText } from "./ChatText";
+import { CcSwitchSetupCard } from "./CcSwitchSetupCard";
 import {
   CCSWITCH_PREPARE_OPENCODE_PROVIDER_TOOL,
   createCcSwitchToolResultTracker,
@@ -85,6 +87,17 @@ interface ChatMessage {
   /** live tool activity line, e.g. "bash: npm test" */
   activity?: string;
   attachments?: ChatAttachment[];
+}
+
+export function containsCcSwitchApiKey(text: string): boolean {
+  if (!/(cc\s*switch|opencode)/iu.test(text)) return false;
+  return (
+    /\bsk-[a-z0-9_-]{8,}/iu.test(text) ||
+    /\bbearer\s+[a-z0-9._-]{8,}/iu.test(text) ||
+    /["']?(?:api[\s_-]?key|token|secret)["']?\s*[:=]\s*["']?[a-z0-9._-]{8,}/iu.test(
+      text,
+    )
+  );
 }
 
 /** A pending sensitive-storage confirmation, awaiting the user's decision. */
@@ -152,6 +165,10 @@ export default function ChatApp() {
   const [sensitivePrompt, setSensitivePrompt] = useState<SensitivePrompt | null>(
     null,
   );
+  const [ccSwitchDraft, setCcSwitchDraft] = useState<CcSwitchProviderDraft | null>(
+    null,
+  );
+  const [ccSwitchSetupOpen, setCcSwitchSetupOpen] = useState(false);
   const t = dict(lang);
   // Latest dict for use inside stable callbacks (SSE handler, task listener).
   const tRef = useRef(t);
@@ -341,6 +358,18 @@ export default function ChatApp() {
     };
   }, []);
 
+  useEffect(() => {
+    const subscription = listen("deskmate://ccswitch-setup-request", () => {
+      ccSwitchDraftRef.current = null;
+      setCcSwitchDraft(null);
+      setCcSwitchSetupOpen(true);
+      setView("chat");
+    });
+    return () => {
+      void subscription.then((unlisten) => unlisten()).catch(() => undefined);
+    };
+  }, []);
+
   const resetSession = useCallback(async (): Promise<void> => {
     fixedReplySequenceRef.current += 1;
     clearReplyPacing();
@@ -355,6 +384,8 @@ export default function ChatApp() {
     rolesRef.current.clear();
     ccSwitchDraftRef.current = null;
     ccSwitchToolTrackerRef.current = createCcSwitchToolResultTracker();
+    setCcSwitchDraft(null);
+    setCcSwitchSetupOpen(false);
     createdRef.current = Date.now();
     setMessages([]);
     setView("chat");
@@ -405,6 +436,8 @@ export default function ChatApp() {
       switch (result.kind) {
         case "draft":
           ccSwitchDraftRef.current = result.draft;
+          setCcSwitchDraft(result.draft);
+          setCcSwitchSetupOpen(true);
           clearAssistantTool(messageID);
           setMemoryNotice(noticeForCcSwitchResult(result));
           return;
@@ -713,6 +746,14 @@ export default function ChatApp() {
     const text = input.trim();
     if (!text && attachments.length === 0) return;
     if (status !== "ready" || !sessionRef.current) return;
+    if (containsCcSwitchApiKey(text)) {
+      setInput("");
+      setAttachmentError(null);
+      setCcSwitchDraft(null);
+      setCcSwitchSetupOpen(true);
+      setMemoryNotice(t.ccSwitchSecretRedirect);
+      return;
+    }
     if (readingAttachments) {
       setAttachmentError(t.chatAttachmentStillReading);
       return;
@@ -1165,6 +1206,17 @@ export default function ChatApp() {
       ) : (
         <>
           <div className="chat-list" ref={listRef}>
+            {ccSwitchSetupOpen && (
+              <CcSwitchSetupCard
+                t={t}
+                draft={ccSwitchDraft}
+                onClose={() => {
+                  ccSwitchDraftRef.current = null;
+                  setCcSwitchDraft(null);
+                  setCcSwitchSetupOpen(false);
+                }}
+              />
+            )}
             {messages.length === 0 && (
               <div className="chat-empty">
                 <ChatText text={chatEmpty} />

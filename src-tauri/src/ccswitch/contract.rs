@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 pub const CONTRACT_VERSION: u8 = 1;
 const TICKET_TTL_MS: u64 = 10 * 60 * 1_000;
+const SELECTION_TTL_MS: u64 = 5 * 60 * 1_000;
 const MAX_PROVIDER_NAME_LEN: usize = 80;
 const MAX_ENDPOINT_LEN: usize = 2_048;
 const MAX_MODEL_ID_LEN: usize = 256;
@@ -47,6 +48,13 @@ pub struct SecretFreeProviderDraft {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ProviderValidationInput {
+    pub provider_name: String,
+    pub endpoint: String,
+    pub api_key: String,
+}
+
+#[cfg(test)]
 pub struct ProviderSetupInput {
     pub provider_name: String,
     pub endpoint: String,
@@ -54,6 +62,13 @@ pub struct ProviderSetupInput {
     pub selected_model: String,
     pub models: Vec<ModelChoice>,
     pub pre_import_hash: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderSelectionInput {
+    pub selection_id: String,
+    pub selected_model: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,6 +84,17 @@ pub struct ProviderValidationResult {
     pub contract_version: u8,
     pub receipt: HandoffReceipt,
     pub models: Vec<ModelChoice>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderSelectionResult {
+    pub contract_version: u8,
+    pub selection_id: String,
+    pub provider_name: String,
+    pub endpoint: String,
+    pub models: Vec<ModelChoice>,
+    pub expires_at: MillisSinceEpoch,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -125,6 +151,8 @@ pub enum CcSwitchContractError {
     TicketMissing,
     TicketExpired,
     TicketStale,
+    SelectionMissing,
+    SelectionExpired,
 }
 
 #[derive(Deserialize)]
@@ -151,51 +179,129 @@ impl PreparedHandoff {
     }
 }
 
-#[derive(Default)]
 pub struct CcSwitchSetupState {
+    selections: Mutex<HashMap<String, StoredSelection>>,
     tickets: Mutex<HashMap<String, StoredTicket>>,
 }
 
+impl Default for CcSwitchSetupState {
+    fn default() -> Self {
+        Self {
+            selections: Mutex::new(HashMap::new()),
+            tickets: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
 impl CcSwitchSetupState {
+    #[cfg(test)]
     pub fn stage_provider(
         &self,
         input: ProviderSetupInput,
         now: MillisSinceEpoch,
     ) -> Result<ProviderValidationResult, CcSwitchContractError> {
-        let provider_name = normalize_bounded(
-            &input.provider_name,
-            MAX_PROVIDER_NAME_LEN,
-            CcSwitchContractError::InvalidProviderName,
-        )?;
-        let endpoint = normalize_endpoint(&input.endpoint)?;
-        let api_key = normalize_bounded(
-            &input.api_key,
-            MAX_API_KEY_LEN,
-            CcSwitchContractError::InvalidApiKey,
-        )?;
-        let pre_import_hash = normalize_bounded(
+        let provider = Self::validate_provider_input(ProviderValidationInput {
+            provider_name: input.provider_name,
+            endpoint: input.endpoint,
+            api_key: input.api_key,
+        })?;
+        let selection = self.stage_validated_provider(provider, input.models, now)?;
+        self.select_model(
+            ProviderSelectionInput {
+                selection_id: selection.selection_id,
+                selected_model: input.selected_model,
+            },
             &input.pre_import_hash,
-            MAX_HASH_LEN,
-            CcSwitchContractError::InvalidHash,
+            now,
+        )
+    }
+
+    pub fn validate_provider_input(
+        input: ProviderValidationInput,
+    ) -> Result<ValidatedProvider, CcSwitchContractError> {
+        Ok(ValidatedProvider {
+            provider_name: normalize_bounded(
+                &input.provider_name,
+                MAX_PROVIDER_NAME_LEN,
+                CcSwitchContractError::InvalidProviderName,
+            )?,
+            endpoint: normalize_endpoint(&input.endpoint)?,
+            api_key: normalize_bounded(
+                &input.api_key,
+                MAX_API_KEY_LEN,
+                CcSwitchContractError::InvalidApiKey,
+            )?,
+        })
+    }
+
+    pub fn stage_validated_provider(
+        &self,
+        provider: ValidatedProvider,
+        models: Vec<ModelChoice>,
+        now: MillisSinceEpoch,
+    ) -> Result<ProviderSelectionResult, CcSwitchContractError> {
+        let models = normalize_models(models)?;
+        let selection_id = Uuid::new_v4().to_string();
+        let selection = StoredSelection {
+            selection_id: selection_id.clone(),
+            provider_name: provider.provider_name,
+            endpoint: provider.endpoint,
+            api_key: provider.api_key,
+            models: models.clone(),
+            expires_at: MillisSinceEpoch(now.0.saturating_add(SELECTION_TTL_MS)),
+        };
+        let result = selection.result();
+        let mut selections = self
+            .selections
+            .lock()
+            .map_err(|_| CcSwitchContractError::SelectionMissing)?;
+        selections.retain(|_, stored| !stored.is_expired(now));
+        selections.insert(selection_id, selection);
+        Ok(result)
+    }
+
+    pub fn select_model(
+        &self,
+        input: ProviderSelectionInput,
+        pre_import_hash: &str,
+        now: MillisSinceEpoch,
+    ) -> Result<ProviderValidationResult, CcSwitchContractError> {
+        let selection_id = normalize_bounded(
+            &input.selection_id,
+            128,
+            CcSwitchContractError::SelectionMissing,
         )?;
-        let models = normalize_models(input.models)?;
+        let selection = self
+            .selections
+            .lock()
+            .map_err(|_| CcSwitchContractError::SelectionMissing)?
+            .remove(&selection_id)
+            .ok_or(CcSwitchContractError::SelectionMissing)?;
+        if selection.is_expired(now) {
+            return Err(CcSwitchContractError::SelectionExpired);
+        }
         let selected_model = normalize_bounded(
             &input.selected_model,
             MAX_MODEL_ID_LEN,
             CcSwitchContractError::InvalidModel,
         )?;
-        if !models.iter().any(|model| model.id == selected_model) {
+        if !selection.models.iter().any(|model| model.id == selected_model) {
             return Err(CcSwitchContractError::InvalidModel);
         }
+        let pre_import_hash = normalize_bounded(
+            pre_import_hash,
+            MAX_HASH_LEN,
+            CcSwitchContractError::InvalidHash,
+        )?;
 
         let ticket_id = Uuid::new_v4().to_string();
         let ticket = StoredTicket {
             ticket_id: ticket_id.clone(),
-            provider_name,
-            endpoint,
-            api_key,
+            provider_name: selection.provider_name,
+            endpoint: selection.endpoint,
+            api_key: selection.api_key,
             selected_model,
-            models: models.clone(),
+            models: selection.models.clone(),
             pre_import_hash,
             expires_at: MillisSinceEpoch(now.0.saturating_add(TICKET_TTL_MS)),
         };
@@ -207,7 +313,7 @@ impl CcSwitchSetupState {
         Ok(ProviderValidationResult {
             contract_version: CONTRACT_VERSION,
             receipt,
-            models,
+            models: selection.models,
         })
     }
 
@@ -231,13 +337,64 @@ impl CcSwitchSetupState {
         Ok(PreparedHandoff { ticket })
     }
 
-    pub fn cancel_ticket(&self, ticket_id: &str) -> Result<(), CcSwitchContractError> {
-        let ticket_id = normalize_bounded(ticket_id, 128, CcSwitchContractError::TicketMissing)?;
+    pub fn cancel_setup(&self, handle_id: &str) -> Result<(), CcSwitchContractError> {
+        let handle_id = normalize_bounded(handle_id, 128, CcSwitchContractError::TicketMissing)?;
+        self.selections
+            .lock()
+            .map_err(|_| CcSwitchContractError::SelectionMissing)?
+            .remove(&handle_id);
         self.tickets
             .lock()
             .map_err(|_| CcSwitchContractError::TicketMissing)?
-            .remove(&ticket_id);
+            .remove(&handle_id);
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub fn cancel_ticket(&self, ticket_id: &str) -> Result<(), CcSwitchContractError> {
+        self.cancel_setup(ticket_id)
+    }
+}
+
+pub struct ValidatedProvider {
+    provider_name: String,
+    endpoint: String,
+    api_key: String,
+}
+
+impl ValidatedProvider {
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
+    pub fn api_key(&self) -> &str {
+        &self.api_key
+    }
+}
+
+struct StoredSelection {
+    selection_id: String,
+    provider_name: String,
+    endpoint: String,
+    api_key: String,
+    models: Vec<ModelChoice>,
+    expires_at: MillisSinceEpoch,
+}
+
+impl StoredSelection {
+    fn result(&self) -> ProviderSelectionResult {
+        ProviderSelectionResult {
+            contract_version: CONTRACT_VERSION,
+            selection_id: self.selection_id.clone(),
+            provider_name: self.provider_name.clone(),
+            endpoint: self.endpoint.clone(),
+            models: self.models.clone(),
+            expires_at: self.expires_at,
+        }
+    }
+
+    fn is_expired(&self, now: MillisSinceEpoch) -> bool {
+        now >= self.expires_at
     }
 }
 
@@ -362,33 +519,67 @@ fn is_loopback(host: Option<Host<&str>>) -> bool {
 mod tests {
     use super::*;
 
-    fn valid_input(canary: &str) -> ProviderSetupInput {
-        ProviderSetupInput {
+    fn valid_input(canary: &str) -> ProviderValidationInput {
+        ProviderValidationInput {
             provider_name: " Test Provider ".into(),
             endpoint: "https://api.example.test/".into(),
             api_key: canary.into(),
-            selected_model: "model-a".into(),
-            models: vec![ModelChoice {
-                id: "model-a".into(),
-                name: "Model A".into(),
-            }],
-            pre_import_hash: "hash-before".into(),
         }
     }
 
-    fn stage(state: &CcSwitchSetupState, canary: &str) -> ProviderValidationResult {
+    fn models() -> Vec<ModelChoice> {
+        vec![ModelChoice {
+            id: "model-a".into(),
+            name: "Model A".into(),
+        }]
+    }
+
+    fn stage_selection(
+        state: &CcSwitchSetupState,
+        canary: &str,
+    ) -> ProviderSelectionResult {
+        let provider = CcSwitchSetupState::validate_provider_input(valid_input(canary))
+            .expect("valid provider input");
         state
-            .stage_provider(valid_input(canary), MillisSinceEpoch(1_000))
+            .stage_validated_provider(provider, models(), MillisSinceEpoch(1_000))
             .expect("valid provider stages")
     }
 
+    fn stage(state: &CcSwitchSetupState, canary: &str) -> ProviderValidationResult {
+        let selection = stage_selection(state, canary);
+        state
+            .select_model(
+                ProviderSelectionInput {
+                    selection_id: selection.selection_id,
+                    selected_model: "model-a".into(),
+                },
+                "hash-before",
+                MillisSinceEpoch(1_000),
+            )
+            .expect("valid model selection stages ticket")
+    }
+
     #[test]
-    fn creates_secret_free_ticket_for_valid_https_provider() {
+    fn creates_secret_free_selection_then_ticket_for_valid_https_provider() {
         let state = CcSwitchSetupState::default();
         let canary = format!("sk-canary-{}", uuid::Uuid::new_v4());
 
-        let result = stage(&state, &canary);
+        let selection = stage_selection(&state, &canary);
+        let serialized = serde_json::to_string(&selection).expect("selection serializes");
+        assert!(!serialized.contains(&canary));
+        assert_eq!(selection.endpoint, "https://api.example.test");
+        assert_eq!(selection.provider_name, "Test Provider");
 
+        let result = state
+            .select_model(
+                ProviderSelectionInput {
+                    selection_id: selection.selection_id,
+                    selected_model: "model-a".into(),
+                },
+                "hash-before",
+                MillisSinceEpoch(2_000),
+            )
+            .expect("selection creates ticket");
         let serialized = serde_json::to_string(&result).expect("validation result serializes");
         assert!(!serialized.contains(&canary));
         assert_eq!(result.receipt.endpoint, "https://api.example.test");
@@ -400,11 +591,13 @@ mod tests {
         let state = CcSwitchSetupState::default();
         let mut input = valid_input("sk-loopback");
         input.endpoint = "http://127.0.0.1:47892/v1-compatible/".into();
+        let provider = CcSwitchSetupState::validate_provider_input(input)
+            .expect("loopback input is valid");
         let result = state
-            .stage_provider(input, MillisSinceEpoch(1_000))
+            .stage_validated_provider(provider, models(), MillisSinceEpoch(1_000))
             .expect("loopback http is allowed");
         assert_eq!(
-            result.receipt.endpoint,
+            result.endpoint,
             "http://127.0.0.1:47892/v1-compatible"
         );
 
@@ -417,8 +610,8 @@ mod tests {
             let mut input = valid_input("sk-bad-endpoint");
             input.endpoint = endpoint.into();
             assert_eq!(
-                state.stage_provider(input, MillisSinceEpoch(1_000)),
-                Err(CcSwitchContractError::InvalidEndpoint),
+                CcSwitchSetupState::validate_provider_input(input).err(),
+                Some(CcSwitchContractError::InvalidEndpoint),
                 "{endpoint} must be rejected"
             );
         }
@@ -426,26 +619,34 @@ mod tests {
 
     #[test]
     fn rejects_blank_control_and_overlong_fields() {
-        let state = CcSwitchSetupState::default();
         let mut input = valid_input("sk-valid");
         input.provider_name = " ".into();
         assert_eq!(
-            state.stage_provider(input, MillisSinceEpoch(1_000)),
-            Err(CcSwitchContractError::InvalidProviderName)
+            CcSwitchSetupState::validate_provider_input(input).err(),
+            Some(CcSwitchContractError::InvalidProviderName)
         );
 
         let mut input = valid_input("sk-valid");
         input.api_key = "sk-\ninvalid".into();
         assert_eq!(
-            state.stage_provider(input, MillisSinceEpoch(1_000)),
-            Err(CcSwitchContractError::InvalidApiKey)
+            CcSwitchSetupState::validate_provider_input(input).err(),
+            Some(CcSwitchContractError::InvalidApiKey)
         );
 
-        let mut input = valid_input("sk-valid");
-        input.selected_model = "x".repeat(MAX_MODEL_ID_LEN + 1);
+        let state = CcSwitchSetupState::default();
+        let selection = stage_selection(&state, "sk-valid");
         assert_eq!(
-            state.stage_provider(input, MillisSinceEpoch(1_000)),
-            Err(CcSwitchContractError::InvalidModel)
+            state
+                .select_model(
+                    ProviderSelectionInput {
+                        selection_id: selection.selection_id,
+                        selected_model: "x".repeat(MAX_MODEL_ID_LEN + 1),
+                    },
+                    "hash-before",
+                    MillisSinceEpoch(2_000),
+                )
+                .err(),
+            Some(CcSwitchContractError::InvalidModel)
         );
     }
 

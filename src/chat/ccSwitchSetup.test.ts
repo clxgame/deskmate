@@ -1,14 +1,18 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import {
   assistantMessage,
   cleanupChatHarness,
   completedTool,
+  containsCcSwitchApiKey,
   invoke,
+  receiveAppEvent,
   receiveChatEvent,
   renderChat,
   resetChatHarness,
   setSnapshotMessages,
+  wasPromptSent,
   wasSessionMessageFetched,
 } from "./ccSwitchSetupChatHarness.test";
 
@@ -16,6 +20,55 @@ beforeEach(resetChatHarness);
 afterEach(cleanupChatHarness);
 
 describe("CC Switch setup tool handling in chat", () => {
+  test("blocks likely API keys before chat history or transport and opens the secure card", async () => {
+    await renderChat();
+    const user = userEvent.setup();
+    const canary = `sk-${crypto.randomUUID().replaceAll("-", "")}`;
+    const input = screen.getByPlaceholderText("输入消息,Enter 发送") as HTMLTextAreaElement;
+
+    await user.type(input, `Configure OpenCode with apiKey=${canary}`);
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(await screen.findByRole("region", { name: "安全配置 OpenCode" })).toBeDefined();
+    expect(input.value).toBe("");
+    expect(document.body.innerHTML).not.toContain(canary);
+    expect(wasPromptSent()).toBe(false);
+    expect(invoke.mock.calls.some(([command]) => command === "history_save")).toBe(false);
+  });
+
+  test("recognizes JSON assignments and bearer values only in setup context", () => {
+    expect(
+      containsCcSwitchApiKey('OpenCode config: {"apiKey":"secret-value-123"}'),
+    ).toBe(true);
+    expect(containsCcSwitchApiKey("CC Switch Authorization: Bearer token_value_123")).toBe(
+      true,
+    );
+    expect(containsCcSwitchApiKey("OpenCode has no credential here")).toBe(false);
+    expect(containsCcSwitchApiKey("unrelated sk-example_12345678")).toBe(false);
+  });
+
+  test("opens from the settings event and cancels the native handle on new-chat cleanup", async () => {
+    await renderChat();
+    receiveAppEvent("deskmate://ccswitch-setup-request", null);
+    const user = userEvent.setup();
+
+    expect(await screen.findByRole("region", { name: "安全配置 OpenCode" })).toBeDefined();
+    await user.type(screen.getByLabelText("Base URL"), "https://api.example.test/v1");
+    await user.type(screen.getByLabelText("API Key"), "temporary-test-key");
+    await user.click(screen.getByRole("button", { name: "验证并准备" }));
+    await screen.findByRole("combobox", { name: "模型" });
+
+    await user.click(screen.getByRole("button", { name: "历史" }));
+    await user.click(screen.getByRole("button", { name: /新会话/ }));
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("cancel_ccswitch_setup", {
+        handleId: "selection-chat-1",
+      });
+      expect(screen.queryByRole("region", { name: "安全配置 OpenCode" })).toBeNull();
+    });
+  });
+
   test("keeps ordinary tools as activity instead of treating them as setup drafts", async () => {
     await renderChat();
 

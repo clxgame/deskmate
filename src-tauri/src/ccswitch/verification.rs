@@ -4,7 +4,7 @@ mod poll;
 #[cfg(test)]
 mod tests;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::recovery::{
     read_observed_file, FileObservation, ObservedFiles, OpenCodeFile, OpenCodePaths,
@@ -13,7 +13,8 @@ use config::classify_changed_config;
 pub(crate) use poll::poll_with;
 pub use poll::{PollClock, PollPolicy, VerificationError};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct VerificationTarget {
     pub provider_name: String,
     pub endpoint: String,

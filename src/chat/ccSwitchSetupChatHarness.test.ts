@@ -12,17 +12,22 @@ export const invoke = mock<(command: string, args?: unknown) => Promise<unknown>
 const originalFetch = globalThis.fetch;
 const originalEventSource = globalThis.EventSource;
 let chatEventHandler: ((event: unknown) => void) | null = null;
+const appEventHandlers = new Map<string, (event: { payload: unknown }) => void>();
 let snapshotMessages: readonly OpenCodeMessage[] = [];
 let fetchLog: readonly string[] = [];
 
 mock.module("@tauri-apps/api/core", () => ({ ...tauriCore, invoke }));
 mock.module("@tauri-apps/api/event", () => ({
-  listen: () => Promise.resolve(() => {}),
+  listen: (event: string, callback: (payload: { payload: unknown }) => void) => {
+    appEventHandlers.set(event, callback);
+    return Promise.resolve(() => appEventHandlers.delete(event));
+  },
   emit: () => Promise.resolve(),
 }));
 
 const chatAppModule = await import("./ChatApp");
 const ChatApp = chatAppModule.default;
+export const containsCcSwitchApiKey = chatAppModule.containsCcSwitchApiKey;
 
 const SETTINGS = {
   autostart: false,
@@ -86,12 +91,22 @@ export function wasSessionMessageFetched(): boolean {
   );
 }
 
+export function wasPromptSent(): boolean {
+  return fetchLog.some((url) => url.includes("/prompt_async"));
+}
+
 export function receiveChatEvent(event: unknown): void {
   const handler = chatEventHandler;
   if (!handler) throw new Error("chat event handler was not registered");
   act(() => {
     handler(event);
   });
+}
+
+export function receiveAppEvent(event: string, payload: unknown): void {
+  const handler = appEventHandlers.get(event);
+  if (!handler) throw new Error(`app event handler was not registered: ${event}`);
+  act(() => handler({ payload }));
 }
 
 function installOpenCodeTransport(): void {
@@ -149,6 +164,19 @@ function mockChatInvoke(): void {
         });
       case "memory_context":
         return Promise.resolve({ memories: [], promptBlock: "" });
+      case "ccswitch_capability_status":
+        return Promise.resolve({ kind: "ready", version: "3.20.0" });
+      case "prepare_ccswitch_opencode_provider":
+        return Promise.resolve({
+          contractVersion: 1,
+          selectionId: "selection-chat-1",
+          providerName: "YUME OpenCode",
+          endpoint: "https://api.example.test/v1",
+          models: [{ id: "model-a", name: "Model A" }],
+          expiresAt: 123,
+        });
+      case "history_list":
+        return Promise.resolve([]);
       default:
         return Promise.resolve(undefined);
     }
@@ -164,6 +192,7 @@ export async function renderChat(): Promise<void> {
 
 export function resetChatHarness(): void {
   chatEventHandler = null;
+  appEventHandlers.clear();
   snapshotMessages = [];
   fetchLog = [];
   invoke.mockReset();

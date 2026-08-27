@@ -9,6 +9,43 @@ export const LANGS: { value: Lang; label: string }[] = [
   { value: "ko-KR", label: "한국어" },
 ];
 
+type CcSwitchErrorMessages = {
+  readonly apiKey: string;
+  readonly endpoint: string;
+  readonly model: string;
+  readonly expired: string;
+  readonly unavailable: string;
+  readonly recovery: string;
+  readonly generic: string;
+};
+
+function localizedCcSwitchError(code: string, messages: CcSwitchErrorMessages): string {
+  switch (code) {
+    case "ccswitch_invalid_api_key":
+      return messages.apiKey;
+    case "ccswitch_invalid_endpoint":
+      return messages.endpoint;
+    case "ccswitch_invalid_model":
+    case "ccswitch_invalid_model_catalog":
+      return messages.model;
+    case "ccswitch_selection_expired":
+    case "ccswitch_selection_missing":
+    case "ccswitch_ticket_expired":
+    case "ccswitch_ticket_missing":
+      return messages.expired;
+    case "ccswitch_incompatible_version":
+    case "ccswitch_missing_protocol":
+    case "ccswitch_model_validation_unavailable":
+    case "ccswitch_open_failed":
+    case "ccswitch_unsupported_platform":
+      return messages.unavailable;
+    case "ccswitch_recovery_stale_conflict":
+      return messages.recovery;
+    default:
+      return messages.generic;
+  }
+}
+
 const zh = {
   // settings window
   settingsTitle: "设置",
@@ -60,6 +97,62 @@ const zh = {
   ccSwitchStatusRecoverableError: "检查失败。可以重试",
   ccSwitchStatusRefresh: "重新检查",
   ccSwitchSetupOpen: "在聊天中配置",
+  ccSwitchSetupTitle: "安全配置 OpenCode",
+  ccSwitchSetupUnavailable: "未检测到可用的 CC Switch。请先安装或重新检查。",
+  ccSwitchSetupState: (state: string) => {
+    const states: Record<string, string> = {
+      draft: "填写配置",
+      unavailable: "不可用",
+      validating: "正在验证",
+      "model-selection": "选择模型",
+      "model-ready": "模型已确认",
+      confirming: "需要确认",
+      launching: "正在打开 CC Switch",
+      "waiting-external-confirmation": "等待 CC Switch 完成导入",
+      verified: "导入已确认",
+      invalid: "验证失败",
+      "user-cancelled": "已取消",
+      "external-timeout": "等待超时",
+      "changed-invalid": "外部配置变化异常",
+      "restore-confirmation": "确认恢复",
+      "discard-confirmation": "确认保留当前状态",
+      "stale-conflict": "恢复冲突",
+      failure: "配置失败",
+    };
+    return states[state] ?? "配置中";
+  },
+  ccSwitchSetupProviderName: "供应商名称",
+  ccSwitchSetupValidate: "验证并准备",
+  ccSwitchSetupValidating: "正在验证 API Key，并准备一次性导入票据…",
+  ccSwitchSetupModelReady: (count: number) => `验证成功，准备导入 ${count} 个模型。`,
+  ccSwitchSetupSwitchImmediately: "导入后立即切换到这个模型",
+  ccSwitchSetupContinue: "继续",
+  ccSwitchSetupDisclosure:
+    "下一步会打开 CC Switch。官方协议会把 API Key 临时放进 CC Switch 的进程参数里，CC Switch 仍会要求你二次确认。",
+  ccSwitchSetupRecoveryDisclosure: "YUME 已在导入前保存本地快照；失败或超时时可以恢复。",
+  ccSwitchSetupLaunch: "打开 CC Switch",
+  ccSwitchSetupLaunching: "正在唤起 CC Switch…",
+  ccSwitchSetupWaiting: "请在 CC Switch 里确认导入。YUME 会等待外部配置真正生效。",
+  ccSwitchSetupVerified: "配置已确认生效。现在可以用 OpenCode 了。",
+  ccSwitchSetupTimeout: "等待 CC Switch 确认超时。你可以恢复导入前的配置，或保留当前状态。",
+  ccSwitchSetupChangedInvalid: (reason: string) => `检测到外部配置变化，但目标模型未生效：${reason}`,
+  ccSwitchSetupGenericFailure: "配置没有完成。请恢复后重试。",
+  ccSwitchSetupRestore: "恢复导入前配置",
+  ccSwitchSetupDiscard: "保留当前状态",
+  ccSwitchSetupDiscardDisclosure: "保留当前状态会永久删除加密恢复快照。确认后将无法由 YUME 自动恢复。",
+  ccSwitchSetupRestoreDisclosure: "恢复会覆盖当前 OpenCode 配置文件。仅在你确认要回到导入前状态时继续。",
+  ccSwitchSetupStaleConflict: "恢复被阻止：当前文件已经被再次修改。请手动检查后再处理。",
+  ccSwitchSetupCancelled: "已取消本次安全配置。",
+  ccSwitchSetupError: (code: string) => localizedCcSwitchError(code, {
+    apiKey: "API Key 被拒绝。",
+    endpoint: "Base URL 无效或无法安全访问。",
+    model: "模型列表或所选模型无效。",
+    expired: "安全配置已过期，请重新验证。",
+    unavailable: "当前无法使用 CC Switch 或验证服务。",
+    recovery: "恢复被阻止，因为配置文件已再次更改。",
+    generic: "配置失败，请重试。",
+  }),
+  ccSwitchSecretRedirect: "检测到疑似 OpenCode/CC Switch API Key。为避免泄漏，已改用安全配置卡片。",
   aiUsageTitle: "AI 用量",
   aiUsageRefresh: "刷新",
   aiUsageLoading: "正在读取本周用量…",
@@ -276,6 +369,62 @@ const en: Dict = {
   ccSwitchStatusRecoverableError: "Check failed. You can retry",
   ccSwitchStatusRefresh: "Check again",
   ccSwitchSetupOpen: "Configure in chat",
+  ccSwitchSetupTitle: "Secure OpenCode setup",
+  ccSwitchSetupUnavailable: "No usable CC Switch was detected. Install it or check again first.",
+  ccSwitchSetupState: (state) => {
+    const states: Record<string, string> = {
+      draft: "Enter setup details",
+      unavailable: "Unavailable",
+      validating: "Validating",
+      "model-selection": "Choose a model",
+      "model-ready": "Model ready",
+      confirming: "Confirmation required",
+      launching: "Opening CC Switch",
+      "waiting-external-confirmation": "Waiting for CC Switch import",
+      verified: "Import verified",
+      invalid: "Validation failed",
+      "user-cancelled": "Cancelled",
+      "external-timeout": "Timed out",
+      "changed-invalid": "Unexpected external change",
+      "restore-confirmation": "Confirm restore",
+      "discard-confirmation": "Confirm keeping current state",
+      "stale-conflict": "Restore conflict",
+      failure: "Setup failed",
+    };
+    return states[state] ?? "Setting up";
+  },
+  ccSwitchSetupProviderName: "Provider name",
+  ccSwitchSetupValidate: "Validate and prepare",
+  ccSwitchSetupValidating: "Validating the API key and preparing a one-time import ticket…",
+  ccSwitchSetupModelReady: (count) => `Verified. ${count} model(s) are ready to import.`,
+  ccSwitchSetupSwitchImmediately: "Switch to this model after import",
+  ccSwitchSetupContinue: "Continue",
+  ccSwitchSetupDisclosure:
+    "Next, YUME opens CC Switch. The official protocol temporarily exposes the API key in the CC Switch process arguments, and CC Switch will still ask you to confirm.",
+  ccSwitchSetupRecoveryDisclosure: "YUME saved a local pre-import snapshot, so you can restore if the import fails or times out.",
+  ccSwitchSetupLaunch: "Open CC Switch",
+  ccSwitchSetupLaunching: "Opening CC Switch…",
+  ccSwitchSetupWaiting: "Confirm the import in CC Switch. YUME will wait until the external configuration really changes.",
+  ccSwitchSetupVerified: "Setup is verified. OpenCode is ready to use.",
+  ccSwitchSetupTimeout: "Timed out waiting for CC Switch. You can restore the previous configuration or keep the current state.",
+  ccSwitchSetupChangedInvalid: (reason) => `External configuration changed, but the target model is not active: ${reason}`,
+  ccSwitchSetupGenericFailure: "Setup did not finish. Restore and try again.",
+  ccSwitchSetupRestore: "Restore previous config",
+  ccSwitchSetupDiscard: "Keep current state",
+  ccSwitchSetupDiscardDisclosure: "Keeping the current state permanently deletes the encrypted recovery snapshot. YUME cannot restore it afterward.",
+  ccSwitchSetupRestoreDisclosure: "Restore overwrites the current OpenCode configuration files. Continue only if you want the pre-import state back.",
+  ccSwitchSetupStaleConflict: "Restore was blocked because the files changed again. Please inspect them manually.",
+  ccSwitchSetupCancelled: "Secure setup was cancelled.",
+  ccSwitchSetupError: (code) => localizedCcSwitchError(code, {
+    apiKey: "The API key was rejected.",
+    endpoint: "The Base URL is invalid or could not be reached safely.",
+    model: "The model catalog or selected model is invalid.",
+    expired: "The secure setup expired. Validate the provider again.",
+    unavailable: "CC Switch or the validation service is unavailable.",
+    recovery: "Restore was blocked because the configuration changed again.",
+    generic: "Setup failed. Please try again.",
+  }),
+  ccSwitchSecretRedirect: "This looks like an OpenCode/CC Switch API key. To avoid leaks, YUME opened the secure setup card instead.",
   aiUsageTitle: "AI usage",
   aiUsageRefresh: "Refresh",
   aiUsageLoading: "Loading this week's usage…",
@@ -495,6 +644,62 @@ const ja: Dict = {
   ccSwitchStatusRecoverableError: "確認に失敗しました。再試行できます",
   ccSwitchStatusRefresh: "再確認",
   ccSwitchSetupOpen: "チャットで設定",
+  ccSwitchSetupTitle: "OpenCode の安全設定",
+  ccSwitchSetupUnavailable: "利用可能な CC Switch を検出できません。先にインストールまたは再確認してください。",
+  ccSwitchSetupState: (state) => {
+    const states: Record<string, string> = {
+      draft: "設定を入力",
+      unavailable: "利用不可",
+      validating: "検証中",
+      "model-selection": "モデルを選択",
+      "model-ready": "モデル準備完了",
+      confirming: "確認が必要",
+      launching: "CC Switch を起動中",
+      "waiting-external-confirmation": "CC Switch のインポート待機中",
+      verified: "インポート確認済み",
+      invalid: "検証失敗",
+      "user-cancelled": "キャンセル済み",
+      "external-timeout": "タイムアウト",
+      "changed-invalid": "外部設定の変更が不正",
+      "restore-confirmation": "復元確認",
+      "discard-confirmation": "現在の状態を保持する確認",
+      "stale-conflict": "復元競合",
+      failure: "設定失敗",
+    };
+    return states[state] ?? "設定中";
+  },
+  ccSwitchSetupProviderName: "プロバイダー名",
+  ccSwitchSetupValidate: "検証して準備",
+  ccSwitchSetupValidating: "API キーを検証し、一回限りのインポートチケットを準備しています…",
+  ccSwitchSetupModelReady: (count) => `検証成功。${count} 件のモデルをインポートできます。`,
+  ccSwitchSetupSwitchImmediately: "インポート後すぐこのモデルに切り替える",
+  ccSwitchSetupContinue: "続行",
+  ccSwitchSetupDisclosure:
+    "次に CC Switch を開きます。公式プロトコルにより API キーは一時的に CC Switch のプロセス引数へ渡され、CC Switch 側でも再確認が必要です。",
+  ccSwitchSetupRecoveryDisclosure: "YUME はインポート前のローカルスナップショットを保存しました。失敗またはタイムアウト時に復元できます。",
+  ccSwitchSetupLaunch: "CC Switch を開く",
+  ccSwitchSetupLaunching: "CC Switch を起動しています…",
+  ccSwitchSetupWaiting: "CC Switch でインポートを確認してください。YUME は外部設定が実際に反映されるまで待機します。",
+  ccSwitchSetupVerified: "設定の反映を確認しました。OpenCode を使用できます。",
+  ccSwitchSetupTimeout: "CC Switch の確認待ちがタイムアウトしました。以前の設定に復元するか、現在の状態を保持できます。",
+  ccSwitchSetupChangedInvalid: (reason) => `外部設定は変わりましたが、対象モデルが有効ではありません: ${reason}`,
+  ccSwitchSetupGenericFailure: "設定が完了しませんでした。復元して再試行してください。",
+  ccSwitchSetupRestore: "以前の設定に復元",
+  ccSwitchSetupDiscard: "現在の状態を保持",
+  ccSwitchSetupDiscardDisclosure: "現在の状態を保持すると、暗号化された復元スナップショットは完全に削除され、その後 YUME では復元できません。",
+  ccSwitchSetupRestoreDisclosure: "復元すると現在の OpenCode 設定ファイルを上書きします。インポート前の状態に戻す場合のみ続行してください。",
+  ccSwitchSetupStaleConflict: "ファイルが再度変更されたため復元を停止しました。手動で確認してください。",
+  ccSwitchSetupCancelled: "安全設定をキャンセルしました。",
+  ccSwitchSetupError: (code) => localizedCcSwitchError(code, {
+    apiKey: "API Key が拒否されました。",
+    endpoint: "Base URL が無効か、安全に接続できません。",
+    model: "モデル一覧または選択したモデルが無効です。",
+    expired: "安全設定の有効期限が切れました。もう一度検証してください。",
+    unavailable: "CC Switch または検証サービスを利用できません。",
+    recovery: "設定ファイルが再度変更されたため、復元がブロックされました。",
+    generic: "設定に失敗しました。もう一度お試しください。",
+  }),
+  ccSwitchSecretRedirect: "OpenCode/CC Switch の API キーらしき内容を検出しました。漏洩防止のため安全設定カードを開きました。",
   aiUsageTitle: "AI 利用状況",
   aiUsageRefresh: "更新",
   aiUsageLoading: "今週の利用状況を読み込んでいます…",
@@ -710,6 +915,62 @@ const ko: Dict = {
   ccSwitchStatusRecoverableError: "확인에 실패했습니다. 다시 시도할 수 있습니다",
   ccSwitchStatusRefresh: "다시 확인",
   ccSwitchSetupOpen: "채팅에서 설정",
+  ccSwitchSetupTitle: "OpenCode 보안 설정",
+  ccSwitchSetupUnavailable: "사용 가능한 CC Switch를 찾지 못했습니다. 먼저 설치하거나 다시 확인하세요.",
+  ccSwitchSetupState: (state) => {
+    const states: Record<string, string> = {
+      draft: "설정 입력",
+      unavailable: "사용 불가",
+      validating: "검증 중",
+      "model-selection": "모델 선택",
+      "model-ready": "모델 준비됨",
+      confirming: "확인 필요",
+      launching: "CC Switch 여는 중",
+      "waiting-external-confirmation": "CC Switch 가져오기 대기 중",
+      verified: "가져오기 확인됨",
+      invalid: "검증 실패",
+      "user-cancelled": "취소됨",
+      "external-timeout": "시간 초과",
+      "changed-invalid": "외부 설정 변경 오류",
+      "restore-confirmation": "복원 확인",
+      "discard-confirmation": "현재 상태 유지 확인",
+      "stale-conflict": "복원 충돌",
+      failure: "설정 실패",
+    };
+    return states[state] ?? "설정 중";
+  },
+  ccSwitchSetupProviderName: "공급자 이름",
+  ccSwitchSetupValidate: "검증 및 준비",
+  ccSwitchSetupValidating: "API 키를 검증하고 일회용 가져오기 티켓을 준비하는 중…",
+  ccSwitchSetupModelReady: (count) => `검증 성공. ${count}개 모델을 가져올 준비가 됐습니다.`,
+  ccSwitchSetupSwitchImmediately: "가져온 뒤 이 모델로 바로 전환",
+  ccSwitchSetupContinue: "계속",
+  ccSwitchSetupDisclosure:
+    "다음 단계에서 CC Switch를 엽니다. 공식 프로토콜은 API 키를 CC Switch 프로세스 인수에 임시로 노출하며, CC Switch에서도 다시 확인해야 합니다.",
+  ccSwitchSetupRecoveryDisclosure: "YUME가 가져오기 전 로컬 스냅샷을 저장했습니다. 실패하거나 시간이 초과되면 복원할 수 있습니다.",
+  ccSwitchSetupLaunch: "CC Switch 열기",
+  ccSwitchSetupLaunching: "CC Switch를 여는 중…",
+  ccSwitchSetupWaiting: "CC Switch에서 가져오기를 확인하세요. YUME는 외부 설정이 실제로 적용될 때까지 기다립니다.",
+  ccSwitchSetupVerified: "설정 적용이 확인되었습니다. 이제 OpenCode를 사용할 수 있습니다.",
+  ccSwitchSetupTimeout: "CC Switch 확인 대기 시간이 초과되었습니다. 이전 설정을 복원하거나 현재 상태를 유지할 수 있습니다.",
+  ccSwitchSetupChangedInvalid: (reason) => `외부 설정은 변경되었지만 대상 모델이 활성화되지 않았습니다: ${reason}`,
+  ccSwitchSetupGenericFailure: "설정이 완료되지 않았습니다. 복원 후 다시 시도하세요.",
+  ccSwitchSetupRestore: "이전 설정 복원",
+  ccSwitchSetupDiscard: "현재 상태 유지",
+  ccSwitchSetupDiscardDisclosure: "현재 상태를 유지하면 암호화된 복구 스냅샷이 영구 삭제되어 이후 YUME에서 복원할 수 없습니다.",
+  ccSwitchSetupRestoreDisclosure: "복원하면 현재 OpenCode 설정 파일을 덮어씁니다. 가져오기 전 상태로 돌아가려는 경우에만 계속하세요.",
+  ccSwitchSetupStaleConflict: "파일이 다시 변경되어 복원이 차단되었습니다. 수동으로 확인하세요.",
+  ccSwitchSetupCancelled: "보안 설정이 취소되었습니다.",
+  ccSwitchSetupError: (code) => localizedCcSwitchError(code, {
+    apiKey: "API Key가 거부되었습니다.",
+    endpoint: "Base URL이 잘못되었거나 안전하게 연결할 수 없습니다.",
+    model: "모델 목록 또는 선택한 모델이 올바르지 않습니다.",
+    expired: "보안 설정이 만료되었습니다. 공급자를 다시 검증하세요.",
+    unavailable: "CC Switch 또는 검증 서비스를 사용할 수 없습니다.",
+    recovery: "설정 파일이 다시 변경되어 복원이 차단되었습니다.",
+    generic: "설정에 실패했습니다. 다시 시도하세요.",
+  }),
+  ccSwitchSecretRedirect: "OpenCode/CC Switch API 키로 보이는 내용을 감지했습니다. 유출 방지를 위해 보안 설정 카드를 열었습니다.",
   aiUsageTitle: "AI 사용량",
   aiUsageRefresh: "새로 고침",
   aiUsageLoading: "이번 주 사용량을 불러오는 중…",

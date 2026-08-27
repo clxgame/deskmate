@@ -181,6 +181,14 @@ pub(crate) fn command_error_from_contract(error: CcSwitchContractError) -> CcSwi
             code: "ccswitch_ticket_stale",
             message: "The setup ticket no longer matches the validated provider.",
         },
+        CcSwitchContractError::SelectionMissing => CcSwitchCommandError {
+            code: "ccswitch_selection_missing",
+            message: "The provider selection is unavailable.",
+        },
+        CcSwitchContractError::SelectionExpired => CcSwitchCommandError {
+            code: "ccswitch_selection_expired",
+            message: "The provider selection expired.",
+        },
     }
 }
 

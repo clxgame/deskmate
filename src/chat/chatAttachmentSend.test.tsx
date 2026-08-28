@@ -1,34 +1,73 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import * as tauriCore from "@tauri-apps/api/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { OpenCodeFilePart } from "./attachments";
-
-type PromptOptions = {
-  readonly attachments?: OpenCodeFilePart[];
-  readonly model?: { readonly providerID: string; readonly modelID: string };
-  readonly system?: string;
-};
 
 const invoke = mock<(command: string, args?: unknown) => Promise<unknown>>(
   () => Promise.resolve(undefined),
 );
-const promptAsync = mock<
-  (sessionID: string, text: string, options?: PromptOptions) => Promise<void>
->(() => Promise.resolve());
+const originalFetch = globalThis.fetch;
+const OriginalEventSource = globalThis.EventSource;
+
+type PromptPart = {
+  readonly type?: string;
+  readonly text?: string;
+  readonly filename?: string;
+  readonly mime?: string;
+  readonly url?: string;
+};
+
+type PromptRequest = {
+  readonly parts?: readonly PromptPart[];
+};
+
+const promptRequests: PromptRequest[] = [];
 
 mock.module("@tauri-apps/api/core", () => ({ ...tauriCore, invoke }));
 mock.module("@tauri-apps/api/event", () => ({
   emit: () => Promise.resolve(),
   listen: () => Promise.resolve(() => {}),
 }));
-mock.module("../lib/opencode", () => ({
-  abortSession: () => Promise.resolve(),
-  createSession: () =>
-    Promise.resolve({ id: "ses_attachment", title: "t", directory: "." }),
-  promptAsync,
-  subscribeEvents: () => Promise.resolve(() => {}),
-  waitForServer: () => Promise.resolve(),
-}));
+
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function installOpenCodeTransport(): void {
+  const fetchMock = mock((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/session") && init?.method === "GET") {
+      return Promise.resolve(new Response(null, { status: 200 }));
+    }
+    if (url.endsWith("/session") && init?.method === "POST") {
+      return Promise.resolve(
+        jsonResponse({ id: "ses_attachment", title: "t", directory: "." }),
+      );
+    }
+    if (url.endsWith("/session/ses_attachment/prompt_async") && init?.method === "POST") {
+      promptRequests.push(JSON.parse(String(init.body ?? "{}")) as PromptRequest);
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }
+    if (url.endsWith("/session/ses_attachment/abort") && init?.method === "POST") {
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }
+    return Promise.resolve(new Response("unexpected opencode test request", { status: 500 }));
+  });
+  globalThis.fetch = Object.assign(fetchMock, {
+    preconnect: originalFetch.preconnect,
+  });
+  globalThis.EventSource = class {
+    onmessage: ((message: MessageEvent) => void) | null = null;
+
+    constructor(readonly url: string) {
+      expect(url).toBe("http://127.0.0.1:48888/event");
+    }
+
+    close(): void {}
+  } as typeof EventSource;
+}
 
 const { default: ChatApp } = await import("./ChatApp");
 
@@ -61,9 +100,11 @@ const SETTINGS = {
 
 beforeEach(() => {
   invoke.mockReset();
-  promptAsync.mockReset();
+  promptRequests.length = 0;
   invoke.mockImplementation((command: string) => {
     switch (command) {
+      case "sidecar_base_url":
+        return Promise.resolve("http://127.0.0.1:48888");
       case "get_settings":
         return Promise.resolve(SETTINGS);
       case "load_persona":
@@ -75,9 +116,14 @@ beforeEach(() => {
         return Promise.resolve(undefined);
     }
   });
+  installOpenCodeTransport();
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  globalThis.fetch = originalFetch;
+  globalThis.EventSource = OriginalEventSource;
+});
 
 function dropMarkdownFile(): void {
   const root = document.querySelector(".chat-root");
@@ -89,17 +135,17 @@ function dropMarkdownFile(): void {
 }
 
 async function expectAttachmentPrompt(expectedText: string): Promise<void> {
-  await waitFor(() => expect(promptAsync).toHaveBeenCalledTimes(1));
-  const [, text, options] = promptAsync.mock.calls[0] ?? [];
-  expect(text).toBe(expectedText);
-  expect(options?.attachments).toEqual([
+  await waitFor(() => expect(promptRequests).toHaveLength(1));
+  const [textPart, filePart] = promptRequests[0]?.parts ?? [];
+  expect(textPart?.text).toBe(expectedText);
+  expect(filePart).toEqual(
     expect.objectContaining({
       filename: "notes.md",
       mime: "text/plain",
       type: "file",
       url: expect.stringContaining("data:text/plain"),
     }),
-  ]);
+  );
 }
 
 describe("dropped attachment sending", () => {

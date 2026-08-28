@@ -1,3 +1,4 @@
+// allow: SIZE_OK — chat memory acceptance cases share one end-to-end ChatApp harness.
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import * as tauriCore from "@tauri-apps/api/core";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -15,10 +16,14 @@ const invoke = mock<(command: string, args?: unknown) => Promise<unknown>>(
   () => Promise.resolve(undefined),
 );
 const listen = mock(() => Promise.resolve(() => {}));
-const promptAsync = mock(
-  (_sessionId: string, _text: string, _options?: { system?: string }) =>
-    Promise.resolve(),
-);
+const originalFetch = globalThis.fetch;
+const OriginalEventSource = globalThis.EventSource;
+
+type PromptRequest = {
+  readonly system?: string;
+};
+
+const promptRequests: PromptRequest[] = [];
 
 // Keep the module's other exports (convertFileSrc, ...) so replacing invoke
 // does not hide them from modules loaded later in the same process.
@@ -27,13 +32,45 @@ mock.module("@tauri-apps/api/event", () => ({
   listen,
   emit: () => Promise.resolve(),
 }));
-mock.module("../lib/opencode", () => ({
-  waitForServer: () => Promise.resolve(),
-  createSession: () => Promise.resolve({ id: "ses_1", title: "t", directory: "." }),
-  promptAsync,
-  abortSession: () => Promise.resolve(),
-  subscribeEvents: () => Promise.resolve(() => {}),
-}));
+
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function installOpenCodeTransport(): void {
+  const fetchMock = mock((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/session") && init?.method === "GET") {
+      return Promise.resolve(new Response(null, { status: 200 }));
+    }
+    if (url.endsWith("/session") && init?.method === "POST") {
+      return Promise.resolve(jsonResponse({ id: "ses_1", title: "t", directory: "." }));
+    }
+    if (url.endsWith("/session/ses_1/prompt_async") && init?.method === "POST") {
+      promptRequests.push(JSON.parse(String(init.body ?? "{}")) as PromptRequest);
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }
+    if (url.endsWith("/session/ses_1/abort") && init?.method === "POST") {
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }
+    return Promise.resolve(new Response("unexpected opencode test request", { status: 500 }));
+  });
+  globalThis.fetch = Object.assign(fetchMock, {
+    preconnect: originalFetch.preconnect,
+  });
+  globalThis.EventSource = class {
+    onmessage: ((message: MessageEvent) => void) | null = null;
+
+    constructor(readonly url: string) {
+      expect(url).toBe("http://127.0.0.1:48888/event");
+    }
+
+    close(): void {}
+  } as typeof EventSource;
+}
 
 const { default: ChatApp } = await import("./ChatApp");
 
@@ -94,6 +131,8 @@ function handleInvoke(handlers: Record<string, () => Promise<unknown>>) {
   invoke.mockImplementation((command: string) => {
     if (handlers[command]) return handlers[command]();
     switch (command) {
+      case "sidecar_base_url":
+        return Promise.resolve("http://127.0.0.1:48888");
       case "get_settings":
         return Promise.resolve(SETTINGS);
       case "load_persona":
@@ -125,15 +164,16 @@ async function sendMessage(text: string) {
 
 beforeEach(() => {
   invoke.mockReset();
-  promptAsync.mockReset();
-  promptAsync.mockImplementation(
-    (_sessionId: string, _text: string, _options?: { system?: string }) =>
-      Promise.resolve(),
-  );
+  promptRequests.length = 0;
   handleInvoke({});
+  installOpenCodeTransport();
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  globalThis.fetch = originalFetch;
+  globalThis.EventSource = OriginalEventSource;
+});
 
 describe("explicit memory controls in chat", () => {
   test("uses a saved nickname over the persona's default form of address", async () => {
@@ -144,11 +184,11 @@ describe("explicit memory controls in chat", () => {
 
     await sendMessage("帮我安排今天的工作");
 
-    await waitFor(() => expect(promptAsync).toHaveBeenCalledTimes(1));
-    const options = promptAsync.mock.calls[0]?.[2];
-    expect(options?.system).toContain("指挥官");
-    expect(options?.system).toContain("最高优先级");
-    expect(options?.system).toContain("覆盖角色设定中的默认称呼");
+    await waitFor(() => expect(promptRequests).toHaveLength(1));
+    const system = promptRequests[0]?.system ?? "";
+    expect(system).toContain("指挥官");
+    expect(system).toContain("最高优先级");
+    expect(system).toContain("覆盖角色设定中的默认称呼");
   });
 
   test("saving a message shows an inline receipt with undo", async () => {
@@ -328,6 +368,8 @@ describe("deleting a conversation", () => {
     invoke.mockReset();
     invoke.mockImplementation((command: string) => {
       switch (command) {
+        case "sidecar_base_url":
+          return Promise.resolve("http://127.0.0.1:48888");
         case "get_settings":
           return Promise.resolve(SETTINGS);
         case "load_persona":
@@ -366,6 +408,8 @@ describe("deleting a conversation", () => {
     invoke.mockReset();
     invoke.mockImplementation((command: string) => {
       switch (command) {
+        case "sidecar_base_url":
+          return Promise.resolve("http://127.0.0.1:48888");
         case "get_settings":
           return Promise.resolve(SETTINGS);
         case "load_persona":
@@ -405,6 +449,8 @@ describe("resuming a conversation from history", () => {
     invoke.mockReset();
     invoke.mockImplementation((command: string) => {
       switch (command) {
+        case "sidecar_base_url":
+          return Promise.resolve("http://127.0.0.1:48888");
         case "get_settings":
           return Promise.resolve(SETTINGS);
         case "load_persona":
@@ -463,6 +509,8 @@ describe("memory retrieval on send", () => {
     invoke.mockReset();
     invoke.mockImplementation((command: string) => {
       switch (command) {
+        case "sidecar_base_url":
+          return Promise.resolve("http://127.0.0.1:48888");
         case "get_settings":
           return Promise.resolve({ ...SETTINGS, memoryAiUse: false });
         case "load_persona":

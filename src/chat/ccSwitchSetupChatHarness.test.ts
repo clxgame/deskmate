@@ -29,7 +29,7 @@ const chatAppModule = await import("./ChatApp");
 const ChatApp = chatAppModule.default;
 export const containsCcSwitchApiKey = chatAppModule.containsCcSwitchApiKey;
 
-const SETTINGS = {
+export const SETTINGS = {
   autostart: false,
   language: "zh-CN",
   theme: "dark",
@@ -175,6 +175,30 @@ function mockChatInvoke(): void {
           models: [{ id: "model-a", name: "Model A" }],
           expiresAt: 123,
         });
+      case "select_ccswitch_opencode_model":
+        return Promise.resolve({
+          receipt: {
+            ticketId: "ticket-chat-1",
+            providerName: "YUME OpenCode",
+            endpoint: "https://api.example.test/v1",
+            selectedModel: "model-a",
+            expiresAt: 123,
+          },
+          recovery: {
+            snapshotId: "snapshot-chat-1",
+            original: {
+              config: { kind: "present", sha256: "hash-before" },
+              auth: { kind: "missing" },
+            },
+          },
+        });
+      case "observe_ccswitch_opencode_files":
+        return Promise.resolve({
+          config: { kind: "present", sha256: "hash-before" },
+          auth: { kind: "missing" },
+        });
+      case "complete_ccswitch_recovery":
+        return Promise.resolve("destroyed");
       case "history_list":
         return Promise.resolve([]);
       default:

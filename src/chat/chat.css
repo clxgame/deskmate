@@ -4,6 +4,15 @@
 }
 
 .chat-root {
+  --r-md: 10px;
+  --r-sm: 8px;
+  --s-0-5: 2px;
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-8: 32px;
+  --attachment-name-max-w: 210px;
+  --attachment-tray-max-h: 84px;
   --t-small: 11px;
   display: flex;
   flex-direction: column;
@@ -310,20 +319,26 @@
 }
 
 .ccswitch-card {
+  align-self: stretch;
   background: var(--surface-raised);
   border: 1px solid var(--line-strong);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   color: var(--text);
-  margin: 8px 12px;
-  padding: 12px;
+  margin: var(--s-2) var(--s-3);
+  max-width: calc(100% - (var(--s-3) * 2));
+  min-width: 0;
+  overflow-wrap: break-word;
+  padding: var(--s-3);
+  width: calc(100% - (var(--s-3) * 2));
 }
 
 .ccswitch-card-head,
 .ccswitch-actions {
   align-items: center;
   display: flex;
-  gap: 8px;
+  gap: var(--s-2);
   justify-content: space-between;
+  min-width: 0;
 }
 
 .ccswitch-card-title {
@@ -339,17 +354,19 @@
 
 .ccswitch-card-status {
   color: var(--text-dim);
-  margin-top: 2px;
+  margin-top: var(--s-0-5);
 }
 
 .ccswitch-close,
 .ccswitch-secondary,
 .ccswitch-primary {
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   cursor: pointer;
   font: inherit;
-  min-height: 28px;
-  padding: 4px 8px;
+  min-height: var(--s-8);
+  min-width: 0;
+  padding: var(--s-1) var(--s-2);
+  white-space: normal;
 }
 
 .ccswitch-close,
@@ -393,24 +410,28 @@
 
 .ccswitch-form {
   display: grid;
-  gap: 8px;
-  margin-top: 12px;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+  min-width: 0;
 }
 
 .ccswitch-form label {
   display: grid;
-  gap: 4px;
+  gap: var(--s-1);
+  min-width: 0;
 }
 
 .ccswitch-form input,
 .ccswitch-state-panel select {
   background: var(--surface-sunken);
   border: 1px solid var(--line-strong);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   color: var(--text);
   font: inherit;
-  min-height: 28px;
-  padding: 4px 8px;
+  min-height: var(--s-8);
+  min-width: 0;
+  padding: var(--s-1) var(--s-2);
+  width: 100%;
 }
 
 .ccswitch-state-panel select {
@@ -419,19 +440,33 @@
 
 .ccswitch-state-panel {
   display: grid;
-  gap: 8px;
+  gap: var(--s-2);
   line-height: 1.5;
-  margin-top: 12px;
+  line-break: strict;
+  margin-top: var(--s-3);
+  min-width: 0;
+  overflow-wrap: break-word;
+  word-break: normal;
+  width: 100%;
 }
 
 .ccswitch-state-panel p {
   margin: 0;
+  min-width: 0;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .ccswitch-check {
   align-items: center;
   display: flex;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.ccswitch-actions {
+  flex-wrap: wrap;
 }
 
 .ccswitch-error {

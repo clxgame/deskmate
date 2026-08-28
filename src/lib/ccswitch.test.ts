@@ -25,10 +25,8 @@ const invoke = mock<(command: string, args?: unknown) => Promise<unknown>>(
           providerName: "Provider",
           endpoint: "https://api.example.test",
           selectedModel: "model-a",
-          preImportHash: "hash-before",
           expiresAt: 456,
         },
-        models: [{ id: "model-a", name: "Model A" }],
         recovery: {
           snapshotId: "snapshot-1",
           original: {
@@ -45,7 +43,6 @@ const invoke = mock<(command: string, args?: unknown) => Promise<unknown>>(
         providerName: "Provider",
         endpoint: "https://api.example.test",
         selectedModel: "model-a",
-        preImportHash: "hash-before",
         expiresAt: 123,
         enabled: true,
       };
@@ -58,8 +55,13 @@ mock.module("@tauri-apps/api/core", () => ({ ...tauriCore, invoke }));
 
 const {
   cancelCcSwitchSetup,
+  checkCcSwitchOpenCodeImport,
+  completeCcSwitchRecovery,
+  discardCcSwitchRecovery,
   getCcSwitchCapabilityStatus,
   launchCcSwitchOpenCodeImport,
+  observeCcSwitchOpenCodeFiles,
+  restoreCcSwitchRecovery,
   validateCcSwitchOpenCodeProvider,
   selectCcSwitchOpenCodeModel,
 } = await import("./ccswitch");
@@ -91,8 +93,8 @@ describe("CC Switch Tauri wrappers", () => {
     });
   });
 
-  test("turns a secret-free native selection into a launch ticket without resending catalog or key", async () => {
-    await selectCcSwitchOpenCodeModel({
+  test("turns a secret-free native selection into a metadata-only launch ticket", async () => {
+    const result = await selectCcSwitchOpenCodeModel({
       selectionId: "selection-1",
       selectedModel: "model-a",
     });
@@ -103,15 +105,13 @@ describe("CC Switch Tauri wrappers", () => {
         selectedModel: "model-a",
       },
     });
+    expect(JSON.stringify(result)).not.toContain("preImportHash");
+    expect(JSON.stringify(result)).not.toContain('"models"');
   });
 
-  test("launches only with an explicit disclosure flag and can cancel by ticket", async () => {
+  test("launches with only the opaque ticket and explicit user intent", async () => {
     await launchCcSwitchOpenCodeImport({
       ticketId: "ticket-1",
-      providerName: "Provider",
-      endpoint: "https://api.example.test",
-      selectedModel: "model-a",
-      preImportHash: "hash-before",
       switchImmediately: true,
       acceptedProcessArgumentDisclosure: true,
     });
@@ -120,16 +120,57 @@ describe("CC Switch Tauri wrappers", () => {
     expect(invoke).toHaveBeenCalledWith("launch_ccswitch_opencode_import", {
       request: {
         ticketId: "ticket-1",
-        providerName: "Provider",
-        endpoint: "https://api.example.test",
-        selectedModel: "model-a",
-        preImportHash: "hash-before",
         switchImmediately: true,
         acceptedProcessArgumentDisclosure: true,
       },
     });
     expect(invoke).toHaveBeenCalledWith("cancel_ccswitch_setup", {
       handleId: "ticket-1",
+    });
+  });
+
+  test("binds verification and explicit recovery lifecycle inputs exactly", async () => {
+    const initial = {
+      config: { kind: "present" as const, sha256: "a".repeat(64) },
+      auth: { kind: "missing" as const },
+    };
+    await observeCcSwitchOpenCodeFiles();
+    await checkCcSwitchOpenCodeImport({
+      providerName: "Provider",
+      endpoint: "https://api.example.test",
+      modelId: "model-a",
+      initial,
+    });
+    await completeCcSwitchRecovery({
+      snapshotId: "snapshot-1",
+      kind: "timedOut",
+      observed: initial,
+    });
+    await restoreCcSwitchRecovery("snapshot-1");
+    await discardCcSwitchRecovery("snapshot-1", true);
+
+    expect(invoke).toHaveBeenCalledWith("observe_ccswitch_opencode_files");
+    expect(invoke).toHaveBeenCalledWith("check_ccswitch_opencode_import", {
+      target: {
+        providerName: "Provider",
+        endpoint: "https://api.example.test",
+        modelId: "model-a",
+        initial,
+      },
+    });
+    expect(invoke).toHaveBeenCalledWith("complete_ccswitch_recovery", {
+      completion: {
+        snapshotId: "snapshot-1",
+        kind: "timedOut",
+        observed: initial,
+      },
+    });
+    expect(invoke).toHaveBeenCalledWith("restore_ccswitch_recovery", {
+      snapshotId: "snapshot-1",
+    });
+    expect(invoke).toHaveBeenCalledWith("discard_ccswitch_recovery", {
+      snapshotId: "snapshot-1",
+      confirmed: true,
     });
   });
 });

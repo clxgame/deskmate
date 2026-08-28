@@ -1,3 +1,4 @@
+// allow: SIZE_OK — fixed-reply timing cases stay together to preserve shared fake-clock setup.
 import {
   afterEach,
   beforeEach,
@@ -23,23 +24,65 @@ const invoke = mock<(command: string, args?: unknown) => Promise<unknown>>(
 );
 const listen = mock(() => Promise.resolve(() => {}));
 let eventHandler: ((event: OpenCodeEvent) => void) | null = null;
-const subscribeEvents = mock((handler: (event: OpenCodeEvent) => void) => {
-  eventHandler = handler;
-  return Promise.resolve(() => {});
-});
+const originalFetch = globalThis.fetch;
+const OriginalEventSource = globalThis.EventSource;
 
 mock.module("@tauri-apps/api/core", () => ({ ...tauriCore, invoke }));
 mock.module("@tauri-apps/api/event", () => ({
   listen,
   emit: () => Promise.resolve(),
 }));
-mock.module("../lib/opencode", () => ({
-  waitForServer: () => Promise.resolve(),
-  createSession: () => Promise.resolve({ id: "ses_fixed", title: "t", directory: "." }),
-  promptAsync: () => Promise.resolve(),
-  abortSession: () => Promise.resolve(),
-  subscribeEvents,
-}));
+
+function makeJsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function installOpenCodeTransport(): void {
+  const fetchMock = mock((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/session") && init?.method === "GET") {
+      return Promise.resolve(new Response(null, { status: 200 }));
+    }
+    if (url.endsWith("/session") && init?.method === "POST") {
+      return Promise.resolve(makeJsonResponse({ id: "ses_fixed", title: "t", directory: "." }));
+    }
+    if (url.endsWith("/session/ses_fixed/prompt_async") && init?.method === "POST") {
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }
+    if (url.endsWith("/session/ses_fixed/abort") && init?.method === "POST") {
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }
+    if (url.includes("/session/ses_fixed/message?")) {
+      return Promise.resolve(makeJsonResponse([]));
+    }
+    return Promise.resolve(new Response("unexpected opencode test request", { status: 500 }));
+  });
+  globalThis.fetch = Object.assign(fetchMock, {
+    preconnect: originalFetch.preconnect,
+  });
+
+  globalThis.EventSource = class {
+    onmessage: ((message: MessageEvent) => void) | null = null;
+
+    constructor(readonly url: string) {
+      expect(url).toBe("http://127.0.0.1:48888/event");
+      eventHandler = (event: OpenCodeEvent) => {
+        this.onmessage?.(
+          new MessageEvent("message", {
+            data: JSON.stringify(event),
+          }),
+        );
+      };
+    }
+
+    close(): void {
+      eventHandler = null;
+    }
+  } as typeof EventSource;
+}
 
 const { default: ChatApp } = await import("./ChatApp");
 
@@ -75,6 +118,8 @@ beforeEach(() => {
   invoke.mockReset();
   invoke.mockImplementation((command: string) => {
     switch (command) {
+      case "sidecar_base_url":
+        return Promise.resolve("http://127.0.0.1:48888");
       case "get_settings":
         return Promise.resolve(SETTINGS);
       case "load_persona":
@@ -87,11 +132,14 @@ beforeEach(() => {
         return Promise.resolve(undefined);
     }
   });
+  installOpenCodeTransport();
 });
 
 afterEach(() => {
   jest.useRealTimers();
   cleanup();
+  globalThis.fetch = originalFetch;
+  globalThis.EventSource = OriginalEventSource;
 });
 
 describe("小著固定名字由来回复", () => {

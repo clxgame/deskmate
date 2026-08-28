@@ -127,9 +127,11 @@ const zh = {
   ccSwitchSetupModelReady: (count: number) => `验证成功，准备导入 ${count} 个模型。`,
   ccSwitchSetupSwitchImmediately: "导入后立即切换到这个模型",
   ccSwitchSetupContinue: "继续",
+  ccSwitchSetupCancel: "取消",
   ccSwitchSetupDisclosure:
     "下一步会打开 CC Switch。官方协议会把 API Key 临时放进 CC Switch 的进程参数里，CC Switch 仍会要求你二次确认。",
-  ccSwitchSetupRecoveryDisclosure: "YUME 已在导入前保存本地快照；失败或超时时可以恢复。",
+  ccSwitchSetupRecoveryDisclosure:
+    "YUME 已在导入前保存 OpenCode 本地快照；失败或超时时可以恢复。恢复只会处理 OpenCode 配置，不会删除 CC Switch 里的 provider 或数据库记录。",
   ccSwitchSetupLaunch: "打开 CC Switch",
   ccSwitchSetupLaunching: "正在唤起 CC Switch…",
   ccSwitchSetupWaiting: "请在 CC Switch 里确认导入。YUME 会等待外部配置真正生效。",
@@ -140,7 +142,8 @@ const zh = {
   ccSwitchSetupRestore: "恢复导入前配置",
   ccSwitchSetupDiscard: "保留当前状态",
   ccSwitchSetupDiscardDisclosure: "保留当前状态会永久删除加密恢复快照。确认后将无法由 YUME 自动恢复。",
-  ccSwitchSetupRestoreDisclosure: "恢复会覆盖当前 OpenCode 配置文件。仅在你确认要回到导入前状态时继续。",
+  ccSwitchSetupRestoreDisclosure:
+    "恢复会覆盖当前 OpenCode 配置文件，但不会删除 CC Switch 里的 provider 或数据库记录；如需清理，请打开 CC Switch 手动删除。仅在你确认要回到导入前状态时继续。",
   ccSwitchSetupStaleConflict: "恢复被阻止：当前文件已经被再次修改。请手动检查后再处理。",
   ccSwitchSetupCancelled: "已取消本次安全配置。",
   ccSwitchSetupError: (code: string) => localizedCcSwitchError(code, {
@@ -399,9 +402,11 @@ const en: Dict = {
   ccSwitchSetupModelReady: (count) => `Verified. ${count} model(s) are ready to import.`,
   ccSwitchSetupSwitchImmediately: "Switch to this model after import",
   ccSwitchSetupContinue: "Continue",
+  ccSwitchSetupCancel: "Cancel",
   ccSwitchSetupDisclosure:
     "Next, YUME opens CC Switch. The official protocol temporarily exposes the API key in the CC Switch process arguments, and CC Switch will still ask you to confirm.",
-  ccSwitchSetupRecoveryDisclosure: "YUME saved a local pre-import snapshot, so you can restore if the import fails or times out.",
+  ccSwitchSetupRecoveryDisclosure:
+    "YUME saved a local pre-import OpenCode snapshot, so you can restore if the import fails or times out. Restore only changes OpenCode files; it will not remove the provider or database record inside CC Switch.",
   ccSwitchSetupLaunch: "Open CC Switch",
   ccSwitchSetupLaunching: "Opening CC Switch…",
   ccSwitchSetupWaiting: "Confirm the import in CC Switch. YUME will wait until the external configuration really changes.",
@@ -412,7 +417,8 @@ const en: Dict = {
   ccSwitchSetupRestore: "Restore previous config",
   ccSwitchSetupDiscard: "Keep current state",
   ccSwitchSetupDiscardDisclosure: "Keeping the current state permanently deletes the encrypted recovery snapshot. YUME cannot restore it afterward.",
-  ccSwitchSetupRestoreDisclosure: "Restore overwrites the current OpenCode configuration files. Continue only if you want the pre-import state back.",
+  ccSwitchSetupRestoreDisclosure:
+    "Restore overwrites the current OpenCode configuration files, but it will not remove the provider or database record inside CC Switch. Open CC Switch to delete that provider manually if needed. Continue only if you want the pre-import state back.",
   ccSwitchSetupStaleConflict: "Restore was blocked because the files changed again. Please inspect them manually.",
   ccSwitchSetupCancelled: "Secure setup was cancelled.",
   ccSwitchSetupError: (code) => localizedCcSwitchError(code, {
@@ -674,9 +680,11 @@ const ja: Dict = {
   ccSwitchSetupModelReady: (count) => `検証成功。${count} 件のモデルをインポートできます。`,
   ccSwitchSetupSwitchImmediately: "インポート後すぐこのモデルに切り替える",
   ccSwitchSetupContinue: "続行",
+  ccSwitchSetupCancel: "キャンセル",
   ccSwitchSetupDisclosure:
     "次に CC Switch を開きます。公式プロトコルにより API キーは一時的に CC Switch のプロセス引数へ渡され、CC Switch 側でも再確認が必要です。",
-  ccSwitchSetupRecoveryDisclosure: "YUME はインポート前のローカルスナップショットを保存しました。失敗またはタイムアウト時に復元できます。",
+  ccSwitchSetupRecoveryDisclosure:
+    "YUME はインポート前の OpenCode ローカルスナップショットを保存しました。失敗またはタイムアウト時に復元できます。復元で変更されるのは OpenCode 設定だけで、CC Switch 内のプロバイダーやデータベース記録は削除されません。",
   ccSwitchSetupLaunch: "CC Switch を開く",
   ccSwitchSetupLaunching: "CC Switch を起動しています…",
   ccSwitchSetupWaiting: "CC Switch でインポートを確認してください。YUME は外部設定が実際に反映されるまで待機します。",
@@ -687,7 +695,8 @@ const ja: Dict = {
   ccSwitchSetupRestore: "以前の設定に復元",
   ccSwitchSetupDiscard: "現在の状態を保持",
   ccSwitchSetupDiscardDisclosure: "現在の状態を保持すると、暗号化された復元スナップショットは完全に削除され、その後 YUME では復元できません。",
-  ccSwitchSetupRestoreDisclosure: "復元すると現在の OpenCode 設定ファイルを上書きします。インポート前の状態に戻す場合のみ続行してください。",
+  ccSwitchSetupRestoreDisclosure:
+    "復元すると現在の OpenCode 設定ファイルを上書きしますが、CC Switch 内のプロバイダーやデータベース記録は削除されません。必要なら CC Switch を開いて手動で削除してください。インポート前の状態に戻す場合のみ続行してください。",
   ccSwitchSetupStaleConflict: "ファイルが再度変更されたため復元を停止しました。手動で確認してください。",
   ccSwitchSetupCancelled: "安全設定をキャンセルしました。",
   ccSwitchSetupError: (code) => localizedCcSwitchError(code, {
@@ -945,9 +954,11 @@ const ko: Dict = {
   ccSwitchSetupModelReady: (count) => `검증 성공. ${count}개 모델을 가져올 준비가 됐습니다.`,
   ccSwitchSetupSwitchImmediately: "가져온 뒤 이 모델로 바로 전환",
   ccSwitchSetupContinue: "계속",
+  ccSwitchSetupCancel: "취소",
   ccSwitchSetupDisclosure:
     "다음 단계에서 CC Switch를 엽니다. 공식 프로토콜은 API 키를 CC Switch 프로세스 인수에 임시로 노출하며, CC Switch에서도 다시 확인해야 합니다.",
-  ccSwitchSetupRecoveryDisclosure: "YUME가 가져오기 전 로컬 스냅샷을 저장했습니다. 실패하거나 시간이 초과되면 복원할 수 있습니다.",
+  ccSwitchSetupRecoveryDisclosure:
+    "YUME가 가져오기 전 OpenCode 로컬 스냅샷을 저장했습니다. 실패하거나 시간이 초과되면 복원할 수 있습니다. 복원은 OpenCode 설정 파일만 바꾸며 CC Switch 안의 공급자나 데이터베이스 기록은 삭제하지 않습니다.",
   ccSwitchSetupLaunch: "CC Switch 열기",
   ccSwitchSetupLaunching: "CC Switch를 여는 중…",
   ccSwitchSetupWaiting: "CC Switch에서 가져오기를 확인하세요. YUME는 외부 설정이 실제로 적용될 때까지 기다립니다.",
@@ -958,7 +969,8 @@ const ko: Dict = {
   ccSwitchSetupRestore: "이전 설정 복원",
   ccSwitchSetupDiscard: "현재 상태 유지",
   ccSwitchSetupDiscardDisclosure: "현재 상태를 유지하면 암호화된 복구 스냅샷이 영구 삭제되어 이후 YUME에서 복원할 수 없습니다.",
-  ccSwitchSetupRestoreDisclosure: "복원하면 현재 OpenCode 설정 파일을 덮어씁니다. 가져오기 전 상태로 돌아가려는 경우에만 계속하세요.",
+  ccSwitchSetupRestoreDisclosure:
+    "복원하면 현재 OpenCode 설정 파일을 덮어쓰지만 CC Switch 안의 공급자나 데이터베이스 기록은 삭제하지 않습니다. 필요하면 CC Switch를 열어 해당 공급자를 직접 삭제하세요. 가져오기 전 상태로 돌아가려는 경우에만 계속하세요.",
   ccSwitchSetupStaleConflict: "파일이 다시 변경되어 복원이 차단되었습니다. 수동으로 확인하세요.",
   ccSwitchSetupCancelled: "보안 설정이 취소되었습니다.",
   ccSwitchSetupError: (code) => localizedCcSwitchError(code, {

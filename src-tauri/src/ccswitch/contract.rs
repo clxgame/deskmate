@@ -341,6 +341,21 @@ impl CcSwitchSetupState {
         Ok(PreparedHandoff { ticket })
     }
 
+    pub fn ticket_consume_request(
+        &self,
+        ticket_id: &str,
+    ) -> Result<TicketConsumeRequest, CcSwitchContractError> {
+        let ticket_id = normalize_bounded(ticket_id, 128, CcSwitchContractError::TicketMissing)?;
+        let tickets = self
+            .tickets
+            .lock()
+            .map_err(|_| CcSwitchContractError::TicketMissing)?;
+        let ticket = tickets
+            .get(&ticket_id)
+            .ok_or(CcSwitchContractError::TicketMissing)?;
+        Ok(ticket.consume_request())
+    }
+
     pub fn cancel_setup(&self, handle_id: &str) -> Result<(), CcSwitchContractError> {
         let handle_id = normalize_bounded(handle_id, 128, CcSwitchContractError::TicketMissing)?;
         self.selections
@@ -428,6 +443,16 @@ impl StoredTicket {
 
     fn is_expired(&self, now: MillisSinceEpoch) -> bool {
         now >= self.expires_at
+    }
+
+    fn consume_request(&self) -> TicketConsumeRequest {
+        TicketConsumeRequest {
+            ticket_id: self.ticket_id.clone(),
+            provider_name: self.provider_name.clone(),
+            endpoint: self.endpoint.clone(),
+            selected_model: self.selected_model.clone(),
+            pre_import_hash: self.pre_import_hash.clone(),
+        }
     }
 
     fn ensure_matches(

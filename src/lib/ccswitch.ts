@@ -40,7 +40,6 @@ export type CcSwitchHandoffReceipt = {
   readonly providerName: string;
   readonly endpoint: string;
   readonly selectedModel: string;
-  readonly preImportHash: string;
   readonly expiresAt: number;
 };
 
@@ -56,16 +55,11 @@ export type CcSwitchProviderSelection = {
 export type CcSwitchPreparedProvider = {
   readonly contractVersion: number;
   readonly receipt: CcSwitchHandoffReceipt;
-  readonly models: readonly CcSwitchModelChoice[];
   readonly recovery: CcSwitchRecoveryHandle;
 };
 
 export type LaunchCcSwitchImportRequest = {
   readonly ticketId: string;
-  readonly providerName: string;
-  readonly endpoint: string;
-  readonly selectedModel: string;
-  readonly preImportHash: string;
   readonly switchImmediately: boolean;
   readonly acceptedProcessArgumentDisclosure: boolean;
 };

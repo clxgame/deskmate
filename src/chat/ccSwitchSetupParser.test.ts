@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import ccSwitchProviderDraftTool from "../../src-tauri/resources/opencode-tools/ccswitch_prepare_opencode_provider";
 import type { OpenCodeMessage, ToolPart } from "../lib/opencode";
 import {
   createCcSwitchToolResultTracker,
@@ -48,6 +49,24 @@ function assistantMessage(
 }
 
 describe("CC Switch setup tool parser", () => {
+  test("accepts the exact output emitted by the shipped provider-draft tool", async () => {
+    const output = await ccSwitchProviderDraftTool.execute({
+      providerName: "Local proxy",
+      baseUrl: "https://api.example.test/v1",
+      modelHint: "gpt-test",
+    });
+
+    expect(parseCcSwitchToolResult(completedTool(output))).toEqual({
+      kind: "draft",
+      draft: {
+        callID: "call-1",
+        providerName: "Local proxy",
+        baseUrl: "https://api.example.test/v1",
+        modelHint: "gpt-test",
+      },
+    });
+  });
+
   test("returns ordinary-tool fallback for unrelated tools", () => {
     const tracker = createCcSwitchToolResultTracker();
     const result = tracker.acceptToolPart({

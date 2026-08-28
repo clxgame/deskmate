@@ -11,6 +11,7 @@ import {
   receiveChatEvent,
   renderChat,
   resetChatHarness,
+  SETTINGS,
   setSnapshotMessages,
   wasPromptSent,
   wasSessionMessageFetched,
@@ -47,14 +48,63 @@ describe("CC Switch setup tool handling in chat", () => {
     expect(containsCcSwitchApiKey("unrelated sk-example_12345678")).toBe(false);
   });
 
-  test("opens from the settings event and cancels the native handle on new-chat cleanup", async () => {
+  test("cleans a live native ticket and recovery snapshot on persona change without key echo", async () => {
     await renderChat();
     receiveAppEvent("deskmate://ccswitch-setup-request", null);
     const user = userEvent.setup();
+    const canary = `persona-change-${crypto.randomUUID()}`;
 
     expect(await screen.findByRole("region", { name: "安全配置 OpenCode" })).toBeDefined();
     await user.type(screen.getByLabelText("Base URL"), "https://api.example.test/v1");
-    await user.type(screen.getByLabelText("API Key"), "temporary-test-key");
+    await user.type(screen.getByLabelText("API Key"), canary);
+    await user.click(screen.getByRole("button", { name: "验证并准备" }));
+    const model = await screen.findByRole("combobox", { name: "模型" });
+    await user.selectOptions(model, "model-a");
+    await user.click(screen.getByRole("button", { name: "继续" }));
+    await screen.findByText(/下一步会打开 CC Switch/);
+
+    const nativeBoundaryIndex = invoke.mock.calls.findIndex(
+      ([command]) => command === "prepare_ccswitch_opencode_provider",
+    );
+    expect(nativeBoundaryIndex).toBeGreaterThanOrEqual(0);
+    expect(document.body.innerHTML).not.toContain(canary);
+
+    receiveAppEvent("deskmate://settings-changed", {
+      ...SETTINGS,
+      personaId: "aimisi",
+    });
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("cancel_ccswitch_setup", {
+        handleId: "ticket-chat-1",
+      });
+      expect(invoke).toHaveBeenCalledWith("observe_ccswitch_opencode_files");
+      expect(invoke).toHaveBeenCalledWith("complete_ccswitch_recovery", {
+        completion: {
+          snapshotId: "snapshot-chat-1",
+          kind: "cancelled",
+          observed: {
+            config: { kind: "present", sha256: "hash-before" },
+            auth: { kind: "missing" },
+          },
+        },
+      });
+      expect(screen.queryByRole("region", { name: "安全配置 OpenCode" })).toBeNull();
+    });
+    expect(document.body.innerHTML).not.toContain(canary);
+    expect(JSON.stringify(invoke.mock.calls.slice(nativeBoundaryIndex + 1))).not.toContain(canary);
+    expect(invoke.mock.calls.some(([command]) => command === "history_save")).toBe(false);
+  });
+
+  test("cancels a live native selection when a new chat starts", async () => {
+    await renderChat();
+    receiveAppEvent("deskmate://ccswitch-setup-request", null);
+    const user = userEvent.setup();
+    const canary = `new-chat-${crypto.randomUUID()}`;
+
+    await screen.findByRole("region", { name: "安全配置 OpenCode" });
+    await user.type(screen.getByLabelText("Base URL"), "https://api.example.test/v1");
+    await user.type(screen.getByLabelText("API Key"), canary);
     await user.click(screen.getByRole("button", { name: "验证并准备" }));
     await screen.findByRole("combobox", { name: "模型" });
 
@@ -67,6 +117,8 @@ describe("CC Switch setup tool handling in chat", () => {
       });
       expect(screen.queryByRole("region", { name: "安全配置 OpenCode" })).toBeNull();
     });
+    expect(document.body.innerHTML).not.toContain(canary);
+    expect(invoke.mock.calls.some(([command]) => command === "history_save")).toBe(false);
   });
 
   test("keeps ordinary tools as activity instead of treating them as setup drafts", async () => {

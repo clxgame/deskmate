@@ -1,3 +1,4 @@
+// allow: SIZE_OK — Todo 7 keeps the native IPC bridge and its fake-server security tests together.
 use std::collections::HashSet;
 use std::io::Read;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -6,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
 
 use super::contract::{
-    CcSwitchSetupState, MillisSinceEpoch, ModelChoice, ProviderSelectionInput,
+    CcSwitchSetupState, HandoffReceipt, MillisSinceEpoch, ModelChoice, ProviderSelectionInput,
     ProviderSelectionResult, ProviderValidationInput,
 };
 use super::platform::SystemCcSwitchPlatform;
@@ -55,9 +56,32 @@ pub fn prepare_ccswitch_opencode_provider(
 #[serde(rename_all = "camelCase")]
 pub struct CcSwitchPreparedProvider {
     pub contract_version: u8,
-    pub receipt: super::contract::HandoffReceipt,
-    pub models: Vec<ModelChoice>,
+    pub receipt: CcSwitchTicketReceipt,
     pub recovery: CcSwitchRecoveryHandle,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CcSwitchTicketReceipt {
+    pub contract_version: u8,
+    pub ticket_id: String,
+    pub provider_name: String,
+    pub endpoint: String,
+    pub selected_model: String,
+    pub expires_at: MillisSinceEpoch,
+}
+
+impl From<HandoffReceipt> for CcSwitchTicketReceipt {
+    fn from(receipt: HandoffReceipt) -> Self {
+        Self {
+            contract_version: receipt.contract_version,
+            ticket_id: receipt.ticket_id,
+            provider_name: receipt.provider_name,
+            endpoint: receipt.endpoint,
+            selected_model: receipt.selected_model,
+            expires_at: receipt.expires_at,
+        }
+    }
 }
 
 #[tauri::command]
@@ -78,16 +102,72 @@ pub fn select_ccswitch_opencode_model(
 #[tauri::command]
 pub fn launch_ccswitch_opencode_import(
     state: State<CcSwitchSetupState>,
-    request: LaunchCcSwitchImportRequest,
-) -> Result<CcSwitchLaunchReceipt, CcSwitchCommandError> {
-    launch_import_with_platform(
+    request: CcSwitchLaunchCommandRequest,
+) -> Result<CcSwitchUiLaunchReceipt, CcSwitchCommandError> {
+    let request = bind_launch_request(&state, request)?;
+    let receipt = launch_import_with_platform(
         LaunchEnvironment {
             state: &state,
             platform: &SystemCcSwitchPlatform,
             now: now_millis(),
         },
         request,
-    )
+    )?;
+    Ok(receipt.into())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CcSwitchLaunchCommandRequest {
+    pub ticket_id: String,
+    #[serde(default)]
+    pub switch_immediately: bool,
+    #[serde(default)]
+    pub accepted_process_argument_disclosure: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CcSwitchUiLaunchReceipt {
+    pub contract_version: u8,
+    pub ticket_id: String,
+    pub provider_name: String,
+    pub endpoint: String,
+    pub selected_model: String,
+    pub expires_at: MillisSinceEpoch,
+    pub enabled: bool,
+}
+
+impl From<CcSwitchLaunchReceipt> for CcSwitchUiLaunchReceipt {
+    fn from(receipt: CcSwitchLaunchReceipt) -> Self {
+        Self {
+            contract_version: receipt.contract_version,
+            ticket_id: receipt.ticket_id,
+            provider_name: receipt.provider_name,
+            endpoint: receipt.endpoint,
+            selected_model: receipt.selected_model,
+            expires_at: receipt.expires_at,
+            enabled: receipt.enabled,
+        }
+    }
+}
+
+fn bind_launch_request(
+    state: &CcSwitchSetupState,
+    request: CcSwitchLaunchCommandRequest,
+) -> Result<LaunchCcSwitchImportRequest, CcSwitchCommandError> {
+    let binding = state
+        .ticket_consume_request(&request.ticket_id)
+        .map_err(launch::command_error_from_contract)?;
+    Ok(LaunchCcSwitchImportRequest {
+        ticket_id: binding.ticket_id,
+        provider_name: binding.provider_name,
+        endpoint: binding.endpoint,
+        selected_model: binding.selected_model,
+        pre_import_hash: binding.pre_import_hash,
+        switch_immediately: request.switch_immediately,
+        accepted_process_argument_disclosure: request.accepted_process_argument_disclosure,
+    })
 }
 
 #[tauri::command]
@@ -203,6 +283,9 @@ where
     let provider = CcSwitchSetupState::validate_provider_input(input)
         .map_err(launch::command_error_from_contract)?;
     let models = fetcher(provider.endpoint(), provider.api_key())?;
+    if catalog_reflects_secret(&models, provider.api_key()) {
+        return Err(invalid_model_catalog_error());
+    }
     state
         .stage_validated_provider(provider, models, now)
         .map_err(launch::command_error_from_contract)
@@ -288,6 +371,31 @@ fn parse_model_catalog(
     Ok(models)
 }
 
+fn catalog_reflects_secret(models: &[ModelChoice], api_key: &str) -> bool {
+    let encoded_api_key: String =
+        url::form_urlencoded::byte_serialize(api_key.as_bytes()).collect();
+    models.iter().any(|model| {
+        [&model.id, &model.name].into_iter().any(|value| {
+            value.contains(api_key)
+                || (!encoded_api_key.is_empty() && value.contains(&encoded_api_key))
+                || looks_like_api_key(value)
+        })
+    })
+}
+
+fn looks_like_api_key(value: &str) -> bool {
+    let candidate = value.trim();
+    if candidate.len() < 20 || candidate.chars().any(char::is_whitespace) {
+        return false;
+    }
+    let lower = candidate.to_ascii_lowercase();
+    [
+        "sk-", "sk_", "pk-", "pk_", "rk-", "rk_", "ghp_", "glpat-", "xoxb-",
+    ]
+    .into_iter()
+    .any(|prefix| lower.starts_with(prefix))
+}
+
 fn command_error_from_model_request(error: ureq::Error) -> CcSwitchCommandError {
     match error {
         ureq::Error::Status(401 | 403, _) => CcSwitchCommandError {
@@ -336,8 +444,7 @@ fn select_model_at_locations<K: RecoveryKeyStore>(
     };
     Ok(CcSwitchPreparedProvider {
         contract_version: validation.contract_version,
-        receipt: validation.receipt,
-        models: validation.models,
+        receipt: validation.receipt.into(),
         recovery: CcSwitchRecoveryHandle {
             snapshot_id: snapshot.id.as_str().to_owned(),
             original: snapshot.original,
@@ -644,8 +751,85 @@ mod recovery_bridge_tests {
         .expect("native model selection creates launch ticket");
         let serialized = serde_json::to_string(&prepared).expect("prepared result serializes");
         assert!(!serialized.contains(&canary));
+        assert!(!serialized.contains("preImportHash"));
+        assert!(!serialized.contains("\"models\""));
         assert_eq!(prepared.receipt.selected_model, "model-b");
-        assert_eq!(prepared.receipt.pre_import_hash.len(), 64);
+
+        let launch_request = bind_launch_request(
+            &state,
+            CcSwitchLaunchCommandRequest {
+                ticket_id: prepared.receipt.ticket_id.clone(),
+                switch_immediately: true,
+                accepted_process_argument_disclosure: true,
+            },
+        )
+        .expect("native ticket supplies launch binding");
+        assert_eq!(launch_request.provider_name, "Local Provider");
+        assert_eq!(launch_request.selected_model, "model-b");
+        assert_eq!(launch_request.pre_import_hash.len(), 64);
+        assert!(launch_request.accepted_process_argument_disclosure);
+
+        let injected_metadata = serde_json::json!({
+            "ticketId": prepared.receipt.ticket_id,
+            "switchImmediately": true,
+            "acceptedProcessArgumentDisclosure": true,
+            "preImportHash": "renderer-controlled"
+        });
+        assert!(serde_json::from_value::<CcSwitchLaunchCommandRequest>(injected_metadata).is_err());
+
+        let ui_receipt: CcSwitchUiLaunchReceipt = CcSwitchLaunchReceipt {
+            contract_version: 1,
+            ticket_id: "ticket-for-ui".to_owned(),
+            provider_name: "Local Provider".to_owned(),
+            endpoint: "https://api.example.test".to_owned(),
+            selected_model: "model-b".to_owned(),
+            pre_import_hash: "native-only-hash".to_owned(),
+            expires_at: MillisSinceEpoch(10_000),
+            enabled: true,
+        }
+        .into();
+        let ui_serialized = serde_json::to_string(&ui_receipt).expect("UI receipt serializes");
+        assert!(!ui_serialized.contains("preImportHash"));
+        assert!(!ui_serialized.contains("native-only-hash"));
+    }
+
+    #[test]
+    fn validation_rejects_a_catalog_that_reflects_the_submitted_secret() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake provider");
+        let address = listener.local_addr().expect("fake provider address");
+        let canary = format!("reflected-secret-{}", uuid::Uuid::new_v4());
+        let reflected = canary.clone();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept validation request");
+            let mut request = [0_u8; 2_048];
+            let _ = stream.read(&mut request).expect("read validation request");
+            let body = format!("{{\"data\":[{{\"id\":\"model-a\",\"name\":\"{reflected}\"}}]}}");
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write reflected response");
+        });
+
+        let error = prepare_provider_with_fetcher(
+            &CcSwitchSetupState::default(),
+            ProviderValidationInput {
+                provider_name: "Reflected Provider".to_owned(),
+                endpoint: format!("http://{address}"),
+                api_key: canary.clone(),
+            },
+            MillisSinceEpoch(1_000),
+            fetch_model_catalog,
+        )
+        .expect_err("secret-reflecting catalog is rejected");
+        server.join().expect("fake provider joins");
+
+        let serialized = serde_json::to_string(&error).expect("fixed error serializes");
+        assert_eq!(error.code, "ccswitch_invalid_model_catalog");
+        assert!(!serialized.contains(&canary));
     }
 
     #[test]

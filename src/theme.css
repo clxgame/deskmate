@@ -28,6 +28,7 @@
   --warn: #e8be82;
   --dialog-backdrop: rgb(6 8 14 / 45%);
   --shadow-focus: 0 0 0 3px var(--focus-ring);
+  --t-head: 15px;
 }
 
 .set-root[data-theme="mint"],

@@ -72,7 +72,7 @@ describe("OpenCode sidecar preparation", () => {
     expect(isJsonObject(draft)).toBe(true);
     if (!isJsonObject(draft)) return;
     expect(draft.version).toBe(1);
-    expect(draft.kind).toBe("yume.ccswitch.opencode_provider_draft");
+    expect(draft.kind).toBe("opencode_provider_draft");
     expect(draft.providerName).toBe("Local YUME");
     expect(JSON.stringify(draft)).not.toContain("apiKey");
     expect(JSON.stringify(draft)).not.toContain("secret");
@@ -90,22 +90,48 @@ describe("OpenCode sidecar preparation", () => {
 
       const sensitiveProviderValue = ["sk", "review", "canary", "1234567890"].join("-");
       const sensitiveModelValue = `${"bear"}${"er"} DROP_VALUE_MODEL`;
-      const output = await loaded.default.execute({
-        providerName: sensitiveProviderValue,
-        baseUrl: "https://models.example.test?api_key=DROP_VALUE_BASE",
-        modelHint: sensitiveModelValue,
-      });
-      const draft: unknown = JSON.parse(output);
+      let message = "";
+      try {
+        await loaded.default.execute({
+          providerName: sensitiveProviderValue,
+          baseUrl: "https://models.example.test?api_key=DROP_VALUE_BASE",
+          modelHint: sensitiveModelValue,
+        });
+      } catch (error) {
+        if (!(error instanceof Error)) throw error;
+        message = error.message;
+      }
 
-      expect(output).not.toContain("DROP_VALUE");
-      expect(output).not.toContain("review-canary");
-      expect(isJsonObject(draft)).toBe(true);
-      if (!isJsonObject(draft)) return;
-      expect(draft.providerName).toBeUndefined();
-      expect(draft.baseUrl).toBeUndefined();
-      expect(draft.modelHint).toBeUndefined();
+      expect(message).toBe("secret-free draft refused");
+      expect(message).not.toContain("DROP_VALUE");
+      expect(message).not.toContain("review-canary");
     } finally {
       await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("refuses token-shaped draft fields before emitting an envelope", async () => {
+    const loaded: unknown = await import(pathToFileURL(shippedTool).href);
+    if (!isJsonObject(loaded) || !isExecutableTool(loaded.default)) {
+      throw new Error("shipped CC Switch tool is not executable");
+    }
+    const tokenLike = [
+      ["gh", "p_", "A".repeat(36)].join(""),
+      ["github", "_pat_", "11", "B".repeat(82)].join(""),
+      ["gl", "pat-", "C".repeat(20)].join(""),
+      ["hf", "_", "D".repeat(32)].join(""),
+      ["xox", "b-", "E".repeat(24)].join(""),
+      ["AK", "IA", "F".repeat(16)].join(""),
+    ];
+
+    for (const candidate of tokenLike) {
+      await expect(
+        loaded.default.execute({
+          providerName: candidate,
+          baseUrl: `https://models.example.test/v1?access_token=${candidate}`,
+          modelHint: `model-${candidate}`,
+        }),
+      ).rejects.toThrow("secret-free draft refused");
     }
   });
 
@@ -122,7 +148,7 @@ describe("OpenCode sidecar preparation", () => {
       const staged = await stageCcswitchTool(join(root, "workspace"));
 
       expect(await readFile(staged, "utf8")).toContain(
-        "yume.ccswitch.opencode_provider_draft",
+        "opencode_provider_draft",
       );
       expect(await readFile(sentinel, "utf8")).toBe("sentinel");
       expect(validatePermissionMap(buildPermissionMap())).toEqual([]);

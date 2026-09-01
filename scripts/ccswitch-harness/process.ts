@@ -1,29 +1,43 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { createServer } from "node:net";
 import { join } from "node:path";
+import type { Readable } from "node:stream";
 import { buildSidecarConfig } from "./permissions";
 import { HarnessError } from "./types";
 
 type OpenCodeLaunch = {
   readonly binary: string;
   readonly port: number;
+  readonly providerBaseUrl: string;
   readonly workspace: string;
   readonly root: string;
+  readonly runtimeCanary: string;
 };
 
-export function childEnv(root: string): NodeJS.ProcessEnv {
-  const next = { ...process.env };
-  delete next.OPENCODE_SERVER_PASSWORD;
-  delete next.OPENCODE_SERVER_USERNAME;
-  next.HOME = root;
-  next.USERPROFILE = root;
-  next.APPDATA = join(root, "AppData", "Roaming");
-  next.LOCALAPPDATA = join(root, "AppData", "Local");
-  next.XDG_CONFIG_HOME = join(root, "xdg-config");
-  next.XDG_DATA_HOME = join(root, "xdg-data");
-  next.XDG_CACHE_HOME = join(root, "xdg-cache");
-  next.OPENCODE_CONFIG_CONTENT = JSON.stringify(buildSidecarConfig());
-  delete next.OPENCODE_AUTH_CONTENT;
+type ChildEnvironmentInput = {
+  readonly root: string;
+  readonly providerBaseUrl: string;
+  readonly runtimeCanary: string;
+};
+
+export type OpenCodeChild = ChildProcessByStdio<null, Readable, Readable>;
+
+export function childEnv(input: ChildEnvironmentInput): NodeJS.ProcessEnv {
+  const inheritedKeys = ["ComSpec", "NUMBER_OF_PROCESSORS", "OS", "PATH", "PATHEXT", "PROCESSOR_ARCHITECTURE", "SystemRoot", "TEMP", "TMP", "WINDIR"] as const;
+  const next: NodeJS.ProcessEnv = {};
+  for (const key of inheritedKeys) {
+    const value = process.env[key];
+    if (value !== undefined) next[key] = value;
+  }
+  next.HOME = input.root;
+  next.USERPROFILE = input.root;
+  next.APPDATA = join(input.root, "AppData", "Roaming");
+  next.LOCALAPPDATA = join(input.root, "AppData", "Local");
+  next.XDG_CONFIG_HOME = join(input.root, "xdg-config");
+  next.XDG_DATA_HOME = join(input.root, "xdg-data");
+  next.XDG_CACHE_HOME = join(input.root, "xdg-cache");
+  next.OPENCODE_CONFIG_CONTENT = JSON.stringify(buildSidecarConfig(input.providerBaseUrl));
+  next.YUME_TODO8_RUNTIME_CANARY = input.runtimeCanary;
   return next;
 }
 
@@ -43,16 +57,16 @@ export async function freePort(): Promise<number> {
   });
 }
 
-export function startOpenCode(input: OpenCodeLaunch): ChildProcessWithoutNullStreams {
+export function startOpenCode(input: OpenCodeLaunch): OpenCodeChild {
   return spawn(input.binary, ["--pure", "serve", "--port", String(input.port), "--hostname", "127.0.0.1", "--print-logs"], {
     cwd: input.workspace,
-    env: childEnv(input.root),
+    env: childEnv(input),
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
   });
 }
 
-export async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
+export async function stopChild(child: OpenCodeChild): Promise<void> {
   const waitForExit = new Promise<void>((resolveStop) => {
     child.once("exit", () => resolveStop());
     setTimeout(() => resolveStop(), 5_000);

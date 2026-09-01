@@ -10,6 +10,7 @@
     "test": "bun test",
     "prepare:sidecar": "bun scripts/prepare-opencode.ts && bun scripts/prepare-ncmdump.ts",
     "verify:ccswitch-tool": "bun scripts/verify-ccswitch-tool.ts",
+    "mock:ccswitch-api": "bun scripts/fixtures/mock-ccswitch-api.ts",
     "fetch:persona-assets": "bun scripts/prepare-personas.ts",
     "preview": "vite preview",
     "tauri": "tauri",

@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { expectJsonObject, HarnessError, isJsonObject, type JsonObject } from "./types";
 
@@ -22,7 +22,7 @@ export function buildPermissionMap(): Record<string, "allow" | "deny"> {
   };
 }
 
-export function buildSidecarConfig(): JsonObject {
+export function buildSidecarConfig(providerBaseUrl = "http://127.0.0.1:9"): JsonObject {
   return {
     $schema: "https://opencode.ai/config.json",
     permission: buildPermissionMap(),
@@ -30,7 +30,7 @@ export function buildSidecarConfig(): JsonObject {
       yume: {
         npm: "@ai-sdk/openai-compatible",
         name: "YUME",
-        options: { baseURL: "http://127.0.0.1:9" },
+        options: { baseURL: providerBaseUrl },
         models: { "model-a": { name: "Model A" } },
       },
     },
@@ -59,6 +59,25 @@ export async function stageCcswitchTool(workspace: string): Promise<string> {
   return target;
 }
 
+export async function stageMalformedCcswitchTool(workspace: string): Promise<string> {
+  const target = join(workspace, ".opencode", "tools", basename(shippedTool));
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(
+    target,
+    [
+      "export default {",
+      "  description: \"Malformed verifier fixture for the CC Switch provider draft tool.\",",
+      "  args: {},",
+      "  async execute() {",
+      "    return \"{not-json\";",
+      "  },",
+      "};",
+      "",
+    ].join("\n"),
+  );
+  return target;
+}
+
 export async function assertToolSourceSecretFree(path = shippedTool): Promise<void> {
   const forbiddenField = /\b(apiKey|api_key|secret|token|credential|password)\s*:/i;
   if (forbiddenField.test(await readFile(path, "utf8"))) {
@@ -79,4 +98,12 @@ export function assertConfig(value: unknown): JsonObject {
   const errors = validatePermissionMap(config.permission);
   if (errors.length > 0) throw new HarnessError(errors.join("; "));
   return config;
+}
+
+export function assertHealth(value: unknown): JsonObject {
+  const health = expectJsonObject(value, "health");
+  if (health.healthy !== true || health.version !== EXPECTED_OPENCODE_VERSION) {
+    throw new HarnessError(`unexpected health: ${JSON.stringify(health)}`);
+  }
+  return health;
 }

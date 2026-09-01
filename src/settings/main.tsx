@@ -2,7 +2,13 @@ import "../devtools";
 import "../theme.css";
 import { createRoot } from "react-dom/client";
 import SettingsApp from "./SettingsApp";
+import { SettingsKeyboardNavigation } from "./SettingsKeyboardNavigation";
 
 const root = document.getElementById("root");
 if (root === null) throw new Error("Missing settings root element");
-createRoot(root).render(<SettingsApp />);
+createRoot(root).render(
+  <>
+    <SettingsApp />
+    <SettingsKeyboardNavigation />
+  </>,
+);

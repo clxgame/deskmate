@@ -101,7 +101,7 @@ const SETTINGS = {
 beforeEach(() => {
   invoke.mockReset();
   promptRequests.length = 0;
-  invoke.mockImplementation((command: string) => {
+  invoke.mockImplementation((command: string, args?: unknown) => {
     switch (command) {
       case "sidecar_base_url":
         return Promise.resolve("http://127.0.0.1:48888");
@@ -109,6 +109,43 @@ beforeEach(() => {
         return Promise.resolve(SETTINGS);
       case "load_persona":
         return Promise.resolve({ persona: "你是小著。", placeholders: null });
+      case "stage_chat_attachment":
+        return Promise.resolve(stageResponse(args));
+      case "read_chat_attachment":
+        return Promise.resolve({
+          id: "stage-notes",
+          sessionId: "ses_attachment",
+          fileName: "notes.md",
+          mime: "text/plain",
+          size: 8,
+          kind: "text",
+          status: "ready",
+          dataUrl: "data:text/plain;base64,IyDorrHliZI=",
+        });
+      case "convert_staged_ncm":
+        return Promise.resolve({
+          id: "artifact-song",
+          sessionId: "ses_attachment",
+          fileName: "song.mp3",
+          mime: "audio/mpeg",
+          size: 3,
+          kind: "audio",
+          status: "ready",
+          dataUrl: "data:audio/mpeg;base64,bmNt",
+        });
+      case "export_chat_artifact":
+        return Promise.resolve({
+          artifactId: "artifact-song",
+          sessionId: "ses_attachment",
+          fileName: "song.mp3",
+          mime: "audio/mpeg",
+          size: 3,
+          exportedAt: "2026-08-28T00:00:00Z",
+        });
+      case "discard_chat_attachment":
+        return Promise.resolve({ discarded: true });
+      case "cleanup_chat_session":
+        return Promise.resolve({ removed: 0 });
       case "memory_context":
       case "history_save":
         return Promise.resolve({ memories: [], promptBlock: "" });
@@ -173,4 +210,48 @@ describe("dropped attachment sending", () => {
 
     await expectAttachmentPrompt("请整理这份笔记");
   });
+
+  test("keeps converted audio local without prompting the model", async () => {
+    render(<ChatApp />);
+    await screen.findByPlaceholderText("输入消息,Enter 发送");
+    const root = document.querySelector(".chat-root");
+    if (!root) throw new Error("chat root is missing");
+    const file = new File(["ncm"], "locked.ncm", {
+      type: "application/octet-stream",
+    });
+    fireEvent.drop(root, {
+      dataTransfer: { files: [file], types: ["Files"] },
+    });
+
+    await screen.findByRole("alertdialog", { name: "转换 NCM 音乐" });
+    fireEvent.click(screen.getByRole("button", { name: "转换" }));
+
+    await screen.findByRole("article", { name: "生成的音频 song.mp3" });
+    expect(screen.getByText("在的,说吧")).toBeTruthy();
+    expect(promptRequests).toHaveLength(0);
+  });
 });
+
+function stageResponse(args: unknown): unknown {
+  const request = payloadRequest(args);
+  const fileName = typeof request.fileName === "string" ? request.fileName : "file.bin";
+  const isNcm = fileName.endsWith(".ncm");
+  return {
+    id: isNcm ? "stage-ncm" : "stage-notes",
+    sessionId: request.sessionId,
+    fileName,
+    mime: isNcm ? "application/x-ncm" : "text/plain",
+    size: request.size,
+    kind: isNcm ? "audio" : "text",
+    status: "staged",
+  };
+}
+
+function payloadRequest(args: unknown): Readonly<Record<string, unknown>> {
+  if (typeof args !== "object" || args === null || !("request" in args)) {
+    throw new Error("request payload missing");
+  }
+  const request = args.request;
+  if (typeof request !== "object" || request === null) throw new Error("request missing");
+  return Object.fromEntries(Object.entries(request));
+}

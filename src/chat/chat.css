@@ -613,45 +613,44 @@
 .chat-attachment-tray {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  width: 100%;
-  max-height: 84px;
+  gap: var(--s-2);
+  max-height: var(--attachment-tray-max-h);
+  min-width: 0;
   overflow-y: auto;
-  padding: 0 2px;
+  padding: 0 var(--s-0-5);
   background: transparent;
   flex-shrink: 0;
+  width: 100%;
 }
 
 .chat-attachment-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--s-1);
   min-width: 0;
   max-width: 100%;
-  padding: 4px 6px 4px 8px;
+  padding: var(--s-1) var(--s-2);
   border: 1px solid var(--line-strong);
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: var(--surface-sunken);
-  font-size: 11px;
+  font-size: var(--t-small);
+  line-height: 1.4;
 }
 
+.chat-attachment-chip-staging,
 .chat-attachment-chip-pending {
   border-color: var(--accent);
   border-style: dashed;
   background: var(--accent-soft);
 }
 
+.chat-attachment-chip-failed,
 .chat-attachment-chip-error {
   border-color: var(--danger);
 }
 
-.chat-attachment-kind {
-  color: var(--accent-ink);
-  font-weight: 700;
-}
-
 .chat-attachment-name {
-  max-width: 210px;
+  max-width: var(--attachment-name-max-w);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -664,43 +663,70 @@
 
 .chat-attachment-status {
   color: var(--text-dim);
+  font-weight: 600;
   white-space: nowrap;
 }
 
+.chat-attachment-status-staging,
 .chat-attachment-status-pending {
   color: var(--accent-ink);
-  font-weight: 600;
 }
 
+.chat-attachment-status-staging::before,
 .chat-attachment-status-pending::before {
   content: "";
   display: inline-block;
-  width: 5px;
-  height: 5px;
-  margin: 0 4px 1px 0;
+  width: var(--s-1);
+  height: var(--s-1);
+  margin: 0 var(--s-1) var(--s-0-5) 0;
   border-radius: 50%;
   background: currentColor;
   vertical-align: middle;
 }
 
+.chat-attachment-status-failed,
 .chat-attachment-status-error {
   color: var(--danger);
 }
 
+.chat-attachment-action,
 .chat-attachment-remove {
-  border: none;
-  background: transparent;
-  color: var(--text-dim);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-raised);
+  color: var(--text);
   cursor: pointer;
-  font-size: 14px;
+  font: inherit;
   line-height: 1;
-  padding: 0 2px;
+  min-height: var(--s-8);
+  padding: var(--s-1) var(--s-2);
+  white-space: nowrap;
 }
 
+.chat-attachment-action:hover:not(:disabled),
 .chat-attachment-remove:hover {
-  color: var(--danger);
+  background: var(--surface-hover);
 }
 
+.chat-attachment-action:focus-visible,
+.chat-artifact-download:focus-visible,
+.chat-artifact-retry:focus-visible {
+  box-shadow: var(--shadow-focus);
+  outline: none;
+}
+
+.chat-attachment-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.chat-attachment-secondary {
+  background: var(--surface-sunken);
+  color: var(--text);
+}
+
+.chat-attachment-action:disabled,
 .chat-attachment-remove:disabled {
   color: var(--text-disabled);
   cursor: default;
@@ -709,8 +735,133 @@
 .chat-attachment-error {
   flex-basis: 100%;
   color: var(--danger);
-  font-size: 11px;
+  font-size: var(--t-small);
   line-height: 1.4;
+}
+
+.chat-attachment-confirm-wrap {
+  display: grid;
+  gap: var(--s-2);
+  min-width: 0;
+  width: 100%;
+}
+
+.chat-attachment-confirm {
+  border: 1px solid var(--warn);
+  border-radius: var(--r-md);
+  background: var(--surface-raised);
+  color: var(--text);
+  display: grid;
+  gap: var(--s-2);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: var(--s-3);
+}
+
+.chat-attachment-confirm-title {
+  color: var(--warn);
+  font-size: var(--t-body);
+  font-weight: 700;
+}
+
+.chat-attachment-confirm-body {
+  color: var(--text-dim);
+  font-size: var(--t-small);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.chat-attachment-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.chat-artifact-row {
+  align-self: stretch;
+  display: flex;
+  justify-content: flex-start;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0 var(--s-3);
+}
+
+.chat-artifact-card {
+  background: var(--surface-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  color: var(--text);
+  display: grid;
+  gap: var(--s-2);
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: var(--s-3);
+  width: 100%;
+}
+
+.chat-artifact-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.chat-artifact-meta {
+  display: grid;
+  gap: var(--s-0-5);
+  min-width: 0;
+}
+
+.chat-artifact-title {
+  font-size: var(--t-body);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-artifact-size,
+.chat-artifact-feedback {
+  color: var(--text-dim);
+  font-size: var(--t-small);
+  line-height: 1.4;
+}
+
+.chat-artifact-feedback-error {
+  color: var(--danger);
+}
+
+.chat-artifact-download,
+.chat-artifact-retry {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  min-height: var(--s-8);
+  padding: var(--s-1) var(--s-2);
+  white-space: nowrap;
+}
+
+.chat-artifact-download:hover:not(:disabled),
+.chat-artifact-retry:hover {
+  background: var(--surface-hover);
+}
+
+.chat-artifact-download:disabled {
+  color: var(--text-disabled);
+  cursor: default;
+}
+
+.chat-artifact-audio {
+  height: var(--s-8);
+  max-width: 100%;
+  min-width: 0;
+  width: 100%;
 }
 
 .chat-message-attachments {

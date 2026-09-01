@@ -5,6 +5,12 @@ use super::protocol::SecretImportUrl;
 
 const WINDOWS_PROTOCOL_KEY: &str = r"HKEY_CLASSES_ROOT\ccswitch\shell\open\command";
 const CC_SWITCH_EXE: &str = "CC-Switch.exe";
+#[cfg(windows)]
+const CC_SWITCH_SHORT_EXE: &str = "CC-SWI~1.EXE";
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+#[cfg(windows)]
+const VERSION_QUERY_PATH_ENV: &str = "YUME_CC_SWITCH_EXE";
 const WINDOWS_FILE_PROTOCOL_HANDLER_ARG: &str = "url.dll,FileProtocolHandler";
 const WINDOWS_SYSTEM_ROOT: &str = r"C:\Windows";
 
@@ -94,9 +100,22 @@ fn registry_command_value(stdout: &str) -> Option<&str> {
 
 #[cfg(windows)]
 fn read_packaged_version(executable: &Path) -> Option<String> {
+    read_packaged_version_with_product_reader(executable, read_executable_product_version)
+}
+
+#[cfg(windows)]
+fn read_packaged_version_with_product_reader(
+    executable: &Path,
+    read_product_version: impl FnOnce(&Path) -> Option<String>,
+) -> Option<String> {
     if !executable.is_file() {
         return None;
     }
+    read_packaged_metadata_version(executable).or_else(|| read_product_version(executable))
+}
+
+#[cfg(windows)]
+fn read_packaged_metadata_version(executable: &Path) -> Option<String> {
     let package_json = executable
         .parent()?
         .join("resources")
@@ -108,6 +127,42 @@ fn read_packaged_version(executable: &Path) -> Option<String> {
         .get("version")
         .and_then(serde_json::Value::as_str)
         .map(str::to_owned)
+}
+
+#[cfg(windows)]
+fn read_executable_product_version(executable: &Path) -> Option<String> {
+    use std::os::windows::process::CommandExt as _;
+
+    let powershell = Path::new(WINDOWS_SYSTEM_ROOT)
+        .join("System32")
+        .join("WindowsPowerShell")
+        .join("v1.0")
+        .join("powershell.exe");
+    if !powershell.is_file() {
+        return None;
+    }
+    let output = Command::new(powershell)
+        .creation_flags(CREATE_NO_WINDOW)
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$path = [Environment]::GetEnvironmentVariable('YUME_CC_SWITCH_EXE', 'Process'); $item = Get-Item -LiteralPath $path; $version = $item.VersionInfo.ProductVersion; if ([string]::IsNullOrWhiteSpace($version)) { $version = $item.VersionInfo.FileVersion }; $version",
+        ])
+        .env(VERSION_QUERY_PATH_ENV, executable)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let version = String::from_utf8(output.stdout).ok()?;
+    version.lines().map(str::trim).find_map(|line| {
+        if line.is_empty() {
+            None
+        } else {
+            Some(line.to_owned())
+        }
+    })
 }
 
 fn detect_installation_from_registry_output(
@@ -154,10 +209,25 @@ pub(crate) fn parse_registered_executable(command: &str) -> Option<PathBuf> {
         return None;
     }
     let file_name = path.file_name()?.to_str()?;
-    if !file_name.eq_ignore_ascii_case(CC_SWITCH_EXE) {
+    if !is_ccswitch_executable_name(file_name) {
         return None;
     }
     Some(path)
+}
+
+fn is_ccswitch_executable_name(file_name: &str) -> bool {
+    file_name.eq_ignore_ascii_case(CC_SWITCH_EXE)
+        || is_windows_short_ccswitch_executable_name(file_name)
+}
+
+#[cfg(windows)]
+fn is_windows_short_ccswitch_executable_name(file_name: &str) -> bool {
+    file_name.eq_ignore_ascii_case(CC_SWITCH_SHORT_EXE)
+}
+
+#[cfg(not(windows))]
+fn is_windows_short_ccswitch_executable_name(_file_name: &str) -> bool {
+    false
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

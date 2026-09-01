@@ -16,10 +16,19 @@ export { CcSwitchSetupCard, dict };
 
 export const draft = {
   callID: "call-1",
+  credentialMode: "manual",
   providerName: "YUME",
   baseUrl: "https://api.example.test/v1",
   modelHint: "model-a",
-};
+} as const;
+
+export const savedSettingsDraft = {
+  callID: "settings",
+  providerName: "YUME OpenCode",
+  baseUrl: "https://settings.example.test/v1",
+  modelHint: "model-b",
+  credentialMode: "saved-settings",
+} as const;
 
 export const selection = {
   contractVersion: 1,
@@ -31,6 +40,18 @@ export const selection = {
     { id: "model-b", name: "Model B" },
   ],
   expiresAt: 123,
+};
+
+export const savedSelection = {
+  contractVersion: 1,
+  selectionId: "saved-selection-1",
+  providerName: "YUME OpenCode",
+  endpoint: "https://settings.example.test/v1",
+  models: [
+    { id: "model-a", name: "Model A" },
+    { id: "model-b", name: "Model B" },
+  ],
+  expiresAt: 456,
 };
 
 export const prepared = {
@@ -52,6 +73,17 @@ export const prepared = {
   },
 };
 
+export const savedPrepared = {
+  ...prepared,
+  receipt: {
+    ...prepared.receipt,
+    ticketId: "saved-ticket-1",
+    providerName: "YUME OpenCode",
+    endpoint: "https://settings.example.test/v1",
+    selectedModel: "model-b",
+  },
+};
+
 export const currentFiles = {
   config: { kind: "present", sha256: "hash-after" },
   auth: { kind: "missing" },
@@ -66,9 +98,22 @@ export function installDefaultInvoke(): void {
       case "prepare_ccswitch_opencode_provider":
         return Promise.resolve(selection);
       case "select_ccswitch_opencode_model":
+        if (
+          typeof args === "object" &&
+          args !== null &&
+          "input" in args &&
+          typeof args.input === "object" &&
+          args.input !== null &&
+          "selectionId" in args.input &&
+          args.input.selectionId === savedSelection.selectionId
+        ) {
+          return Promise.resolve(savedPrepared);
+        }
         return Promise.resolve(prepared);
       case "launch_ccswitch_opencode_import":
         return Promise.resolve({ ...prepared.receipt, enabled: true });
+      case "prepare_ccswitch_opencode_provider_from_settings":
+        return Promise.resolve(savedSelection);
       case "check_ccswitch_opencode_import":
         return Promise.resolve({
           kind: "verified",

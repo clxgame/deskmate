@@ -22,11 +22,14 @@ type CcSwitchErrorMessages = {
 function localizedCcSwitchError(code: string, messages: CcSwitchErrorMessages): string {
   switch (code) {
     case "ccswitch_invalid_api_key":
+    case "ccswitch_saved_api_key_missing":
       return messages.apiKey;
     case "ccswitch_invalid_endpoint":
       return messages.endpoint;
     case "ccswitch_invalid_model":
     case "ccswitch_invalid_model_catalog":
+    case "ccswitch_verified_model_catalog_missing":
+    case "ccswitch_verified_model_missing":
       return messages.model;
     case "ccswitch_selection_expired":
     case "ccswitch_selection_missing":
@@ -123,6 +126,8 @@ const zh = {
   },
   ccSwitchSetupProviderName: "供应商名称",
   ccSwitchSetupValidate: "验证并准备",
+  ccSwitchSetupUseSavedCredential: "使用已验证设置",
+  ccSwitchSetupSavedCredentialHint: "将使用设置中已验证并保存的 API Key，不会在这里显示或重新发送给聊天界面。",
   ccSwitchSetupValidating: "正在验证 API Key，并准备一次性导入票据…",
   ccSwitchSetupModelReady: (count: number) => `验证成功，准备导入 ${count} 个模型。`,
   ccSwitchSetupSwitchImmediately: "导入后立即切换到这个模型",
@@ -251,6 +256,24 @@ const zh = {
   chatAttachmentFixErrors: "请移除读取失败的附件后再发送",
   chatAttachmentSendFailed: "附件发送失败，请检查文件后重试",
   chatAttachmentDropFailed: "没有读取到拖入的文件，请重新拖入",
+  chatAttachmentTrayLabel: "附件",
+  chatAttachmentStaging: "暂存中",
+  chatAttachmentFailed: "处理失败",
+  chatAttachmentProcessing: "正在转换",
+  chatAttachmentRetryShort: "重试",
+  chatAttachmentRetry: (name: string) => `重试 ${name}`,
+  chatAttachmentNcmTitle: "转换 NCM 音乐",
+  chatAttachmentNcmDescription: (name: string) =>
+    `${name} 需要先转换成本地音频卡，确认后才会处理，不会发送给 AI。`,
+  chatAttachmentConvertNcm: "转换",
+  chatAttachmentCancelNcm: "取消",
+  chatArtifactCardLabel: (name: string) => `生成的音频 ${name}`,
+  chatArtifactAudioPreview: (name: string) => `播放 ${name}`,
+  chatArtifactDownload: "下载",
+  chatArtifactSaving: "保存中",
+  chatArtifactRetryDownload: "重试下载",
+  chatArtifactSaved: (name: string) => `已保存为 ${name}`,
+  chatArtifactSaveFailed: (detail: string) => `保存失败：${detail}`,
   resourceSyncFailed: "角色资源释放失败，部分角色或技能可能缺失",
   scheduledTaskPrefix: "定时任务",
   // 记忆
@@ -398,6 +421,9 @@ const en: Dict = {
   },
   ccSwitchSetupProviderName: "Provider name",
   ccSwitchSetupValidate: "Validate and prepare",
+  ccSwitchSetupUseSavedCredential: "Use verified settings",
+  ccSwitchSetupSavedCredentialHint:
+    "Uses the API key already verified and saved in Settings; it is not shown here or sent back into chat.",
   ccSwitchSetupValidating: "Validating the API key and preparing a one-time import ticket…",
   ccSwitchSetupModelReady: (count) => `Verified. ${count} model(s) are ready to import.`,
   ccSwitchSetupSwitchImmediately: "Switch to this model after import",
@@ -526,6 +552,24 @@ const en: Dict = {
   chatAttachmentFixErrors: "Remove failed attachments before sending",
   chatAttachmentSendFailed: "Attachment send failed; check the file and try again",
   chatAttachmentDropFailed: "No file was detected; drop it again",
+  chatAttachmentTrayLabel: "Attachments",
+  chatAttachmentStaging: "Staging",
+  chatAttachmentFailed: "Failed",
+  chatAttachmentProcessing: "Converting",
+  chatAttachmentRetryShort: "Retry",
+  chatAttachmentRetry: (name) => `Retry ${name}`,
+  chatAttachmentNcmTitle: "Convert NCM music",
+  chatAttachmentNcmDescription: (name) =>
+    `${name} needs to become a local audio card first. It will not be sent to the AI.`,
+  chatAttachmentConvertNcm: "Convert",
+  chatAttachmentCancelNcm: "Cancel",
+  chatArtifactCardLabel: (name) => `Generated audio ${name}`,
+  chatArtifactAudioPreview: (name) => `Play ${name}`,
+  chatArtifactDownload: "Download",
+  chatArtifactSaving: "Saving",
+  chatArtifactRetryDownload: "Retry download",
+  chatArtifactSaved: (name) => `Saved as ${name}`,
+  chatArtifactSaveFailed: (detail) => `Save failed: ${detail}`,
   resourceSyncFailed: "Could not unpack persona resources; some personas or skills may be missing",
   scheduledTaskPrefix: "Scheduled task",
   memoryRemember: "Remember this",
@@ -676,6 +720,9 @@ const ja: Dict = {
   },
   ccSwitchSetupProviderName: "プロバイダー名",
   ccSwitchSetupValidate: "検証して準備",
+  ccSwitchSetupUseSavedCredential: "検証済み設定を使用",
+  ccSwitchSetupSavedCredentialHint:
+    "設定で検証して保存済みの API キーを使用します。ここには表示せず、チャット画面にも返しません。",
   ccSwitchSetupValidating: "API キーを検証し、一回限りのインポートチケットを準備しています…",
   ccSwitchSetupModelReady: (count) => `検証成功。${count} 件のモデルをインポートできます。`,
   ccSwitchSetupSwitchImmediately: "インポート後すぐこのモデルに切り替える",
@@ -803,6 +850,24 @@ const ja: Dict = {
   chatAttachmentFixErrors: "読み込みに失敗した添付を削除してから送信してください",
   chatAttachmentSendFailed: "添付の送信に失敗しました。確認して再試行してください",
   chatAttachmentDropFailed: "ファイルを検出できませんでした。もう一度ドロップしてください",
+  chatAttachmentTrayLabel: "添付",
+  chatAttachmentStaging: "一時保存中",
+  chatAttachmentFailed: "処理失敗",
+  chatAttachmentProcessing: "変換中",
+  chatAttachmentRetryShort: "再試行",
+  chatAttachmentRetry: (name) => `${name} を再試行`,
+  chatAttachmentNcmTitle: "NCM 音楽を変換",
+  chatAttachmentNcmDescription: (name) =>
+    `${name} は先にローカル音声カードへ変換します。AI には送信されません。`,
+  chatAttachmentConvertNcm: "変換",
+  chatAttachmentCancelNcm: "キャンセル",
+  chatArtifactCardLabel: (name) => `生成された音声 ${name}`,
+  chatArtifactAudioPreview: (name) => `${name} を再生`,
+  chatArtifactDownload: "ダウンロード",
+  chatArtifactSaving: "保存中",
+  chatArtifactRetryDownload: "ダウンロードを再試行",
+  chatArtifactSaved: (name) => `${name} として保存しました`,
+  chatArtifactSaveFailed: (detail) => `保存に失敗しました: ${detail}`,
   resourceSyncFailed: "キャラクター素材の展開に失敗しました。一部が欠けている可能性があります",
   scheduledTaskPrefix: "定時タスク",
   memoryRemember: "これを覚えて",
@@ -950,6 +1015,9 @@ const ko: Dict = {
   },
   ccSwitchSetupProviderName: "공급자 이름",
   ccSwitchSetupValidate: "검증 및 준비",
+  ccSwitchSetupUseSavedCredential: "검증된 설정 사용",
+  ccSwitchSetupSavedCredentialHint:
+    "설정에서 검증되어 저장된 API Key를 사용하며, 여기에는 표시하거나 채팅 화면으로 다시 보내지 않습니다.",
   ccSwitchSetupValidating: "API 키를 검증하고 일회용 가져오기 티켓을 준비하는 중…",
   ccSwitchSetupModelReady: (count) => `검증 성공. ${count}개 모델을 가져올 준비가 됐습니다.`,
   ccSwitchSetupSwitchImmediately: "가져온 뒤 이 모델로 바로 전환",
@@ -1077,6 +1145,24 @@ const ko: Dict = {
   chatAttachmentFixErrors: "실패한 첨부를 삭제한 뒤 보내세요",
   chatAttachmentSendFailed: "첨부 전송에 실패했습니다. 파일을 확인하고 다시 시도하세요",
   chatAttachmentDropFailed: "파일을 찾지 못했습니다. 다시 끌어다 놓으세요",
+  chatAttachmentTrayLabel: "첨부",
+  chatAttachmentStaging: "임시 저장 중",
+  chatAttachmentFailed: "처리 실패",
+  chatAttachmentProcessing: "변환 중",
+  chatAttachmentRetryShort: "다시 시도",
+  chatAttachmentRetry: (name) => `${name} 다시 시도`,
+  chatAttachmentNcmTitle: "NCM 음악 변환",
+  chatAttachmentNcmDescription: (name) =>
+    `${name} 파일은 먼저 로컬 오디오 카드로 변환됩니다. AI에는 전송되지 않습니다.`,
+  chatAttachmentConvertNcm: "변환",
+  chatAttachmentCancelNcm: "취소",
+  chatArtifactCardLabel: (name) => `생성된 오디오 ${name}`,
+  chatArtifactAudioPreview: (name) => `${name} 재생`,
+  chatArtifactDownload: "다운로드",
+  chatArtifactSaving: "저장 중",
+  chatArtifactRetryDownload: "다운로드 다시 시도",
+  chatArtifactSaved: (name) => `${name}(으)로 저장했습니다`,
+  chatArtifactSaveFailed: (detail) => `저장 실패: ${detail}`,
   resourceSyncFailed: "캐릭터 리소스 압축 해제에 실패했습니다. 일부가 누락될 수 있습니다",
   scheduledTaskPrefix: "예약 작업",
   memoryRemember: "이걸 기억해",

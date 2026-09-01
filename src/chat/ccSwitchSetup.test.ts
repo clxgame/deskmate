@@ -48,6 +48,21 @@ describe("CC Switch setup tool handling in chat", () => {
     expect(containsCcSwitchApiKey("unrelated sk-example_12345678")).toBe(false);
   });
 
+  test("uses saved credentials only for setup requests emitted by Settings", async () => {
+    await renderChat();
+
+    receiveAppEvent("deskmate://ccswitch-setup-request", { source: "settings" });
+
+    expect(await screen.findByRole("region", { name: "安全配置 OpenCode" })).toBeDefined();
+    expect(screen.queryByLabelText("API Key")).toBeNull();
+    expect(screen.getByRole("button", { name: "使用已验证设置" })).toBeDefined();
+    expect(
+      invoke.mock.calls.some(
+        ([command]) => command === "prepare_ccswitch_opencode_provider_from_settings",
+      ),
+    ).toBe(false);
+  });
+
   test("cleans a live native ticket and recovery snapshot on persona change without key echo", async () => {
     await renderChat();
     receiveAppEvent("deskmate://ccswitch-setup-request", null);

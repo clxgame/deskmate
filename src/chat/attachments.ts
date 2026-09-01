@@ -1,143 +1,84 @@
 import * as mammoth from "mammoth";
 
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
-export const MAX_TOTAL_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const MAX_TEXT_CHARS = 160_000;
+const DOCX_MIME =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 const TEXT_EXTENSIONS = new Set([
-  "c",
-  "cfg",
-  "conf",
-  "cpp",
-  "css",
-  "csv",
-  "go",
-  "h",
-  "hpp",
-  "html",
-  "ini",
-  "java",
-  "js",
-  "json",
-  "jsx",
-  "log",
-  "md",
-  "mdx",
-  "mjs",
-  "mts",
-  "py",
-  "rs",
-  "scss",
-  "sh",
-  "sql",
-  "toml",
-  "ts",
-  "tsx",
-  "txt",
-  "vue",
-  "xml",
-  "yaml",
-  "yml",
+  "c", "cfg", "conf", "cpp", "css", "csv", "go", "h", "hpp", "html", "ini",
+  "java", "js", "json", "jsx", "log", "md", "mdx", "mjs", "mts", "py", "rs",
+  "scss", "sh", "sql", "toml", "ts", "tsx", "txt", "vue", "xml", "yaml", "yml",
 ]);
+const AUDIO_EXTENSIONS = new Set(["flac", "mp3", "ncm"]);
 
-const IMAGE_MIME_TYPES = new Set([
+const SUPPORTED_IMAGE_MIME_TYPES = [
   "image/gif",
   "image/jpeg",
   "image/png",
   "image/webp",
-]);
-
-export type ChatAttachmentKind = "image" | "text" | "audio";
-export type ChatAttachmentStatus = "pending" | "ready" | "error";
-
-export interface ChatAttachment {
-  id: string;
-  name: string;
-  mime: string;
-  size: number;
-  kind: ChatAttachmentKind;
-  /** Original file kept in the composer until the user explicitly sends it. */
-  file?: File;
-  dataUrl?: string;
-  status: ChatAttachmentStatus;
-  error?: string;
-  truncated?: boolean;
-}
+] as const;
+type SupportedImageMime = (typeof SUPPORTED_IMAGE_MIME_TYPES)[number];
+const IMAGE_MIME_TYPES: ReadonlySet<string> = new Set(SUPPORTED_IMAGE_MIME_TYPES);
 
 export interface OpenCodeFilePart {
-  type: "file";
-  mime: string;
-  filename: string;
-  url: string;
+  readonly type: "file";
+  readonly mime: string;
+  readonly filename: string;
+  readonly url: string;
 }
 
-export function isNcmFile(file: File): boolean {
-  return extensionOf(file.name) === "ncm";
-}
+export type StagedAttachmentMetadata = { readonly id: string; readonly name: string; readonly mime: string; readonly size: number };
 
-export function isSupportedAttachment(file: File): boolean {
-  const extension = extensionOf(file.name);
-  const mime = normalizedMime(file);
-  return (
-    IMAGE_MIME_TYPES.has(mime) ||
-    mime === "application/pdf" ||
-    mime ===
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-    TEXT_EXTENSIONS.has(extension)
-  );
-}
+export type StagedAttachmentSource = { readonly metadata: StagedAttachmentMetadata; readonly bytes: ArrayBuffer };
 
-export function createPendingAttachment(file: File): ChatAttachment {
-  const isImage = file.type.toLowerCase().startsWith("image/");
-  return {
-    id: makeId(),
-    name: file.name,
-    mime: file.type || "application/octet-stream",
-    size: file.size,
-    kind: isImage ? "image" : isNcmFile(file) ? "audio" : "text",
-    file,
-    status: "pending",
-  };
-}
+export type TextModelReadyAttachment = {
+  readonly id: string; readonly name: string; readonly mime: "text/plain"; readonly size: number;
+  readonly kind: "text"; readonly status: "ready"; readonly dataUrl: string; readonly truncated: boolean;
+};
 
-export function snapshotSelectedFiles(files: ArrayLike<File> | null): File[] {
-  return files ? Array.from(files) : [];
-}
+export type ImageModelReadyAttachment = {
+  readonly id: string; readonly name: string; readonly mime: SupportedImageMime;
+  readonly size: number; readonly kind: "image"; readonly status: "ready"; readonly dataUrl: string;
+};
 
-export async function readChatAttachment(file: File): Promise<ChatAttachment> {
-  if (file.size > MAX_ATTACHMENT_BYTES) {
-    throw new Error(`${file.name} 超过 20 MB 限制`);
+export type ModelReadyAttachment = TextModelReadyAttachment | ImageModelReadyAttachment;
+
+export async function prepareModelReadyAttachment(
+  source: StagedAttachmentSource,
+): Promise<ModelReadyAttachment> {
+  const { metadata, bytes } = source;
+  if (metadata.size > MAX_ATTACHMENT_BYTES) {
+    throw new Error(`${metadata.name} 超过 20 MB 限制`);
   }
 
-  const mime = normalizedMime(file);
-  if (IMAGE_MIME_TYPES.has(mime)) {
+  const extension = extensionOf(metadata.name);
+  const mime = normalizedMime(metadata.name, metadata.mime);
+  if (AUDIO_EXTENSIONS.has(extension) || mime.startsWith("audio/")) {
+    throw new Error(`${metadata.name} 暂不支持读取，请选择图片、PDF、DOCX 或文本文件`);
+  }
+  if (isSupportedImageMime(mime)) {
     return {
-      id: makeId(),
-      name: file.name,
+      id: metadata.id,
+      name: metadata.name,
       mime,
-      size: file.size,
+      size: metadata.size,
       kind: "image",
       status: "ready",
-      dataUrl: await readDataUrl(file),
+      dataUrl: await readDataUrl(new Blob([bytes], { type: mime })),
     };
   }
 
-  const extension = extensionOf(file.name);
   let text: string;
   if (mime === "application/pdf" || extension === "pdf") {
-    text = await extractPdfText(await file.arrayBuffer());
-  } else if (
-    mime ===
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-    extension === "docx"
-  ) {
-    text = (await mammoth.extractRawText({
-      arrayBuffer: await file.arrayBuffer(),
-    })).value;
+    text = await extractPdfText(bytes);
+  } else if (mime === DOCX_MIME || extension === "docx") {
+    const input = { arrayBuffer: bytes, buffer: new Uint8Array(bytes) };
+    text = (await mammoth.extractRawText(input)).value;
   } else if (TEXT_EXTENSIONS.has(extension) || mime.startsWith("text/")) {
-    text = await file.text();
+    text = new TextDecoder().decode(bytes);
   } else {
-    throw new Error(`${file.name} 暂不支持读取，请选择图片、PDF、DOCX 或文本文件`);
+    throw new Error(`${metadata.name} 暂不支持读取，请选择图片、PDF、DOCX 或文本文件`);
   }
 
   const truncated = text.length > MAX_TEXT_CHARS;
@@ -147,10 +88,10 @@ export async function readChatAttachment(file: File): Promise<ChatAttachment> {
     : "";
   const normalizedText = `${bounded}${suffix}`.trim();
   return {
-    id: makeId(),
-    name: file.name,
+    id: metadata.id,
+    name: metadata.name,
     mime: "text/plain",
-    size: file.size,
+    size: metadata.size,
     kind: "text",
     status: "ready",
     dataUrl: await readDataUrl(
@@ -161,14 +102,9 @@ export async function readChatAttachment(file: File): Promise<ChatAttachment> {
 }
 
 export function toOpenCodeFilePart(
-  attachment: ChatAttachment,
-): OpenCodeFilePart | null {
-  if (
-    attachment.kind === "audio" ||
-    attachment.status !== "ready" ||
-    !attachment.dataUrl
-  )
-    return null;
+  attachment: ModelReadyAttachment,
+): OpenCodeFilePart {
+  if (!isModelReadyAttachment(attachment)) throw new Error("Unsupported model attachment");
   return {
     type: "file",
     mime: attachment.mime,
@@ -188,9 +124,10 @@ function extensionOf(name: string): string {
   return dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
 }
 
-function normalizedMime(file: File): string {
-  if (file.type) return file.type.toLowerCase();
-  switch (extensionOf(file.name)) {
+function normalizedMime(name: string, mime: string): string {
+  const normalized = mime.toLowerCase();
+  if (normalized && normalized !== "application/octet-stream") return normalized;
+  switch (extensionOf(name)) {
     case "jpg":
     case "jpeg":
       return "image/jpeg";
@@ -203,33 +140,44 @@ function normalizedMime(file: File): string {
     case "pdf":
       return "application/pdf";
     case "docx":
-      return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      return DOCX_MIME;
     default:
-      return "text/plain";
+      return "application/octet-stream";
   }
 }
 
-function makeId(): string {
-  return typeof crypto.randomUUID === "function"
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+function isSupportedImageMime(mime: string): mime is SupportedImageMime {
+  return IMAGE_MIME_TYPES.has(mime);
 }
 
-function readDataUrl(value: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () =>
-      typeof reader.result === "string"
-        ? resolve(reader.result)
-        : reject(new Error("无法读取文件"));
-    reader.onerror = () => reject(new Error("无法读取文件"));
-    reader.readAsDataURL(value);
-  });
+function isModelReadyAttachment(value: unknown): value is ModelReadyAttachment {
+  if (typeof value !== "object" || value === null) return false;
+  if (!("status" in value) || !("dataUrl" in value) || !("kind" in value) || !("mime" in value)) {
+    return false;
+  }
+  if (value.status !== "ready" || typeof value.dataUrl !== "string" || typeof value.mime !== "string") return false;
+  if (value.kind === "text") {
+    return value.mime === "text/plain" && value.dataUrl.startsWith("data:text/plain");
+  }
+  if (value.kind === "image") {
+    return isSupportedImageMime(value.mime) && value.dataUrl.startsWith(`data:${value.mime}`);
+  }
+  return false;
+}
+
+async function readDataUrl(value: Blob): Promise<string> {
+  const bytes = new Uint8Array(await value.arrayBuffer());
+  const chunks: string[] = [];
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    chunks.push(String.fromCharCode(...bytes.slice(offset, offset + chunkSize)));
+  }
+  return `data:${value.type};base64,${btoa(chunks.join(""))}`;
 }
 
 async function extractPdfText(data: ArrayBuffer): Promise<string> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const document = await pdfjs.getDocument({ data }).promise;
+  const document = await pdfjs.getDocument({ data, useSystemFonts: true }).promise;
   const pages: string[] = [];
   let extractedChars = 0;
   for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {

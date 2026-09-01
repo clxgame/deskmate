@@ -14,8 +14,7 @@ type AiUsageView =
   | { readonly kind: "ready"; readonly usage: AiUsageData };
 
 interface AiUsageProps {
-  readonly baseUrl: string;
-  readonly apiKey: string;
+  readonly enabled: boolean;
   readonly t: Dict;
 }
 
@@ -23,14 +22,13 @@ function formatYuan(amount: number, digits: number): string {
   return `¥${(amount / CNY_UNIT_DIVISOR).toFixed(digits)}`;
 }
 
-export function AiUsage({ baseUrl, apiKey, t }: AiUsageProps) {
+export function AiUsage({ enabled, t }: AiUsageProps) {
   const [view, setView] = useState<AiUsageView>({ kind: "loading" });
   const [refreshVersion, setRefreshVersion] = useState(0);
 
   useEffect(() => {
     let active = true;
-    const key = apiKey.trim();
-    if (!key) {
+    if (!enabled) {
       setView({ kind: "missing-key" });
       return;
     }
@@ -38,7 +36,7 @@ export function AiUsage({ baseUrl, apiKey, t }: AiUsageProps) {
     const load = async (): Promise<void> => {
       setView({ kind: "loading" });
       try {
-        const usage = await getAiUsage(baseUrl, key);
+        const usage = await getAiUsage();
         if (active) setView({ kind: "ready", usage });
       } catch (error) {
         const message = (error instanceof Error ? error.message : String(error)).replace(
@@ -61,7 +59,7 @@ export function AiUsage({ baseUrl, apiKey, t }: AiUsageProps) {
       active = false;
       window.clearInterval(refreshTimer);
     };
-  }, [apiKey, baseUrl, refreshVersion]);
+  }, [enabled, refreshVersion]);
 
   const isLoading = view.kind === "loading";
   return (

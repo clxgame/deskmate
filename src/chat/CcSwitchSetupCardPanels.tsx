@@ -37,6 +37,7 @@ function ConfirmationPanel({ t, controller }: PanelProps) {
       <p>{t.ccSwitchSetupRecoveryDisclosure}</p>
       <div className="ccswitch-actions">
         <button
+          ref={controller.launchButtonRef}
           type="button"
           className="ccswitch-primary"
           onClick={() => void controller.actions.launch()}
@@ -61,6 +62,7 @@ function ModelReadyPanel({ t, controller }: PanelProps) {
       <label>
         <span>{t.model}</span>
         <select
+          ref={controller.modelSelectRef}
           value={controller.selectedModelId}
           onChange={(event) => controller.actions.setSelectedModelId(event.target.value)}
           autoComplete="off"
@@ -135,6 +137,7 @@ function RestoreConfirmationPanel({ t, controller }: PanelProps) {
       <p>{t.ccSwitchSetupRestoreDisclosure}</p>
       <div className="ccswitch-actions">
         <button
+          ref={controller.launchButtonRef}
           type="button"
           className="ccswitch-primary"
           onClick={() => void controller.actions.restore()}

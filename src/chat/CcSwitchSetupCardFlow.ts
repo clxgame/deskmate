@@ -2,6 +2,7 @@ import type { FormEvent } from "react";
 import {
   cancelCcSwitchSetup,
   completeCcSwitchRecovery,
+  prepareCcSwitchOpenCodeProviderFromSettings,
   selectCcSwitchOpenCodeModel,
   validateCcSwitchOpenCodeProvider,
 } from "../lib/ccswitch";
@@ -15,6 +16,10 @@ export async function validateSetup(
 ): Promise<void> {
   event.preventDefault();
   if (!canValidate || runtime.refs.submissionRef.current) return;
+  if (runtime.credentialMode === "saved-settings") {
+    await prepareSavedSettingsSetup(runtime);
+    return;
+  }
   const apiKeyInput = runtime.refs.apiKeyInputRef.current;
   let apiKey = apiKeyInput?.value ?? "";
   if (!apiKey) return;
@@ -51,6 +56,45 @@ export async function validateSetup(
     const code = caught instanceof Error ? errorCode(caught) : errorCode(caught);
     if (ticketId) await ignoreAsyncError(cancelCcSwitchSetup(ticketId));
     runtime.clearApiKeyInput();
+    runtime.setters.setCatalog(null);
+    runtime.setters.setPrepared(null);
+    runtime.refs.liveTicketRef.current = null;
+    runtime.setters.setError(runtime.t.ccSwitchSetupError(code));
+    runtime.setters.setStep("invalid");
+  } finally {
+    runtime.refs.submissionRef.current = false;
+    if (runtime.refs.mountedRef.current && runtime.refs.lifecycleGenerationRef.current === generation) {
+      runtime.setters.setSubmitting(false);
+    }
+  }
+}
+
+async function prepareSavedSettingsSetup(runtime: CcSwitchSetupRuntime): Promise<void> {
+  const generation = runtime.refs.lifecycleGenerationRef.current;
+  runtime.refs.submissionRef.current = true;
+  runtime.setters.setSubmitting(true);
+  runtime.setters.setStep("validating");
+  runtime.setters.setError(null);
+  try {
+    const result = await prepareCcSwitchOpenCodeProviderFromSettings({
+      providerName: runtime.state.providerName,
+    });
+    if (!runtime.refs.mountedRef.current || runtime.refs.lifecycleGenerationRef.current !== generation) {
+      await ignoreAsyncError(cancelCcSwitchSetup(result.selectionId));
+      return;
+    }
+    runtime.refs.liveTicketRef.current = result.selectionId;
+    runtime.setters.setCatalog(result);
+    runtime.setters.setPrepared(null);
+    runtime.setters.setSelectedModelId(
+      result.models.find((model) => model.id === runtime.draft?.modelHint)?.id ??
+        result.models[0]?.id ??
+        "",
+    );
+    runtime.setters.setStep("model-ready");
+  } catch (caught) {
+    if (!runtime.refs.mountedRef.current || runtime.refs.lifecycleGenerationRef.current !== generation) return;
+    const code = caught instanceof Error ? errorCode(caught) : errorCode(caught);
     runtime.setters.setCatalog(null);
     runtime.setters.setPrepared(null);
     runtime.refs.liveTicketRef.current = null;

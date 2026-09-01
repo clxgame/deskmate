@@ -6,14 +6,14 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
-use base64::Engine;
 use sha2::{Digest, Sha256};
 use tauri::{Emitter, Manager, RunEvent, State};
 
 mod ai_usage;
 pub mod ccswitch;
+mod chat_attachments;
 mod history;
 /// Local memory: storage, policy, retrieval, and the frontend command surface.
 mod memory;
@@ -23,6 +23,7 @@ mod settings;
 mod updater;
 mod window_layout;
 use ai_usage::fetch_ai_usage;
+use chat_attachments::AttachmentStore;
 use history::HistoryState;
 use settings::{get_settings, set_settings, verify_api_key, SettingsState};
 
@@ -62,117 +63,6 @@ fn load_persona(app: tauri::AppHandle, id: String) -> Result<serde_json::Value, 
         "placeholders": placeholders,
         "skills": skills,
     }))
-}
-
-/// Skill file that grants ncm conversion. A persona may use `convert_ncm` only
-/// when its owning pack declares this file and ships it.
-const NCM_SKILL_FILE: &str = "ncmdump.md";
-
-#[derive(serde::Serialize)]
-struct ConvertedNcm {
-    filename: String,
-    mime: String,
-    size: usize,
-    #[serde(rename = "dataUrl")]
-    data_url: String,
-}
-
-#[tauri::command]
-fn convert_ncm(
-    app: tauri::AppHandle,
-    persona_id: String,
-    filename: String,
-    bytes: Vec<u8>,
-) -> Result<ConvertedNcm, String> {
-    // The ability is declared by the owning pack's manifest, so a future pack can
-    // grant ncm conversion without editing this command.
-    if !packs::persona_grants_skill(&app, &persona_id, NCM_SKILL_FILE) {
-        return Err("当前角色没有 ncm 转换能力".into());
-    }
-    const MAX_NCM_BYTES: usize = 64 * 1024 * 1024;
-    if bytes.is_empty() || bytes.len() > MAX_NCM_BYTES {
-        return Err("NCM 文件必须在 1 B 至 64 MB 之间".into());
-    }
-    let source_name = std::path::Path::new(&filename)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| name.to_ascii_lowercase().ends_with(".ncm"))
-        .ok_or("无效的 NCM 文件名")?
-        .to_string();
-    let binary = resolve_ncmdump(&app).ok_or("客户端未找到内置 ncmdump")?;
-    let cache = app
-        .path()
-        .app_cache_dir()
-        .map_err(|error| error.to_string())?
-        .join("ncmdump");
-    std::fs::create_dir_all(&cache).map_err(|error| error.to_string())?;
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
-    let work_dir = cache.join(format!("{}-{nonce}", std::process::id()));
-    std::fs::create_dir_all(&work_dir).map_err(|error| error.to_string())?;
-    let result = (|| -> Result<ConvertedNcm, String> {
-        let input = work_dir.join(source_name);
-        let output_dir = work_dir.join("output");
-        std::fs::create_dir_all(&output_dir).map_err(|error| error.to_string())?;
-        std::fs::write(&input, bytes).map_err(|error| error.to_string())?;
-
-        let mut command = Command::new(&binary);
-        command.arg(&input).arg("-o").arg(&output_dir);
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            command.creation_flags(CREATE_NO_WINDOW);
-        }
-        let output = command.output().map_err(|_| "无法启动内置 ncmdump")?;
-        if !output.status.success() {
-            return Err("ncmdump 无法转换这个文件".into());
-        }
-
-        let mut converted = std::fs::read_dir(&output_dir)
-            .map_err(|error| error.to_string())?
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| {
-                matches!(
-                    path.extension()
-                        .and_then(|extension| extension.to_str())
-                        .map(|extension| extension.to_ascii_lowercase())
-                        .as_deref(),
-                    Some("mp3") | Some("flac")
-                )
-            })
-            .collect::<Vec<_>>();
-        converted.sort();
-        let output_path = converted.first().ok_or("ncmdump 没有生成音频文件")?;
-        let output_bytes = std::fs::read(output_path).map_err(|error| error.to_string())?;
-        let extension = output_path
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .unwrap_or("mp3")
-            .to_ascii_lowercase();
-        let mime = if extension == "flac" {
-            "audio/flac"
-        } else {
-            "audio/mpeg"
-        };
-        let output_name = output_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("converted-audio.mp3")
-            .to_string();
-        let data = base64::engine::general_purpose::STANDARD.encode(&output_bytes);
-        Ok(ConvertedNcm {
-            filename: output_name,
-            mime: mime.to_string(),
-            size: output_bytes.len(),
-            data_url: format!("data:{mime};base64,{data}"),
-        })
-    })();
-    let _ = std::fs::remove_dir_all(&work_dir);
-    result
 }
 
 #[tauri::command]
@@ -250,9 +140,10 @@ pub(crate) fn hide_chat_impl(app: &tauri::AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        configure_sidecar_command, migrate_legacy_xiaozhu_intro, overwrite_builtin_xiaozhu_persona,
-        overwrite_yume_opencode_tool, resource_error_event, should_follow_chat_on_window_event,
-        should_hide_chat, should_restore_settings_focus, RESOURCE_ERROR_EVENT,
+        configure_sidecar_command, configure_sidecar_environment, migrate_legacy_xiaozhu_intro,
+        overwrite_builtin_xiaozhu_persona, overwrite_yume_opencode_tool, resource_error_event,
+        should_follow_chat_on_window_event, should_hide_chat, should_restore_settings_focus,
+        RESOURCE_ERROR_EVENT,
     };
     use crate::settings::{self, ApiModel, ModelCatalog};
     use std::ffi::OsStr;
@@ -294,6 +185,54 @@ mod tests {
         configure_sidecar_command(&mut command, 47_891, Path::new("."));
 
         assert_eq!(command.get_args().next(), Some(OsStr::new("--pure")));
+    }
+
+    #[test]
+    fn yume_sidecar_environment_isolated_from_global_home_and_xdg_locations() {
+        let root = std::env::temp_dir().join(format!("yume-sidecar-env-{}", uuid::Uuid::new_v4()));
+        let data_dir = root.join("data");
+        std::fs::create_dir_all(&data_dir).expect("create data directory");
+
+        let mut command = Command::new("opencode");
+        configure_sidecar_environment(&mut command, &data_dir);
+
+        let sidecar_home = data_dir.join("opencode-home");
+        let appdata = sidecar_home.join("AppData").join("Roaming");
+        let localappdata = sidecar_home.join("AppData").join("Local");
+        let xdg_config = sidecar_home.join("xdg-config");
+        let xdg_data = sidecar_home.join("xdg-data");
+        let xdg_cache = sidecar_home.join("xdg-cache");
+        let envs = command.get_envs().collect::<Vec<_>>();
+
+        assert!(envs.iter().any(|(key, value)| {
+            *key == OsStr::new("HOME") && *value == Some(sidecar_home.as_os_str())
+        }));
+        assert!(envs.iter().any(|(key, value)| {
+            *key == OsStr::new("USERPROFILE") && *value == Some(sidecar_home.as_os_str())
+        }));
+        assert!(envs.iter().any(|(key, value)| {
+            *key == OsStr::new("APPDATA") && *value == Some(appdata.as_os_str())
+        }));
+        assert!(envs.iter().any(|(key, value)| {
+            *key == OsStr::new("LOCALAPPDATA") && *value == Some(localappdata.as_os_str())
+        }));
+        assert!(envs.iter().any(|(key, value)| {
+            *key == OsStr::new("XDG_CONFIG_HOME") && *value == Some(xdg_config.as_os_str())
+        }));
+        assert!(envs.iter().any(|(key, value)| {
+            *key == OsStr::new("XDG_DATA_HOME") && *value == Some(xdg_data.as_os_str())
+        }));
+        assert!(envs.iter().any(|(key, value)| {
+            *key == OsStr::new("XDG_CACHE_HOME") && *value == Some(xdg_cache.as_os_str())
+        }));
+        assert!(envs.iter().any(|(key, value)| {
+            *key == OsStr::new("OPENCODE_CONFIG_CONTENT") && value.is_none()
+        }));
+        assert!(envs.iter().any(|(key, value)| {
+            *key == OsStr::new("OPENCODE_AUTH_CONTENT") && value.is_none()
+        }));
+
+        std::fs::remove_dir_all(root).expect("remove test directory");
     }
 
     #[test]
@@ -399,8 +338,10 @@ mod tests {
         let data_dir = root.join("data");
         let shipped_tool = shipped_tools.join("ccswitch_prepare_opencode_provider.ts");
         std::fs::create_dir_all(&shipped_tools).expect("create shipped tools directory");
-        let corrupt_source = valid_yume_opencode_tool_source()
-            .replace("secureEntryRequired", "secureEntryStillRequired");
+        let corrupt_source = valid_yume_opencode_tool_source().replace(
+            "assertDraftArgsSecretFree",
+            "assertDraftArgsStillSecretFree",
+        );
         std::fs::write(&shipped_tool, corrupt_source).expect("write corrupt shipped tool");
 
         let error = overwrite_yume_opencode_tool(&shipped_tools, &data_dir)
@@ -412,6 +353,8 @@ mod tests {
 
         let catalog = ModelCatalog {
             base_url: "https://models.example.test".into(),
+            api_key_fingerprint: "4c806362b613f7496abf284146efd31da90e4b16169fe001841ca17290f427c4"
+                .into(),
             models: vec![ApiModel {
                 id: "model-a".into(),
                 name: "Model A".into(),
@@ -713,30 +656,11 @@ fn resolve_opencode(app: &tauri::AppHandle) -> PathBuf {
     PathBuf::from("opencode")
 }
 
-fn resolve_ncmdump(app: &tauri::AppHandle) -> Option<PathBuf> {
-    let executable = if cfg!(windows) {
-        "ncmdump.exe"
-    } else {
-        "ncmdump"
-    };
-    let mut candidates = Vec::new();
-    if let Ok(dir) = app.path().resource_dir() {
-        candidates.push(dir.join("resources").join("ncmdump").join(executable));
-        candidates.push(dir.join("ncmdump").join(executable));
-    }
-    candidates.push(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("resources")
-            .join("ncmdump")
-            .join(executable),
-    );
-    candidates.into_iter().find(|path| path.is_file())
-}
-
 fn pick_free_port() -> u16 {
     TcpListener::bind("127.0.0.1:0")
         .and_then(|l| l.local_addr())
         .map(|a| a.port())
+        // SAFE-EXPECT: binding port 0 asks the OS for an available localhost port at startup.
         .expect("no free port available")
 }
 
@@ -879,15 +803,15 @@ fn overwrite_yume_opencode_tool(shipped_tools_dir: &Path, data_dir: &Path) -> st
 
 fn validate_yume_opencode_tool_source(source: &str) -> std::io::Result<()> {
     const EXPECTED_SHA256: &str =
-        "bc44f41a1995a0f12a1912bc0913397da72eb0a6ed2b3f8a1899d0e83bfa0f87";
+        "cec94fab3c431e78369a26a7800f33f362544b962d0346332d9d63611f01f01b";
     const REQUIRED_MARKERS: &[&str] = &[
         "export default",
         "args: draftArgs",
         "async execute(args: DraftArgs): Promise<string>",
-        "yume.ccswitch.opencode_provider_draft",
+        "kind: \"opencode_provider_draft\"",
         "buildProviderDraft",
         "safeTextOrUndefined",
-        "secureEntryRequired",
+        "assertDraftArgsSecretFree",
     ];
     const FORBIDDEN_MARKERS: &[&str] = &[
         "from \"zod\"",
@@ -969,11 +893,28 @@ fn configure_sidecar_command(cmd: &mut Command, port: u16, workspace: &Path) {
         .current_dir(workspace);
 }
 
+fn configure_sidecar_environment(cmd: &mut Command, data_dir: &Path) {
+    let sidecar_home = data_dir.join("opencode-home");
+    let appdata = sidecar_home.join("AppData").join("Roaming");
+    let localappdata = sidecar_home.join("AppData").join("Local");
+
+    cmd.env("HOME", &sidecar_home)
+        .env("USERPROFILE", &sidecar_home)
+        .env("APPDATA", &appdata)
+        .env("LOCALAPPDATA", &localappdata)
+        .env("XDG_CONFIG_HOME", sidecar_home.join("xdg-config"))
+        .env("XDG_DATA_HOME", sidecar_home.join("xdg-data"))
+        .env("XDG_CACHE_HOME", sidecar_home.join("xdg-cache"))
+        .env_remove("OPENCODE_CONFIG_CONTENT")
+        .env_remove("OPENCODE_AUTH_CONTENT");
+}
+
 fn resource_error_event(reason: String) -> (&'static str, String) {
     (RESOURCE_ERROR_EVENT, reason)
 }
 
 fn spawn_sidecar(app: &tauri::AppHandle, port: u16) -> std::io::Result<Child> {
+    // SAFE-EXPECT: Tauri provides an app data directory after app setup.
     let data_dir = app.path().app_data_dir().expect("app data dir unavailable");
     std::fs::create_dir_all(&data_dir)?;
     // A resource-copy failure means personas/skills will be missing, which
@@ -991,6 +932,7 @@ fn spawn_sidecar(app: &tauri::AppHandle, port: u16) -> std::io::Result<Child> {
     let bin = resolve_opencode(app);
     let mut cmd = Command::new(&bin);
     configure_sidecar_command(&mut cmd, port, &workspace);
+    configure_sidecar_environment(&mut cmd, &data_dir);
     cmd.env_remove("OPENCODE_SERVER_PASSWORD")
         .env_remove("OPENCODE_SERVER_USERNAME");
 
@@ -1043,6 +985,7 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let menu = Menu::with_items(app, &[&show_hide, &open_settings, &quit])?;
 
     TrayIconBuilder::with_id("main")
+        // SAFE-EXPECT: the bundled app icon is generated by Tauri at compile time.
         .icon(app.default_window_icon().expect("bundled icon").clone())
         .tooltip("YUME - 小著")
         .menu(&menu)
@@ -1176,13 +1119,19 @@ pub fn run() {
             child: Mutex::new(None),
             port,
         })
+        .manage(AttachmentStore::default())
         .manage(ccswitch::contract::CcSwitchSetupState::default())
         .manage(ChatShown(Mutex::new(false)))
         .manage(Arc::new(ChatMotion::default()))
         .invoke_handler(tauri::generate_handler![
             sidecar_base_url,
             load_persona,
-            convert_ncm,
+            chat_attachments::stage_chat_attachment,
+            chat_attachments::read_chat_attachment,
+            chat_attachments::discard_chat_attachment,
+            chat_attachments::convert_staged_ncm,
+            chat_attachments::export_chat_artifact,
+            chat_attachments::cleanup_chat_session,
             toggle_chat,
             hide_chat,
             show_chat_window,
@@ -1197,6 +1146,7 @@ pub fn run() {
             app_version,
             ccswitch::protocol::ccswitch_capability_status,
             ccswitch::protocol::prepare_ccswitch_opencode_provider,
+            ccswitch::protocol::prepare_ccswitch_opencode_provider_from_settings,
             ccswitch::protocol::select_ccswitch_opencode_model,
             ccswitch::protocol::launch_ccswitch_opencode_import,
             ccswitch::protocol::cancel_ccswitch_setup,
@@ -1231,9 +1181,11 @@ pub fn run() {
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
+            chat_attachments::start_stale_sweep(&handle);
 
             // Load persisted settings and apply startup side-effects.
             let loaded = settings::load(&handle);
+            // SAFE-UNWRAP: a poisoned settings mutex means an earlier setup command panicked.
             *app.state::<SettingsState>().0.lock().unwrap() = loaded.clone();
             settings::register_shortcuts(&handle, &loaded);
             if let Some(pet) = app.get_webview_window("pet") {
@@ -1273,6 +1225,7 @@ pub fn run() {
             setup_tray(&handle)?;
             match spawn_sidecar(&handle, port) {
                 Ok(child) => {
+                    // SAFE-UNWRAP: a poisoned sidecar mutex means an earlier setup command panicked.
                     *app.state::<Sidecar>().child.lock().unwrap() = Some(child);
                 }
                 Err(e) => {
@@ -1282,9 +1235,11 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
+        // SAFE-EXPECT: building the Tauri app is the final startup boundary; failures are fatal.
         .expect("error while building tauri application")
         .run(|app, event| {
             if let RunEvent::Exit = event {
+                // SAFE-UNWRAP: a poisoned sidecar mutex means an earlier setup command panicked.
                 if let Some(mut child) = app.state::<Sidecar>().child.lock().unwrap().take() {
                     let _ = child.kill();
                     let _ = child.wait();

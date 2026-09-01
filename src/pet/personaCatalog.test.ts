@@ -131,7 +131,7 @@ describe("persona packs", () => {
   });
 
   test("grants the ncm skill only to 小著", () => {
-    // convert_ncm is gated on this, so the declaration must live with the persona.
+    // NCM conversion is gated on this, so the declaration must live with the persona.
     expect(personaById("xiaozhu").skills).toEqual([
       { id: "xiaozhu", file: "ncmdump.md" },
     ]);

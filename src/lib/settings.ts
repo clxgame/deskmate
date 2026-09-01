@@ -91,8 +91,8 @@ export interface AiUsage {
   readonly topModels: readonly AiUsageModel[];
 }
 
-export function getAiUsage(baseUrl: string, apiKey: string): Promise<AiUsage> {
-  return invoke<AiUsage>("fetch_ai_usage", { baseUrl, apiKey });
+export function getAiUsage(): Promise<AiUsage> {
+  return invoke<AiUsage>("fetch_ai_usage");
 }
 
 /** Fires in every window whenever settings are saved. */

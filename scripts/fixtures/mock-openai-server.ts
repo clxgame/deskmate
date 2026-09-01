@@ -8,6 +8,7 @@ const dangerousToolIds = ["bash", "edit", "write", "patch", "external_directory"
 type MockOpenAiInput = {
   readonly canary: string;
   readonly draft: ProviderDraft;
+  readonly modelIds?: readonly string[];
   readonly port?: number;
 };
 
@@ -24,6 +25,18 @@ type CompletionRequest = {
   readonly dangerousTools: readonly string[];
   readonly hasToolResult: boolean;
 };
+
+function modelCatalog(modelIds: readonly string[]): JsonObject {
+  return {
+    object: "list",
+    data: modelIds.map((id) => ({
+      id,
+      object: "model",
+      created: 1787922000,
+      owned_by: "yume-test",
+    })),
+  };
+}
 
 function addressPort(address: string | AddressInfo | null): number {
   if (typeof address === "object" && address !== null) return address.port;
@@ -60,6 +73,11 @@ function assertHeadersCanaryAbsent(request: IncomingMessage, canary: string): vo
     const header = Array.isArray(value) ? value.join("\n") : value;
     if (header?.includes(canary)) throw new HarnessError("runtime canary leaked into provider headers", "canary_leak");
   }
+}
+
+function assertRequestCanaryAbsent(request: IncomingMessage, canary: string): void {
+  if (request.url?.includes(canary)) throw new HarnessError("runtime canary leaked into provider URL", "canary_leak");
+  assertHeadersCanaryAbsent(request, canary);
 }
 
 function readRequestBody(request: IncomingMessage): Promise<string> {
@@ -181,13 +199,18 @@ function finalTextResponse(): JsonObject {
 
 export async function startMockOpenAiServer(input: MockOpenAiInput): Promise<MockOpenAiServer> {
   const requests: CompletionRequest[] = [];
+  const modelIds = input.modelIds ?? ["model-a"];
   const server = createServer(async (request, response) => {
-    if (request.method !== "POST" || !request.url?.endsWith("/chat/completions")) {
-      writeJson(response, 404, { error: "not found" });
-      return;
-    }
     try {
-      assertHeadersCanaryAbsent(request, input.canary);
+      assertRequestCanaryAbsent(request, input.canary);
+      if (request.method === "GET" && request.url?.endsWith("/models")) {
+        writeJson(response, 200, modelCatalog(modelIds));
+        return;
+      }
+      if (request.method !== "POST" || !request.url?.endsWith("/chat/completions")) {
+        writeJson(response, 404, { error: "not found" });
+        return;
+      }
       const parsed = parseCompletionRequest(await readRequestBody(request), input.canary);
       requests.push(parsed);
       if (!parsed.hasDedicatedTool && !parsed.hasToolResult) {

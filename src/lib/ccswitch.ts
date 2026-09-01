@@ -64,6 +64,10 @@ export type LaunchCcSwitchImportRequest = {
   readonly acceptedProcessArgumentDisclosure: boolean;
 };
 
+export type PrepareCcSwitchProviderFromSettingsRequest = {
+  readonly providerName: string;
+};
+
 export type CcSwitchLaunchReceipt = CcSwitchHandoffReceipt & {
   readonly enabled: boolean;
 };
@@ -133,6 +137,15 @@ export function launchCcSwitchOpenCodeImport(
   return invoke<CcSwitchLaunchReceipt>("launch_ccswitch_opencode_import", {
     request,
   });
+}
+
+export function prepareCcSwitchOpenCodeProviderFromSettings(
+  request: PrepareCcSwitchProviderFromSettingsRequest,
+): Promise<CcSwitchProviderSelection> {
+  return invoke<CcSwitchProviderSelection>(
+    "prepare_ccswitch_opencode_provider_from_settings",
+    { request },
+  );
 }
 
 export function cancelCcSwitchSetup(handleId: string): Promise<void> {

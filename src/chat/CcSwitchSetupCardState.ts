@@ -28,11 +28,12 @@ export function useCcSwitchSetupController(props: CcSwitchSetupCardProps): CcSwi
   const { t, draft, onClose } = props;
   const pollIntervalMs = props.pollIntervalMs ?? POLL_INTERVAL_MS;
   const externalWaitTimeoutMs = props.externalWaitTimeoutMs ?? EXTERNAL_WAIT_TIMEOUT_MS;
+  const credentialMode = draft?.credentialMode ?? "manual";
   const [step, setStep] = useState<SetupStep>("draft");
   const [providerName, setProviderName] = useState(draft?.providerName ?? "YUME OpenCode");
   const [endpoint, setEndpoint] = useState(draft?.baseUrl ?? "");
   const [selectedModelId, setSelectedModelId] = useState("");
-  const [hasApiKey, setHasApiKey] = useState(false);
+  const [hasApiKey, setHasApiKey] = useState(credentialMode === "saved-settings");
   const [switchImmediately, setSwitchImmediately] = useState(true);
   const [catalog, setCatalog] = useState<CcSwitchSetupController["catalog"]>(null);
   const [prepared, setPrepared] = useState<PreparedSetup | null>(null);
@@ -41,6 +42,9 @@ export function useCcSwitchSetupController(props: CcSwitchSetupCardProps): CcSwi
   const [verification, setVerification] = useState<CcSwitchSetupController["verification"]>(null);
   const [submitting, setSubmitting] = useState(false);
   const apiKeyInputRef = useRef<HTMLInputElement>(null);
+  const providerNameInputRef = useRef<HTMLInputElement>(null);
+  const modelSelectRef = useRef<HTMLSelectElement>(null);
+  const launchButtonRef = useRef<HTMLButtonElement>(null);
   const liveTicketRef = useRef<string | null>(null);
   const recoveryRef = useRef<CcSwitchRecoveryHandle | null>(null);
   const mountedRef = useRef(true);
@@ -52,17 +56,18 @@ export function useCcSwitchSetupController(props: CcSwitchSetupCardProps): CcSwi
   const clearApiKeyInput = (): void => {
     const input = apiKeyInputRef.current;
     if (input) input.value = "";
-    setHasApiKey(false);
+    setHasApiKey(credentialMode === "saved-settings");
   };
   const canValidate =
     step !== "unavailable" &&
     providerName.trim().length > 0 &&
     endpoint.trim().length > 0 &&
-    hasApiKey;
+    (credentialMode === "saved-settings" || hasApiKey);
   const runtime = useMemo<CcSwitchSetupRuntime>(
     () => ({
       t,
       draft,
+      credentialMode,
       onClose,
       pollIntervalMs,
       externalWaitTimeoutMs,
@@ -79,6 +84,9 @@ export function useCcSwitchSetupController(props: CcSwitchSetupCardProps): CcSwi
       },
       refs: {
         apiKeyInputRef,
+        providerNameInputRef,
+        modelSelectRef,
+        launchButtonRef,
         liveTicketRef,
         recoveryRef,
         mountedRef,
@@ -91,6 +99,7 @@ export function useCcSwitchSetupController(props: CcSwitchSetupCardProps): CcSwi
       catalog,
       draft,
       endpoint,
+      credentialMode,
       externalWaitTimeoutMs,
       onClose,
       pollIntervalMs,
@@ -148,15 +157,37 @@ export function useCcSwitchSetupController(props: CcSwitchSetupCardProps): CcSwi
   }, []);
 
   useEffect(() => {
-    if (step === "confirming" || step === "restore-confirmation" || step === "discard-confirmation") {
-      dialogRef.current?.focus();
-    }
+    const focusTimer = globalThis.setTimeout(() => {
+      switch (step) {
+        case "draft":
+        case "unavailable":
+        case "invalid":
+          providerNameInputRef.current?.focus();
+          return;
+        case "model-ready":
+          modelSelectRef.current?.focus();
+          return;
+        case "confirming":
+          launchButtonRef.current?.focus();
+          return;
+        case "restore-confirmation":
+        case "discard-confirmation":
+          dialogRef.current?.focus();
+          return;
+        default:
+          return;
+      }
+    }, 0);
+    return () => {
+      globalThis.clearTimeout(focusTimer);
+    };
   }, [step]);
 
   useCcSwitchSetupPolling(runtime);
 
   return {
     step,
+    credentialMode,
     providerName,
     endpoint,
     selectedModelId,
@@ -168,6 +199,9 @@ export function useCcSwitchSetupController(props: CcSwitchSetupCardProps): CcSwi
     submitting,
     canValidate,
     apiKeyInputRef,
+    providerNameInputRef,
+    modelSelectRef,
+    launchButtonRef,
     dialogRef,
     actions: {
       validate: (event) => validateSetup(runtime, event, canValidate),

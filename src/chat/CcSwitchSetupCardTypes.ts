@@ -69,6 +69,7 @@ export type CcSwitchSetupActions = {
 
 export type CcSwitchSetupController = {
   readonly step: SetupStep;
+  readonly credentialMode: "manual" | "saved-settings";
   readonly providerName: string;
   readonly endpoint: string;
   readonly selectedModelId: string;
@@ -80,6 +81,9 @@ export type CcSwitchSetupController = {
   readonly submitting: boolean;
   readonly canValidate: boolean;
   readonly apiKeyInputRef: RefObject<HTMLInputElement | null>;
+  readonly providerNameInputRef: RefObject<HTMLInputElement | null>;
+  readonly modelSelectRef: RefObject<HTMLSelectElement | null>;
+  readonly launchButtonRef: RefObject<HTMLButtonElement | null>;
   readonly dialogRef: RefObject<HTMLDivElement | null>;
   readonly actions: CcSwitchSetupActions;
 };
@@ -107,6 +111,9 @@ export type CcSwitchSetupStateSetters = {
 
 export type CcSwitchSetupRuntimeRefs = {
   readonly apiKeyInputRef: RefObject<HTMLInputElement | null>;
+  readonly providerNameInputRef: RefObject<HTMLInputElement | null>;
+  readonly modelSelectRef: RefObject<HTMLSelectElement | null>;
+  readonly launchButtonRef: RefObject<HTMLButtonElement | null>;
   readonly liveTicketRef: RefObject<string | null>;
   readonly recoveryRef: RefObject<CcSwitchRecoveryHandle | null>;
   readonly mountedRef: RefObject<boolean>;
@@ -117,6 +124,7 @@ export type CcSwitchSetupRuntimeRefs = {
 export type CcSwitchSetupRuntime = {
   readonly t: Dict;
   readonly draft: CcSwitchProviderDraft | null;
+  readonly credentialMode: "manual" | "saved-settings";
   readonly onClose: () => void;
   readonly pollIntervalMs: number;
   readonly externalWaitTimeoutMs: number;

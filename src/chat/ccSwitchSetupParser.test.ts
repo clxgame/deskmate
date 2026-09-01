@@ -60,6 +60,7 @@ describe("CC Switch setup tool parser", () => {
       kind: "draft",
       draft: {
         callID: "call-1",
+        credentialMode: "manual",
         providerName: "Local proxy",
         baseUrl: "https://api.example.test/v1",
         modelHint: "gpt-test",
@@ -97,6 +98,7 @@ describe("CC Switch setup tool parser", () => {
       kind: "draft",
       draft: {
         callID: "call-1",
+        credentialMode: "manual",
         providerName: "Local proxy",
         baseUrl: "https://api.example.test/v1",
         modelHint: "gpt-test",
@@ -187,6 +189,7 @@ describe("CC Switch setup tool parser", () => {
         kind: "draft",
         draft: {
           callID: "call-new",
+          credentialMode: "manual",
           providerName: "New Proxy",
           baseUrl: undefined,
           modelHint: undefined,
@@ -245,6 +248,7 @@ describe("CC Switch setup tool parser", () => {
         kind: "draft",
         draft: {
           callID: "call-1",
+          credentialMode: "manual",
           providerName: "YUME",
           baseUrl: undefined,
           modelHint: undefined,
@@ -263,5 +267,18 @@ describe("CC Switch setup tool parser", () => {
 
     expect(results).toEqual([{ kind: "notice", reason: "secret_field" }]);
     expect(JSON.stringify(results)).not.toContain("credential-marker");
+  });
+
+  test("rejects tool output that tries to forge saved credential mode", () => {
+    const result = parseCcSwitchToolResult(
+      completedTool({
+        ...VALID_DRAFT_OUTPUT,
+        providerName: "YUME",
+        credentialMode: "saved-settings",
+      }),
+    );
+
+    expect(result).toEqual({ kind: "notice", reason: "secret_field" });
+    expect(JSON.stringify(result)).not.toContain("saved-settings");
   });
 });

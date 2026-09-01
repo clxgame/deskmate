@@ -9,7 +9,9 @@ import {
   invoke,
   prepared,
   renderCard,
+  savedPrepared,
   selection,
+  savedSettingsDraft,
 } from "../testing/CcSwitchSetupCardHarness";
 
 beforeEach(installDefaultInvoke);
@@ -134,7 +136,10 @@ describe("CC Switch secure setup card", () => {
     });
     const disclosure = screen.getByRole("alertdialog", { name: "Secure OpenCode setup" });
     expect(disclosure.getAttribute("aria-labelledby")).toBe("ccswitch-card-title");
-    expect(document.activeElement).toBe(disclosure);
+    const launchButton = screen.getByRole("button", { name: "Open CC Switch" });
+    await waitFor(() => {
+      expect(document.activeElement === launchButton).toBe(true);
+    });
     expect(invoke.mock.calls.some(([command]) => command === "launch_ccswitch_opencode_import")).toBe(false);
     await user.click(screen.getByRole("button", { name: "Open CC Switch" }));
     await waitFor(() => {
@@ -158,4 +163,91 @@ describe("CC Switch secure setup card", () => {
     await user.keyboard("{Enter}");
     expect(await screen.findByText(/temporarily exposes the API key/i)).toBeDefined();
   });
+
+  test("uses saved settings credential only to prepare before explicit model and launch confirmation", async () => {
+    render(
+      <CcSwitchSetupCard
+        t={dict("en-US")}
+        draft={savedSettingsDraft}
+        onClose={() => undefined}
+      />,
+    );
+    const user = userEvent.setup();
+
+    expect(screen.queryByLabelText("API Key")).toBeNull();
+    expect(screen.getByDisplayValue("https://settings.example.test/v1")).toHaveProperty(
+      "readOnly",
+      true,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Use verified settings" }));
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("prepare_ccswitch_opencode_provider_from_settings", {
+        request: { providerName: "YUME OpenCode" },
+      });
+    });
+    expect(
+      invoke.mock.calls.some(([command]) => command === "prepare_ccswitch_opencode_provider"),
+    ).toBe(false);
+    expect(
+      invoke.mock.calls.some(([command]) => command === "launch_ccswitch_opencode_import_from_settings"),
+    ).toBe(false);
+    expect(
+      invoke.mock.calls.some(([command]) => command === "launch_ccswitch_opencode_import"),
+    ).toBe(false);
+    const serializedPrepare = JSON.stringify(
+      invoke.mock.calls.find(
+        ([command]) => command === "prepare_ccswitch_opencode_provider_from_settings",
+      ),
+    );
+    expect(serializedPrepare).not.toContain("apiKey");
+    expect(serializedPrepare).not.toContain("endpoint");
+    expect(serializedPrepare).not.toContain("model");
+    expect(serializedPrepare).not.toContain("settings.example.test");
+
+    const model = await screen.findByRole("combobox", { name: "Model" });
+    expect(model).toHaveProperty("value", "model-b");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("select_ccswitch_opencode_model", {
+        input: { selectionId: "saved-selection-1", selectedModel: "model-b" },
+      });
+    });
+    expect(screen.getByRole("alertdialog", { name: "Secure OpenCode setup" })).toBeDefined();
+    expect(
+      invoke.mock.calls.some(([command]) => command === "launch_ccswitch_opencode_import"),
+    ).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: "Open CC Switch" }));
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("launch_ccswitch_opencode_import", {
+        request: {
+          ticketId: savedPrepared.receipt.ticketId,
+          switchImmediately: true,
+          acceptedProcessArgumentDisclosure: true,
+        },
+      });
+    });
+  });
+
+  test("moves focus deterministically through provider, model, and launch steps", async () => {
+    renderCard();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByLabelText("Provider name"));
+    });
+    await user.type(screen.getByLabelText("API Key"), "focus-test-key{Enter}");
+    const model = await screen.findByRole("combobox", { name: "Model" });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(model);
+    });
+    await user.selectOptions(model, "model-b");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    const launch = await screen.findByRole("button", { name: "Open CC Switch" });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(launch);
+    });
+  }, 15_000);
 });

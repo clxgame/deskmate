@@ -523,7 +523,7 @@ function AiTab({ settings, patch, t }: TabProps) {
       <h2 className="set-panel-head">{t.tabAi}</h2>
       <Row label={t.baseUrl}>
         <input
-          className="set-input"
+          className="set-input set-ai-base-url"
           type="text"
           value={settings.baseUrl}
           placeholder="https://ai-gateway.kurogames.com"
@@ -599,7 +599,7 @@ function AiTab({ settings, patch, t }: TabProps) {
         onOpenSetup={openCcSwitchSetup}
         onRefresh={refreshCcSwitchStatus}
       />
-      <AiUsage baseUrl={settings.baseUrl} apiKey={settings.apiKey} t={t} />
+      <AiUsage enabled={Boolean(settings.apiKey.trim())} t={t} />
     </>
   );
 }

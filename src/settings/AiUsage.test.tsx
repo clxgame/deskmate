@@ -37,13 +37,7 @@ describe("AI usage", () => {
       }),
     );
 
-    render(
-      <AiUsage
-        baseUrl="https://ai-gateway.kurogames.com"
-        apiKey="kuro-key"
-        t={t}
-      />,
-    );
+    render(<AiUsage enabled t={t} />);
 
     expect(await screen.findByRole("heading", { name: "AI 用量" })).toBeDefined();
     expect(await screen.findByText("¥2726 / ¥3000")).toBeDefined();
@@ -52,29 +46,27 @@ describe("AI usage", () => {
     expect(screen.getByText("¥273.59 · 438 次")).toBeDefined();
     expect(screen.getByText("claude-opus-4.8")).toBeDefined();
     await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith("fetch_ai_usage", {
-        baseUrl: "https://ai-gateway.kurogames.com",
-        apiKey: "kuro-key",
-      });
+      expect(invoke).toHaveBeenCalledWith("fetch_ai_usage");
     });
   });
 
   test("waits for an API key instead of querying the gateway", async () => {
-    render(<AiUsage baseUrl="https://ai-gateway.kurogames.com" apiKey="" t={t} />);
+    render(<AiUsage enabled={false} t={t} />);
 
     expect(await screen.findByText("填写 API Key 后即可查看用量")).toBeDefined();
     expect(invoke).not.toHaveBeenCalled();
   });
 
+  test("never sends an edited Base URL or API key through usage IPC", async () => {
+    invoke.mockImplementation(() => Promise.reject("unverified_settings"));
+    render(<AiUsage enabled t={t} />);
+
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("fetch_ai_usage"));
+  });
+
   test("explains a usage-permission rejection in the active language", async () => {
     invoke.mockImplementation(() => Promise.reject("Error: status:401"));
-    render(
-      <AiUsage
-        baseUrl="https://ai-gateway.kurogames.com"
-        apiKey="gateway-key"
-        t={dict("en-US")}
-      />,
-    );
+    render(<AiUsage enabled t={dict("en-US")} />);
 
     expect(
       await screen.findByText("This API key cannot access usage details"),
@@ -83,13 +75,7 @@ describe("AI usage", () => {
 
   test("localizes the ai-usage title", async () => {
     invoke.mockImplementation(() => Promise.reject(new Error("status:401")));
-    render(
-      <AiUsage
-        baseUrl="https://ai-gateway.kurogames.com"
-        apiKey="gateway-key"
-        t={dict("ko-KR")}
-      />,
-    );
+    render(<AiUsage enabled t={dict("ko-KR")} />);
 
     expect(await screen.findByRole("heading", { name: "AI 사용량" })).toBeDefined();
   });
@@ -107,13 +93,7 @@ describe("AI usage", () => {
       }),
     );
     const user = userEvent.setup();
-    render(
-      <AiUsage
-        baseUrl="https://ai-gateway.kurogames.com"
-        apiKey="kuro-key"
-        t={t}
-      />,
-    );
+    render(<AiUsage enabled t={t} />);
 
     await screen.findByText("¥500 / ¥1000");
     await user.click(screen.getByRole("button", { name: "刷新" }));

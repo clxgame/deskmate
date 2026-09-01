@@ -8,8 +8,11 @@ import {
 export const CCSWITCH_PREPARE_OPENCODE_PROVIDER_TOOL =
   "ccswitch_prepare_opencode_provider";
 
+export type CcSwitchCredentialMode = "manual" | "saved-settings";
+
 export type CcSwitchProviderDraft = CcSwitchProviderDraftFields & {
   readonly callID: string;
+  readonly credentialMode: CcSwitchCredentialMode;
 };
 
 export type { CcSwitchNoticeReason };
@@ -157,6 +160,6 @@ export function parseCcSwitchToolResult(
   if (!draft.ok) return { kind: "notice", reason: draft.reason };
   return {
     kind: "draft",
-    draft: { callID: part.callID, ...draft.fields },
+    draft: { callID: part.callID, credentialMode: "manual", ...draft.fields },
   };
 }

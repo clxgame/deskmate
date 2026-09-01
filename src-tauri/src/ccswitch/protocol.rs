@@ -118,6 +118,50 @@ pub fn launch_ccswitch_opencode_import(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CcSwitchSettingsPrepareCommandRequest {
+    pub provider_name: String,
+}
+
+#[tauri::command]
+pub fn prepare_ccswitch_opencode_provider_from_settings(
+    app: tauri::AppHandle,
+    setup_state: State<CcSwitchSetupState>,
+    settings_state: State<crate::settings::SettingsState>,
+    request: CcSwitchSettingsPrepareCommandRequest,
+) -> Result<ProviderSelectionResult, CcSwitchCommandError> {
+    let settings = settings_state.0.lock().map_err(|_| CcSwitchCommandError {
+        code: "ccswitch_settings_unavailable",
+        message: "Settings are unavailable.",
+    })?;
+    let base_url = settings.base_url.clone();
+    drop(settings);
+    let api_key = crate::settings::saved_api_key();
+    if api_key.trim().is_empty() {
+        return Err(CcSwitchCommandError {
+            code: "ccswitch_saved_api_key_missing",
+            message: "A verified saved API key is required.",
+        });
+    }
+    let catalog = crate::settings::load_verified_model_catalog(&app, &base_url, &api_key)
+        .ok_or_else(missing_verified_catalog_error)?;
+    let source = SettingsProviderSource {
+        provider_name: request.provider_name,
+        endpoint: catalog.base_url,
+        api_key,
+        models: catalog
+            .models
+            .into_iter()
+            .map(|model| ModelChoice {
+                id: model.id,
+                name: model.name,
+            })
+            .collect(),
+    };
+    prepare_settings_provider_source(&setup_state, source, now_millis())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CcSwitchLaunchCommandRequest {
     pub ticket_id: String,
     #[serde(default)]
@@ -168,6 +212,41 @@ fn bind_launch_request(
         switch_immediately: request.switch_immediately,
         accepted_process_argument_disclosure: request.accepted_process_argument_disclosure,
     })
+}
+
+struct SettingsProviderSource {
+    provider_name: String,
+    endpoint: String,
+    api_key: String,
+    models: Vec<ModelChoice>,
+}
+
+fn prepare_settings_provider_source(
+    state: &CcSwitchSetupState,
+    source: SettingsProviderSource,
+    now: MillisSinceEpoch,
+) -> Result<ProviderSelectionResult, CcSwitchCommandError> {
+    if source.api_key.trim().is_empty() {
+        return Err(CcSwitchCommandError {
+            code: "ccswitch_saved_api_key_missing",
+            message: "A verified saved API key is required.",
+        });
+    }
+    if source.models.is_empty() {
+        return Err(missing_verified_catalog_error());
+    }
+    let provider = CcSwitchSetupState::validate_provider_input(ProviderValidationInput {
+        provider_name: source.provider_name,
+        endpoint: source.endpoint,
+        api_key: source.api_key,
+    })
+    .map_err(launch::command_error_from_contract)?;
+    if catalog_reflects_secret(&source.models, provider.api_key()) {
+        return Err(invalid_model_catalog_error());
+    }
+    state
+        .stage_validated_provider(provider, source.models, now)
+        .map_err(launch::command_error_from_contract)
 }
 
 #[tauri::command]
@@ -413,6 +492,13 @@ fn invalid_model_catalog_error() -> CcSwitchCommandError {
     CcSwitchCommandError {
         code: "ccswitch_invalid_model_catalog",
         message: "The provider returned an invalid model catalog.",
+    }
+}
+
+fn missing_verified_catalog_error() -> CcSwitchCommandError {
+    CcSwitchCommandError {
+        code: "ccswitch_verified_model_catalog_missing",
+        message: "Verify the API key in Settings before configuring CC Switch.",
     }
 }
 
@@ -791,6 +877,108 @@ mod recovery_bridge_tests {
         let ui_serialized = serde_json::to_string(&ui_receipt).expect("UI receipt serializes");
         assert!(!ui_serialized.contains("preImportHash"));
         assert!(!ui_serialized.contains("native-only-hash"));
+    }
+
+    #[test]
+    fn settings_prepare_uses_verified_catalog_without_fetch_launch_or_serializing_secret() {
+        let state = CcSwitchSetupState::default();
+        let platform = super::launch_fixture::FakePlatform::ready("3.20.0");
+        let canary = format!("settings-secret-{}", uuid::Uuid::new_v4());
+
+        let selection = prepare_settings_provider_source(
+            &state,
+            SettingsProviderSource {
+                provider_name: "YUME OpenCode".to_owned(),
+                endpoint: "https://verified.example.test/v1/".to_owned(),
+                api_key: canary.clone(),
+                models: vec![
+                    ModelChoice {
+                        id: "model-a".to_owned(),
+                        name: "Model A".to_owned(),
+                    },
+                    ModelChoice {
+                        id: "model-b".to_owned(),
+                        name: "Model B".to_owned(),
+                    },
+                ],
+            },
+            MillisSinceEpoch(2_000),
+        )
+        .expect("settings prepare uses saved material");
+
+        assert!(platform.opened().is_none());
+        let serialized = serde_json::to_string(&selection).expect("selection result serializes");
+        assert!(!serialized.contains(&canary));
+        assert!(!serialized.contains("preImportHash"));
+        assert_eq!(selection.provider_name, "YUME OpenCode");
+        assert_eq!(selection.endpoint, "https://verified.example.test/v1");
+        assert_eq!(selection.models.len(), 2);
+
+        let prepared = select_model_at_locations(
+            &state,
+            ProviderSelectionInput {
+                selection_id: selection.selection_id,
+                selected_model: "model-b".to_owned(),
+            },
+            TestTree::new().locations(),
+            FakeKeyStore::default(),
+            MillisSinceEpoch(3_000),
+        )
+        .expect("saved selection still requires explicit model confirmation");
+        assert_eq!(prepared.receipt.selected_model, "model-b");
+        assert!(platform.opened().is_none());
+    }
+
+    #[test]
+    fn settings_prepare_fails_closed_when_saved_material_is_incomplete() {
+        let state = CcSwitchSetupState::default();
+        let platform = super::launch_fixture::FakePlatform::ready("3.20.0");
+
+        let missing_key = prepare_settings_provider_source(
+            &state,
+            SettingsProviderSource {
+                provider_name: "YUME OpenCode".to_owned(),
+                endpoint: "https://verified.example.test/v1".to_owned(),
+                api_key: String::new(),
+                models: vec![ModelChoice {
+                    id: "model-a".to_owned(),
+                    name: "Model A".to_owned(),
+                }],
+            },
+            MillisSinceEpoch(2_000),
+        )
+        .expect_err("empty saved key is rejected");
+        assert_eq!(missing_key.code, "ccswitch_saved_api_key_missing");
+
+        let missing_catalog = prepare_settings_provider_source(
+            &state,
+            SettingsProviderSource {
+                provider_name: "YUME OpenCode".to_owned(),
+                endpoint: "https://verified.example.test/v1".to_owned(),
+                api_key: "saved-key".to_owned(),
+                models: Vec::new(),
+            },
+            MillisSinceEpoch(2_000),
+        )
+        .expect_err("empty verified catalog is rejected");
+        assert_eq!(
+            missing_catalog.code,
+            "ccswitch_verified_model_catalog_missing"
+        );
+
+        assert!(platform.opened().is_none());
+    }
+
+    #[test]
+    fn settings_prepare_request_rejects_renderer_supplied_secret_material() {
+        let forged = serde_json::json!({
+            "providerName": "YUME OpenCode",
+            "endpoint": "https://attacker.example.test/v1",
+            "apiKey": "renderer-secret",
+            "model": "attacker-model"
+        });
+
+        assert!(serde_json::from_value::<CcSwitchSettingsPrepareCommandRequest>(forged).is_err());
     }
 
     #[test]

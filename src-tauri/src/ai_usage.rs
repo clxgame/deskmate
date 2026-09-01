@@ -1,6 +1,8 @@
+use crate::settings::{load_verified_model_catalog, saved_api_key, ModelCatalog, SettingsState};
 use chrono::{Datelike, Local};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+use tauri::State;
 use url::Url;
 
 const USAGE_PATH: &str = "/my-usage/api/detail";
@@ -142,12 +144,33 @@ fn fetch_usage(base_url: &str, api_key: &str) -> Result<AiUsage, String> {
     }
 }
 
-#[tauri::command]
-pub async fn fetch_ai_usage(base_url: String, api_key: String) -> Result<AiUsage, String> {
-    let api_key = api_key.trim().to_string();
-    if api_key.is_empty() {
-        return Err("empty_key".to_string());
+fn verified_usage_target(
+    catalog: Option<ModelCatalog>,
+    api_key: &str,
+) -> Result<(String, String), String> {
+    let key = api_key.trim();
+    let catalog = catalog
+        .filter(|catalog| !catalog.models.is_empty())
+        .ok_or_else(|| "unverified_settings".to_string())?;
+    if key.is_empty() {
+        return Err("unverified_settings".to_string());
     }
+    Ok((catalog.base_url, key.to_string()))
+}
+
+#[tauri::command]
+pub async fn fetch_ai_usage(
+    app: tauri::AppHandle,
+    state: State<'_, SettingsState>,
+) -> Result<AiUsage, String> {
+    let settings = state
+        .0
+        .lock()
+        .map_err(|_| "settings_state".to_string())?
+        .clone();
+    let saved_key = saved_api_key();
+    let catalog = load_verified_model_catalog(&app, &settings.base_url, &saved_key);
+    let (base_url, api_key) = verified_usage_target(catalog, &saved_key)?;
     tauri::async_runtime::spawn_blocking(move || fetch_usage(&base_url, &api_key))
         .await
         .map_err(|error| format!("task:{error}"))?
@@ -155,7 +178,36 @@ pub async fn fetch_ai_usage(base_url: String, api_key: String) -> Result<AiUsage
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_usage_payload, usage_url};
+    use super::{parse_usage_payload, usage_url, verified_usage_target};
+    use crate::settings::{ApiModel, ModelCatalog};
+
+    #[test]
+    fn rejects_usage_without_a_verified_model_catalog() {
+        assert_eq!(
+            verified_usage_target(None, "saved-secret"),
+            Err("unverified_settings".to_string())
+        );
+    }
+
+    #[test]
+    fn uses_only_the_base_url_from_the_verified_catalog() {
+        let catalog = ModelCatalog {
+            base_url: "https://verified.example.test/v1".to_string(),
+            api_key_fingerprint: "a".repeat(64),
+            models: vec![ApiModel {
+                id: "model-a".to_string(),
+                name: "Model A".to_string(),
+            }],
+        };
+
+        assert_eq!(
+            verified_usage_target(Some(catalog), " saved-secret "),
+            Ok((
+                "https://verified.example.test/v1".to_string(),
+                "saved-secret".to_string(),
+            ))
+        );
+    }
 
     #[test]
     fn parses_the_weekly_summary_and_sorts_the_daily_models() {

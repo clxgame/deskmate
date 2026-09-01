@@ -54,7 +54,7 @@ Primary font: `"Segoe UI", "Microsoft YaHei", system-ui, sans-serif`.
 
 ## 4. Spacing & Layout
 
-All spacing uses a 4px base: `--s-0-5` 2px, `--s-1` 4px, `--s-2` 8px, `--s-3` 12px, `--s-4` 16px, `--s-5` 20px, `--s-6` 24px, `--s-8` 32px, `--s-14` 56px. Persona pack tiles use the explicit `--pack-tile-size` metric at `60px`; the Desktop pet control group uses `--pet-slider-w` at `140px`, and the lower active-persona selector uses `--active-persona-control-w` at `180px` so labels remain readable in the compact settings panel. The AI usage meter uses `--ai-usage-progress-h` at `6px`. The settings sidebar is `160px`; controls are `240px`; the titlebar is `44px`.
+All spacing uses a 4px base: `--s-0-5` 2px, `--s-1` 4px, `--s-2` 8px, `--s-3` 12px, `--s-4` 16px, `--s-5` 20px, `--s-6` 24px, `--s-8` 32px, `--s-14` 56px. Persona pack tiles use the explicit `--pack-tile-size` metric at `60px`; the Desktop pet control group uses `--pet-slider-w` at `140px`, and the lower active-persona selector uses `--active-persona-control-w` at `180px` so labels remain readable in the compact settings panel. The AI usage meter uses `--ai-usage-progress-h` at `6px`. Chat attachments use `--attachment-tray-max-h` at `84px` and `--attachment-name-max-w` at `210px` to keep staged files compact in the composer. The settings sidebar is `160px`; controls are `240px`; the titlebar is `44px`.
 
 ## 5. Components
 
@@ -89,6 +89,11 @@ All spacing uses a 4px base: `--s-0-5` 2px, `--s-1` 4px, `--s-2` 8px, `--s-3` 12
 - States: loading, missing API key, usage-permission unavailable, unavailable, ready, refresh in progress, and keyboard focus. The permission state clearly distinguishes a valid model key that the usage service does not authorize, without exposing the key or server detail. It uses existing raised, sunken, line, text, success, warning, danger, and focus tokens; only the 6px meter-height token is introduced.
 - Accessibility: the meter exposes `role="progressbar"` with the numeric percentage, refresh is a native labelled button, and the status is a polite live region. No API key or server error detail is rendered in the UI.
 
+### CC Switch setup card (chat)
+- Structure: settings-launched setup uses the provider name plus a read-only endpoint from Settings and an inline note that the saved verified API key will be reused. It never renders an API-key input in this mode; manual chat-launched setup keeps the existing provider, endpoint, and API-key fields.
+- Behavior: Settings verification remains the only network model-catalog check for the saved-credential path. The chat card calls the native saved-settings prepare command with provider name only, enters the same model-selection and confirmation steps as manual setup, and only launches CC Switch after the user presses the final launch button. The renderer cannot supply an API key, endpoint, model catalog, or saved-credential flag through tool output.
+- Accessibility: focus moves deterministically from provider name, to model select, to the launch button as setup state advances. Settings keyboard shortcuts reserve Ctrl+Shift+B for Base URL, Ctrl+Shift+V for Verify, and Ctrl+Shift+C for CC Switch before number-tab navigation.
+
 ### Mouse-follow interaction
 - The Desktop pet tab includes an independent `mouseFollow` switch. When enabled, the desktop pet turns toward the global cursor with a bounded yaw/pitch response; when disabled, it eases back to its authored forward pose.
 - Cursor polling is throttled to 25Hz and the model rotation uses exponential smoothing so the interaction feels responsive without jitter or excessive IPC traffic.
@@ -107,6 +112,16 @@ All spacing uses a 4px base: `--s-0-5` 2px, `--s-1` 4px, `--s-2` 8px, `--s-3` 12
 - Structure: `.chat-memory-confirm` — a `--warn` bordered card with a title, the local-storage disclosure, and confirm/decline buttons.
 - States: only rendered while a decision is pending; dismissing it stores nothing.
 - Accessibility: `role="alertdialog"`; both actions are keyboard reachable and the wording states where the data will live before the user commits.
+
+### Attachment tray (chat)
+- Structure: `.chat-attachment-tray` holds compact `.chat-attachment-chip` items above the composer. Each chip shows type, safe display filename, size when known, state label, and an explicit remove action. NCM confirmation expands inline as `.chat-attachment-confirm` rather than opening a modal or sending anything to the model.
+- States: staging uses dashed `--accent` on `--accent-soft`; ready uses the normal sunken surface; failed uses `--danger`; NCM awaiting confirmation uses a `--warn` bordered alert dialog; processing is a polite status with a retryable failure path. Remove, Convert, Cancel, and Retry controls use the shared button/focus treatment and never rely on symbol-only text.
+- Accessibility: the tray is a polite live region; NCM confirmation is `role="alertdialog"` with labelled Convert and Cancel buttons; failed items expose their error message and Retry by accessible name; every action has a visible `:focus-visible` ring and survives the 320px chat width without horizontal overflow.
+
+### Generated artifact card (chat)
+- Structure: `.chat-artifact-row` is a dedicated local conversation row for generated files. `.chat-artifact-card` contains filename, formatted byte size, native audio controls for MP3/FLAC previews, an explicit Download button, and inline export feedback.
+- States: idle, exporting, exported, and export failed. Exported uses a polite status naming the saved filename; failed uses an alert and leaves Retry available. Rendering or conversion success never writes to Downloads; only the user-activated Download or Retry action may call export.
+- Accessibility: audio has a filename-based accessible name, Download/Retry are native buttons with visible focus, save success is `role="status" aria-live="polite"`, and save failure is `role="alert"`.
 
 ### Memory list row (settings)
 - Structure: `.set-memory-item` — content, then a `.set-memory-meta` line carrying type, scope, date, and the reason the memory exists, then per-row edit/forget actions.

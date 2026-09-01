@@ -1,7 +1,9 @@
+use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tauri::{Emitter, Manager};
 
 mod update_repo;
@@ -45,6 +47,20 @@ fn normalize_theme(theme: &str) -> String {
         "dark" | "mint" | "peach" | "lavender" => theme.to_owned(),
         _ => DEFAULT_THEME.to_owned(),
     }
+}
+
+fn normalize_base_url(base_url: &str) -> String {
+    base_url.trim().trim_end_matches('/').to_string()
+}
+
+fn settings_catalog_binding_changed(old: &Settings, new: &Settings) -> bool {
+    normalize_base_url(&old.base_url) != normalize_base_url(&new.base_url)
+        || old.api_key.trim() != new.api_key.trim()
+}
+
+fn reconcile_verified_settings_binding(settings: &mut Settings, base_url: &str, api_key: &str) {
+    settings.base_url = normalize_base_url(base_url);
+    settings.api_key = api_key.trim().to_owned();
 }
 
 /// A scheduled task: at `time` (HH:MM, daily), auto-send `prompt` to the AI.
@@ -168,6 +184,7 @@ pub(crate) struct ApiModel {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ModelCatalog {
     pub(crate) base_url: String,
+    pub(crate) api_key_fingerprint: String,
     pub(crate) models: Vec<ApiModel>,
 }
 
@@ -186,7 +203,7 @@ fn api_key_entry() -> Option<keyring::Entry> {
     keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER).ok()
 }
 
-fn load_api_key() -> String {
+pub(crate) fn saved_api_key() -> String {
     api_key_entry()
         .and_then(|entry| entry.get_password().ok())
         .unwrap_or_default()
@@ -275,7 +292,7 @@ pub fn load(app: &tauri::AppHandle) -> Settings {
             }
         }
     } else {
-        settings.api_key = load_api_key();
+        settings.api_key = saved_api_key();
     }
     settings
 }
@@ -360,15 +377,19 @@ pub fn set_settings(
     settings.theme = normalize_theme(&settings.theme);
     settings.update_repo = migrated_update_repo(&settings.update_repo).into_owned();
     settings.api_key = settings.api_key.trim().to_string();
+    // SAFE-UNWRAP: a poisoned settings mutex means an earlier command panicked.
+    let old = { state.0.lock().unwrap().clone() };
+    let catalog_binding_changed = settings_catalog_binding_changed(&old, &settings);
     // Store the credential in the OS keystore before anything else, so a
     // keystore failure surfaces to the user instead of being lost silently.
     store_api_key(&settings.api_key)?;
-    // SAFE-UNWRAP: a poisoned settings mutex means an earlier command panicked.
-    let old = { state.0.lock().unwrap().clone() };
     if settings.pet_position.is_none() {
         settings.pet_position = old.pet_position;
     }
     save(&app, &settings)?;
+    if catalog_binding_changed {
+        clear_model_catalog_best_effort(&app);
+    }
     apply(&app, &old, &settings);
     // SAFE-UNWRAP: a poisoned settings mutex means an earlier command panicked.
     *state.0.lock().unwrap() = settings.clone();
@@ -380,6 +401,7 @@ pub fn set_settings(
 fn model_catalog_path(app: &tauri::AppHandle) -> PathBuf {
     app.path()
         .app_data_dir()
+        // SAFE-EXPECT: Tauri provides an app data directory after app setup.
         .expect("app data dir unavailable")
         .join(MODEL_CATALOG_FILE)
 }
@@ -393,6 +415,22 @@ fn save_model_catalog(app: &tauri::AppHandle, catalog: &ModelCatalog) -> Result<
     std::fs::write(path, json).map_err(|e| e.to_string())
 }
 
+fn clear_model_catalog_best_effort(app: &tauri::AppHandle) {
+    match std::fs::remove_file(model_catalog_path(app)) {
+        Ok(()) => {}
+        Err(e) if e.kind() == ErrorKind::NotFound => {}
+        Err(e) => eprintln!("could not clear verified model catalog: {e}"),
+    }
+}
+
+fn fingerprint_is_sha256(fingerprint: &str) -> bool {
+    fingerprint.len() == 64 && fingerprint.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn api_key_fingerprint(api_key: &str) -> String {
+    format!("{:x}", Sha256::digest(api_key.trim().as_bytes()))
+}
+
 pub(crate) fn load_model_catalog(app: &tauri::AppHandle) -> Option<ModelCatalog> {
     std::fs::read_to_string(model_catalog_path(app))
         .ok()
@@ -400,11 +438,37 @@ pub(crate) fn load_model_catalog(app: &tauri::AppHandle) -> Option<ModelCatalog>
         .filter(|catalog| {
             catalog.base_url.starts_with("http://") || catalog.base_url.starts_with("https://")
         })
+        .filter(|catalog| fingerprint_is_sha256(&catalog.api_key_fingerprint))
+}
+
+fn model_catalog_matches_verified_binding(
+    catalog: &ModelCatalog,
+    expected_base_url: &str,
+    api_key: &str,
+) -> bool {
+    !catalog.models.is_empty()
+        && catalog.base_url == normalize_base_url(expected_base_url)
+        && catalog.api_key_fingerprint == api_key_fingerprint(api_key)
+}
+
+pub(crate) fn load_verified_model_catalog(
+    app: &tauri::AppHandle,
+    expected_base_url: &str,
+    api_key: &str,
+) -> Option<ModelCatalog> {
+    let catalog = load_model_catalog(app)?;
+    if model_catalog_matches_verified_binding(&catalog, expected_base_url, api_key) {
+        Some(catalog)
+    } else {
+        None
+    }
 }
 
 pub(crate) fn sidecar_environment(app: &tauri::AppHandle) -> Option<(String, String)> {
-    let catalog = load_model_catalog(app)?;
-    let api_key = load_api_key();
+    let api_key = saved_api_key();
+    let state = app.try_state::<SettingsState>()?;
+    let settings = state.0.lock().ok()?.clone();
+    let catalog = load_verified_model_catalog(app, &settings.base_url, &api_key)?;
     build_sidecar_environment(&catalog, &api_key)
 }
 
@@ -553,25 +617,40 @@ fn fetch_api_models(base_url: &str, api_key: &str) -> Result<Vec<ApiModel>, Stri
 #[tauri::command]
 pub fn verify_api_key(
     app: tauri::AppHandle,
+    state: tauri::State<SettingsState>,
     base_url: String,
     api_key: String,
 ) -> Result<Option<usize>, String> {
     if api_key.trim().is_empty() {
         return Err("empty_key".into());
     }
-    let base = base_url.trim().trim_end_matches('/').to_string();
-    let models = fetch_api_models(&base, &api_key)?;
+    let base = normalize_base_url(&base_url);
+    let key = api_key.trim().to_owned();
+    let models = fetch_api_models(&base, &key)?;
     if models.is_empty() {
         return Err("no_models".into());
     }
-    store_api_key(api_key.trim())?;
+    store_api_key(&key)?;
     save_model_catalog(
         &app,
         &ModelCatalog {
-            base_url: base,
+            base_url: base.clone(),
+            api_key_fingerprint: api_key_fingerprint(&key),
             models: models.clone(),
         },
     )?;
+    let verified_settings = {
+        let mut current = state
+            .0
+            .lock()
+            .map_err(|_| "settings_unavailable".to_string())?;
+        let mut next = current.clone();
+        reconcile_verified_settings_binding(&mut next, &base, &key);
+        save(&app, &next)?;
+        *current = next.clone();
+        next
+    };
+    let _ = app.emit("deskmate://settings-changed", &verified_settings);
     crate::restart_sidecar(&app)?;
     Ok(Some(models.len()))
 }
@@ -676,9 +755,10 @@ pub fn register_shortcuts(app: &tauri::AppHandle, settings: &Settings) {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_sidecar_environment, normalize_pet_scale, normalize_render_value, normalize_theme,
-        parse_api_models, redacted_for_disk, ApiModel, ModelCatalog, PetPosition, Settings,
-        SettingsState,
+        api_key_fingerprint, build_sidecar_environment, model_catalog_matches_verified_binding,
+        normalize_pet_scale, normalize_render_value, normalize_theme, parse_api_models,
+        reconcile_verified_settings_binding, redacted_for_disk, settings_catalog_binding_changed,
+        ApiModel, ModelCatalog, PetPosition, Settings, SettingsState,
     };
 
     #[test]
@@ -706,6 +786,7 @@ mod tests {
     fn generated_sidecar_environment_declares_the_yume_provider() {
         let catalog = ModelCatalog {
             base_url: "https://models.example.test".into(),
+            api_key_fingerprint: api_key_fingerprint("secret-key"),
             models: vec![ApiModel {
                 id: "model-a".into(),
                 name: "Model A".into(),
@@ -734,6 +815,7 @@ mod tests {
     fn generated_sidecar_environment_denies_generic_opencode_tools() {
         let catalog = ModelCatalog {
             base_url: "https://models.example.test".into(),
+            api_key_fingerprint: api_key_fingerprint("secret-key"),
             models: vec![ApiModel {
                 id: "model-a".into(),
                 name: "Model A".into(),
@@ -763,6 +845,79 @@ mod tests {
             .map(|(tool, _)| tool.as_str())
             .collect::<Vec<_>>();
         assert_eq!(allowed, vec!["ccswitch_prepare_opencode_provider"]);
+    }
+
+    #[test]
+    fn verified_model_catalog_matches_only_bound_base_key_and_non_empty_models() {
+        let catalog = ModelCatalog {
+            base_url: "https://models.example.test/v1".into(),
+            api_key_fingerprint: api_key_fingerprint("secret-key"),
+            models: vec![ApiModel {
+                id: "model-a".into(),
+                name: "Model A".into(),
+            }],
+        };
+
+        assert!(model_catalog_matches_verified_binding(
+            &catalog,
+            " https://models.example.test/v1/ ",
+            " secret-key "
+        ));
+        assert!(!model_catalog_matches_verified_binding(
+            &catalog,
+            "https://models.example.test/v2",
+            "secret-key"
+        ));
+        assert!(!model_catalog_matches_verified_binding(
+            &catalog,
+            "https://models.example.test/v1",
+            "changed-key"
+        ));
+
+        let empty_catalog = ModelCatalog {
+            models: Vec::new(),
+            ..catalog
+        };
+        assert!(!model_catalog_matches_verified_binding(
+            &empty_catalog,
+            "https://models.example.test/v1",
+            "secret-key"
+        ));
+    }
+
+    #[test]
+    fn legacy_model_catalog_without_api_key_fingerprint_fails_closed() {
+        let legacy = serde_json::json!({
+            "baseUrl": "https://models.example.test/v1",
+            "models": [{"id": "model-a", "name": "Model A"}]
+        });
+
+        assert!(serde_json::from_value::<ModelCatalog>(legacy).is_err());
+    }
+
+    #[test]
+    fn verified_settings_reconciliation_makes_identical_pending_settings_safe() {
+        let mut current = Settings {
+            base_url: "https://models.example.test/v1/".into(),
+            api_key: " stale-key ".into(),
+            ..Settings::default()
+        };
+
+        reconcile_verified_settings_binding(
+            &mut current,
+            " https://models.example.test/v1/ ",
+            " verified-key ",
+        );
+
+        let pending = Settings {
+            base_url: "https://models.example.test/v1".into(),
+            api_key: "verified-key".into(),
+            ..current.clone()
+        };
+
+        assert_eq!(current.base_url, "https://models.example.test/v1");
+        assert_eq!(current.api_key, "verified-key");
+        assert!(!settings_catalog_binding_changed(&current, &pending));
     }
 
     #[test]

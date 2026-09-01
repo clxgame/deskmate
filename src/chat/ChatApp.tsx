@@ -58,16 +58,11 @@ import {
   type HistorySummary,
 } from "../lib/history";
 import {
-  createPendingAttachment,
-  formatAttachmentSize,
-  isNcmFile,
-  isSupportedAttachment,
-  MAX_TOTAL_ATTACHMENT_BYTES,
-  readChatAttachment,
-  snapshotSelectedFiles,
-  toOpenCodeFilePart,
-  type ChatAttachment,
+  type ModelReadyAttachment,
+  type OpenCodeFilePart,
 } from "./attachments";
+import { ArtifactCard } from "./ArtifactCard";
+import { AttachmentTray } from "./AttachmentTray";
 import { ChatText } from "./ChatText";
 import { CcSwitchSetupCard } from "./CcSwitchSetupCard";
 import {
@@ -78,16 +73,31 @@ import {
   type CcSwitchProviderDraft,
   type CcSwitchToolResult,
 } from "./ccSwitchSetup";
+import { useChatAttachments, type LocalAttachmentArtifact } from "./useChatAttachments";
+import type { PreparedModelAttachments } from "./useChatAttachmentsUtils";
 import "./chat.css";
 
-interface ChatMessage {
+interface TextChatMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
   /** live tool activity line, e.g. "bash: npm test" */
   activity?: string;
-  attachments?: ChatAttachment[];
+  attachments?: ModelReadyAttachment[];
 }
+
+interface ArtifactChatMessage {
+  id: string;
+  role: "artifact";
+  text: "";
+  artifactId: string;
+}
+
+interface CcSwitchSetupRequestPayload {
+  readonly source?: string;
+}
+
+type ChatMessage = TextChatMessage | ArtifactChatMessage;
 
 export function containsCcSwitchApiKey(text: string): boolean {
   if (!/(cc\s*switch|opencode)/iu.test(text)) return false;
@@ -122,6 +132,11 @@ type View = "chat" | "history";
 
 const MIN_REPLY_PRESENTATION_MS = 2_000;
 const FIXED_REPLY_TYPING_DELAY_MS = MIN_REPLY_PRESENTATION_MS / 2;
+const EMPTY_PREPARED_ATTACHMENTS: PreparedModelAttachments = {
+  fileParts: [],
+  fallbackPrompt: null,
+  shouldSendToModel: false,
+};
 
 interface BufferedAssistantUpdate {
   messageID: string;
@@ -153,10 +168,9 @@ export default function ChatApp() {
   const [theme, setTheme] = useState<ThemeId>("dark");
   const [activePersonaId, setActivePersonaId] = useState(DEFAULT_PERSONA_ID);
   const [view, setView] = useState<View>("chat");
-  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
-  const [readingAttachments, setReadingAttachments] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   /** Inline memory receipts, keyed by the message they belong to. */
   const [memoryReceipts, setMemoryReceipts] = useState<
     Record<string, MemoryReceipt>
@@ -193,6 +207,36 @@ export default function ChatApp() {
   const ccSwitchDraftRef = useRef<CcSwitchProviderDraft | null>(null);
   const ccSwitchToolTrackerRef = useRef(createCcSwitchToolResultTracker());
 
+  const appendArtifactMessage = useCallback((artifact: LocalAttachmentArtifact) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `artifact-${artifact.state.artifact.id}-${Date.now()}`,
+        role: "artifact",
+        text: "",
+        artifactId: artifact.state.artifact.id,
+      },
+    ]);
+  }, []);
+
+  const reportAttachmentBackgroundError = useCallback((message: string) => {
+    setAttachmentError(message);
+  }, []);
+
+  const chatAttachments = useChatAttachments({
+    sessionId: currentSessionId ?? "",
+    personaId: activePersonaId,
+    onArtifact: appendArtifactMessage,
+    onBackgroundError: reportAttachmentBackgroundError,
+  });
+  const cleanupAttachmentSession = chatAttachments.cleanupSession;
+  const discardSentAttachmentSources = chatAttachments.discardSentSources;
+  const resetAttachmentSession = chatAttachments.resetSession;
+  const attachmentBusy = chatAttachments.items.some((item) => item.kind === "staging");
+  const attachmentBlocked = chatAttachments.items.some(
+    (item) => item.kind === "failed" && item.phase === "staging",
+  );
+
   const clearReplyPacing = () => {
     const pacing = replyPacingRef.current;
     if (pacing?.releaseTimer !== null && pacing?.releaseTimer !== undefined) {
@@ -209,7 +253,9 @@ export default function ChatApp() {
     broadcastMood("idle");
     setMessages((prev) =>
       prev.map((message) =>
-        message.activity ? { ...message, activity: undefined } : message,
+        isTextChatMessage(message) && message.activity
+          ? { ...message, activity: undefined }
+          : message,
       ),
     );
   };
@@ -333,7 +379,9 @@ export default function ChatApp() {
       broadcastMood("idle");
       setMessages((prev) =>
         prev.map((message) =>
-          message.activity ? { ...message, activity: undefined } : message,
+          isTextChatMessage(message) && message.activity
+            ? { ...message, activity: undefined }
+            : message,
         ),
       );
       return;
@@ -359,12 +407,37 @@ export default function ChatApp() {
   }, []);
 
   useEffect(() => {
-    const subscription = listen("deskmate://ccswitch-setup-request", () => {
-      ccSwitchDraftRef.current = null;
-      setCcSwitchDraft(null);
-      setCcSwitchSetupOpen(true);
-      setView("chat");
-    });
+    const subscription = listen<CcSwitchSetupRequestPayload | null>(
+      "deskmate://ccswitch-setup-request",
+      ({ payload }) => {
+        if (payload?.source !== "settings") {
+          const draft: CcSwitchProviderDraft = {
+            callID: "manual",
+            credentialMode: "manual",
+          };
+          ccSwitchDraftRef.current = draft;
+          setCcSwitchDraft(draft);
+          setCcSwitchSetupOpen(true);
+          setView("chat");
+          return;
+        }
+        void (async () => {
+          const settings =
+            settingsRef.current ?? (await getSettings().catch(() => null));
+          const draft: CcSwitchProviderDraft = {
+            callID: "settings",
+            credentialMode: "saved-settings",
+            providerName: "YUME OpenCode",
+            baseUrl: settings?.baseUrl,
+            modelHint: settings?.modelId,
+          };
+          ccSwitchDraftRef.current = draft;
+          setCcSwitchDraft(draft);
+          setCcSwitchSetupOpen(true);
+          setView("chat");
+        })();
+      },
+    );
     return () => {
       void subscription.then((unlisten) => unlisten()).catch(() => undefined);
     };
@@ -377,10 +450,13 @@ export default function ChatApp() {
     const previousSession = sessionRef.current;
     if (previousSession) {
       await abortSession(previousSession).catch(() => {});
+      await cleanupAttachmentSession(previousSession);
     }
     await waitForServer();
     const session = await createSession("YUME chat");
     sessionRef.current = session.id;
+    setCurrentSessionId(session.id);
+    resetAttachmentSession(session.id);
     rolesRef.current.clear();
     ccSwitchDraftRef.current = null;
     ccSwitchToolTrackerRef.current = createCcSwitchToolResultTracker();
@@ -391,7 +467,7 @@ export default function ChatApp() {
     setView("chat");
     setStatus("ready");
     broadcastMood("idle");
-  }, []);
+  }, [cleanupAttachmentSession, resetAttachmentSession]);
 
   const loadPersona = useCallback((id: string): Promise<void> => {
     const resolvedId = resolvePersonaId(id);
@@ -649,12 +725,13 @@ export default function ChatApp() {
       const title = firstUser
         ? firstUser.text.slice(0, 40)
         : tRef.current.historyNewSession;
+      const textMessages = msgs.filter(isTextChatMessage);
       void historySave({
         id: sessionID,
         title,
         created: createdRef.current,
         updated: Date.now(),
-        messages: msgs
+        messages: textMessages
           .filter((m) => m.text.trim().length > 0)
           .map((m) => ({ role: m.role, text: m.text, time: Date.now() })),
       }).catch((e) => console.error("history save failed", e));
@@ -662,89 +739,9 @@ export default function ChatApp() {
     return () => clearTimeout(timer);
   }, [messages, status]);
 
-  const prepareAttachmentsForSend = async (
-    queuedAttachments: ChatAttachment[],
-  ): Promise<ChatAttachment[]> => {
-    if (!queuedAttachments.some((item) => item.status === "pending")) {
-      return queuedAttachments;
-    }
-    setReadingAttachments(true);
-    let lastError: string | null = null;
-    const prepared: ChatAttachment[] = [];
-    try {
-      for (const attachment of queuedAttachments) {
-        if (attachment.status !== "pending") {
-          prepared.push(attachment);
-          continue;
-        }
-        const file = attachment.file;
-        try {
-          if (!file) throw new Error(`${attachment.name} 无法访问，请重新添加`);
-          let readyAttachment: ChatAttachment;
-          if (isNcmFile(file)) {
-            if (activePersonaIdRef.current !== "xiaozhu") {
-              throw new Error(".ncm 音乐转换是小著的专属能力，请先切换到小著");
-            }
-            const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
-            const converted = await invoke<{
-              filename: string;
-              mime: string;
-              size: number;
-              dataUrl: string;
-            }>("convert_ncm", {
-              personaId: activePersonaIdRef.current,
-              filename: file.name,
-              bytes,
-            });
-            readyAttachment = {
-              id: attachment.id,
-              name: converted.filename,
-              mime: converted.mime,
-              size: converted.size,
-              kind: "audio",
-              status: "ready",
-              dataUrl: converted.dataUrl,
-            };
-          } else {
-            readyAttachment = {
-              ...(await readChatAttachment(file)),
-              id: attachment.id,
-              status: "ready",
-            };
-          }
-          prepared.push(readyAttachment);
-          setAttachments((current) =>
-            current.map((item) =>
-              item.id === attachment.id ? readyAttachment : item,
-            ),
-          );
-        } catch (error: unknown) {
-          const detail = error instanceof Error ? error.message : String(error);
-          const message = detail || tRef.current.chatAttachmentReadFailed;
-          lastError = message;
-          const failedAttachment = {
-            ...attachment,
-            status: "error" as const,
-            error: message,
-          };
-          prepared.push(failedAttachment);
-          setAttachments((current) =>
-            current.map((item) =>
-              item.id === attachment.id ? failedAttachment : item,
-            ),
-          );
-        }
-      }
-    } finally {
-      setReadingAttachments(false);
-    }
-    if (lastError) setAttachmentError(lastError);
-    return prepared;
-  };
-
   const send = async () => {
     const text = input.trim();
-    if (!text && attachments.length === 0) return;
+    if (!text && chatAttachments.items.length === 0) return;
     if (status !== "ready" || !sessionRef.current) return;
     if (containsCcSwitchApiKey(text)) {
       setInput("");
@@ -754,78 +751,43 @@ export default function ChatApp() {
       setMemoryNotice(t.ccSwitchSecretRedirect);
       return;
     }
-    if (readingAttachments) {
+    if (attachmentBusy) {
       setAttachmentError(t.chatAttachmentStillReading);
       return;
     }
-    if (attachments.some((item) => item.status === "error")) {
+    if (attachmentBlocked) {
       setAttachmentError(t.chatAttachmentFixErrors);
       return;
     }
-    const pendingAttachments = await prepareAttachmentsForSend(attachments);
-    if (pendingAttachments.some((item) => item.status === "pending")) {
-      setAttachmentError(t.chatAttachmentStillReading);
+    let prepared: PreparedModelAttachments;
+    try {
+      prepared = await chatAttachments.prepareModelAttachments(text);
+    } catch (error: unknown) {
+      setAttachmentError(error instanceof Error ? error.message : t.chatAttachmentReadFailed);
       return;
     }
-    if (pendingAttachments.some((item) => item.status === "error")) {
-      setAttachmentError(t.chatAttachmentFixErrors);
-      return;
-    }
+    if (!prepared.shouldSendToModel) return;
+    const sentReadyLocalIds = chatAttachments.items
+      .filter((item) => item.kind === "ready")
+      .map((item) => item.localId);
     setInput("");
-    setAttachments([]);
     setAttachmentError(null);
-    await sendText(text, pendingAttachments);
-  };
-
-  const queueSelectedFiles = (files: FileList | File[]) => {
-    const selected = Array.from(files);
-    if (selected.length === 0) return;
-    if (readingAttachments) {
-      setAttachmentError(t.chatAttachmentStillReading);
-      return;
+    const sent = await sendText(text, prepared);
+    if (sent) {
+      discardSentAttachmentSources(sentReadyLocalIds);
     }
-    let totalBytes = attachments.reduce(
-      (sum, item) => (item.status === "error" ? sum : sum + item.size),
-      0,
-    );
-    const queued = selected.map((file) => {
-      const placeholder = createPendingAttachment(file);
-      if (!isNcmFile(file) && !isSupportedAttachment(file)) {
-        return {
-          ...placeholder,
-          status: "error" as const,
-          error: `${file.name} 暂不支持读取，请选择图片、PDF、DOCX 或文本文件`,
-        };
-      }
-      if (totalBytes + file.size > MAX_TOTAL_ATTACHMENT_BYTES) {
-        return {
-          ...placeholder,
-          status: "error" as const,
-          error: `${file.name} 超过 20 MB 限制`,
-        };
-      }
-      totalBytes += file.size;
-      return placeholder;
-    });
-    const firstError = queued.find((item) => item.status === "error");
-    setAttachments((current) => [...current, ...queued]);
-    setAttachmentError(firstError?.error ?? null);
-  };
-
-  const removeAttachment = (id: string) => {
-    setAttachments((current) => current.filter((item) => item.id !== id));
-    setAttachmentError(null);
   };
 
   const sendText = async (
     text: string,
-    messageAttachments: ChatAttachment[] = [],
-  ) => {
+    prepared: PreparedModelAttachments = EMPTY_PREPARED_ATTACHMENTS,
+  ): Promise<boolean> => {
     const sessionID = sessionRef.current;
-    if ((!text && messageAttachments.length === 0) || !sessionID) return;
+    if ((!text && !prepared.shouldSendToModel) || !sessionID) return false;
     await personaLoadRef.current;
+    const messageAttachments = prepared.fileParts.map(attachmentPreviewFromPart);
     const attachmentNames = messageAttachments.map((item) => item.name).join(", ");
-    const promptText = text || `请读取我上传的附件：${attachmentNames}`;
+    const promptText = text || prepared.fallbackPrompt;
     setMessages((prev) => [
       ...prev,
       {
@@ -835,6 +797,7 @@ export default function ChatApp() {
         attachments: messageAttachments,
       },
     ]);
+    if (!promptText) return false;
     setStatus("busy");
     setIsPersonaTyping(false);
     broadcastMood("thinking");
@@ -842,10 +805,10 @@ export default function ChatApp() {
     fixedReplySequenceRef.current = fixedReplySequence;
     if (
       activePersonaIdRef.current === DEFAULT_PERSONA_ID &&
-      messageAttachments.length === 0
+      prepared.fileParts.length === 0
     ) {
       if (isXiaozhuNameOriginQuestion(text)) {
-        if (!(await waitForFixedReplyStart(fixedReplySequence))) return;
+        if (!(await waitForFixedReplyStart(fixedReplySequence))) return false;
         for (const [index, line] of XIAOZHU_NAME_ORIGIN_LINES.entries()) {
           if (index > 0) {
             setIsPersonaTyping(true);
@@ -853,7 +816,7 @@ export default function ChatApp() {
             await new Promise<void>((resolve) => {
               globalThis.setTimeout(resolve, 2000);
             });
-            if (fixedReplySequenceRef.current !== fixedReplySequence) return;
+            if (fixedReplySequenceRef.current !== fixedReplySequence) return false;
           }
           setIsPersonaTyping(false);
           setMessages((prev) => [
@@ -869,10 +832,10 @@ export default function ChatApp() {
         setIsPersonaTyping(false);
         setStatus("ready");
         broadcastMood("idle");
-        return;
+        return true;
       }
       if (isXiaozhuIdentityQuestion(text)) {
-        if (!(await waitForFixedReplyStart(fixedReplySequence))) return;
+        if (!(await waitForFixedReplyStart(fixedReplySequence))) return false;
         setIsPersonaTyping(false);
         setMessages((prev) => [
           ...prev,
@@ -885,7 +848,7 @@ export default function ChatApp() {
         broadcastMood("talking");
         setStatus("ready");
         broadcastMood("idle");
-        return;
+        return true;
       }
     }
     startReplyPacing();
@@ -919,14 +882,13 @@ export default function ChatApp() {
       });
       await promptAsync(sessionID, promptText, {
         system,
-        attachments: messageAttachments
-          .map(toOpenCodeFilePart)
-          .filter((part): part is NonNullable<typeof part> => part !== null),
+        attachments: [...prepared.fileParts],
         model:
           s?.providerId && s.modelId
             ? { providerID: s.providerId, modelID: s.modelId }
             : undefined,
       });
+      return true;
     } catch (error: unknown) {
       console.error(
         error instanceof Error ? error : new Error(String(error)),
@@ -935,12 +897,33 @@ export default function ChatApp() {
       setIsPersonaTyping(false);
       setStatus("ready");
       broadcastMood("error");
-      if (messageAttachments.length > 0) {
-        setAttachments(messageAttachments);
+      if (prepared.fileParts.length > 0) {
         setAttachmentError(tRef.current.chatAttachmentSendFailed);
       }
+      return false;
     }
   };
+
+  const stageAttachmentFiles = useCallback((files: ArrayLike<File> | null) => {
+    const selected = Array.from(files ?? []);
+    if (selected.length === 0) return;
+    void (async () => {
+      let sessionID = sessionRef.current;
+      if (!sessionID) {
+        await resetSession();
+        sessionID = sessionRef.current;
+      }
+      if (!sessionID) {
+        setAttachmentError(tRef.current.chatAttachmentStillReading);
+        return;
+      }
+      resetAttachmentSession(sessionID);
+      setCurrentSessionId(sessionID);
+      chatAttachments.stageFromPicker(selected);
+    })().catch((error: unknown) => {
+      setAttachmentError(error instanceof Error ? error.message : tRef.current.chatAttachmentReadFailed);
+    });
+  }, [chatAttachments, resetAttachmentSession, resetSession]);
 
   /** Turn a memory failure into a user-facing notice. */
   const noticeForMemoryFailure = useCallback(
@@ -962,7 +945,7 @@ export default function ChatApp() {
 
   /** "记住这件事" on one message. */
   const rememberMessage = useCallback(
-    async (message: ChatMessage, sensitiveConfirmed = false) => {
+    async (message: TextChatMessage, sensitiveConfirmed = false) => {
       const draft = draftFromMessage({
         text: message.text,
         personaId: activePersonaIdRef.current,
@@ -1013,16 +996,15 @@ export default function ChatApp() {
   );
 
   const handleFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const files = snapshotSelectedFiles(event.target.files);
+    const files = event.target.files;
     event.target.value = "";
-    if (files.length > 0) queueSelectedFiles(files);
+    stageAttachmentFiles(files);
   };
 
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = Array.from(event.clipboardData.files);
-    if (files.length === 0) return;
+    if (event.clipboardData.files.length === 0) return;
     event.preventDefault();
-    queueSelectedFiles(files);
+    stageAttachmentFiles(event.clipboardData.files);
   };
 
   const hasFiles = (event: DragEvent<HTMLDivElement>): boolean =>
@@ -1058,7 +1040,7 @@ export default function ChatApp() {
       setAttachmentError(t.chatAttachmentDropFailed);
       return;
     }
-    queueSelectedFiles(event.dataTransfer.files);
+    stageAttachmentFiles(event.dataTransfer.files);
   };
 
   // Scheduled tasks fired by the Rust scheduler: auto-send the prompt.
@@ -1104,7 +1086,13 @@ export default function ChatApp() {
     setIsPersonaTyping(false);
     const rec = await historyLoad(id).catch(() => null);
     if (!rec) return;
+    const previousSession = sessionRef.current;
+    if (previousSession !== null && previousSession !== id) {
+      await cleanupAttachmentSession(previousSession);
+    }
     sessionRef.current = id;
+    setCurrentSessionId(id);
+    resetAttachmentSession(id);
     rolesRef.current.clear();
     createdRef.current = rec.created;
     setMessages(
@@ -1117,7 +1105,7 @@ export default function ChatApp() {
     setView("chat");
     setStatus("ready");
     broadcastMood("idle");
-  }, []);
+  }, [cleanupAttachmentSession, resetAttachmentSession]);
 
   /** Start a fresh session. */
   const newChat = useCallback(async () => {
@@ -1202,6 +1190,7 @@ export default function ChatApp() {
           t={t}
           onContinue={resumeSession}
           onNewChat={newChat}
+          onDelete={cleanupAttachmentSession}
         />
       ) : (
         <>
@@ -1222,96 +1211,113 @@ export default function ChatApp() {
                 <ChatText text={chatEmpty} />
               </div>
             )}
-            {messages.map((m) => (
-              <div key={m.id} className={`chat-msg chat-msg-${m.role}`}>
-                {m.activity && (
-                  <div className="chat-activity">⚙ {m.activity}</div>
-                )}
-                {m.attachments && m.attachments.length > 0 && (
-                  <div className="chat-message-attachments">
-                    {m.attachments.map((attachment) => (
-                      <AttachmentPreview
-                        key={attachment.id}
-                        attachment={attachment}
-                      />
-                    ))}
-                  </div>
-                )}
-                {(m.text.trim().length > 0 || m.role === "user") && (
-                  <div className="chat-bubble">
-                    <ChatText text={m.text} />
-                  </div>
-                )}
-                {m.text.trim().length > 0 && (
-                  <div className="chat-msg-actions">
-                    <button
-                      type="button"
-                      className="chat-memory-action"
-                      onClick={() => void rememberMessage(m)}
-                      title={t.memoryRemember}
-                    >
-                      {t.memoryRemember}
-                    </button>
-                    {memoryReceipts[m.id] && (
-                      <button
-                        type="button"
-                        className="chat-memory-action chat-memory-action-danger"
-                        onClick={() =>
-                          void dropMemory(m.id, memoryReceipts[m.id].memoryId, false)
-                        }
-                        title={t.memoryForget}
-                      >
-                        {t.memoryForget}
-                      </button>
-                    )}
-                  </div>
-                )}
-                {memoryReceipts[m.id] && (
-                  <div className="chat-memory-receipt" role="status" aria-live="polite">
-                    <span className="chat-memory-receipt-text">
-                      {t.memorySaved(memoryReceipts[m.id].content)}
-                    </span>
-                    {memoryReceipts[m.id].undoable && (
-                      <button
-                        type="button"
-                        className="chat-memory-undo"
-                        onClick={() =>
-                          void dropMemory(m.id, memoryReceipts[m.id].memoryId, true)
-                        }
-                      >
-                        {t.memoryUndo}
-                      </button>
-                    )}
-                  </div>
-                )}
-                {sensitivePrompt?.messageId === m.id && (
-                  <div className="chat-memory-confirm" role="alertdialog">
-                    <div className="chat-memory-confirm-title">
-                      {t.memorySensitiveTitle}
+            {messages.map((m) => {
+              if (m.role === "artifact") {
+                const artifactState = chatAttachments.artifacts.find(
+                  (item) => item.artifact.id === m.artifactId,
+                );
+                if (artifactState === undefined) return null;
+                return (
+                  <ArtifactCard
+                    key={m.id}
+                    t={t}
+                    state={artifactState}
+                    onDownload={chatAttachments.download}
+                    onRetry={chatAttachments.retryDownload}
+                  />
+                );
+              }
+              return (
+                <div key={m.id} className={`chat-msg chat-msg-${m.role}`}>
+                  {m.activity && (
+                    <div className="chat-activity">⚙ {m.activity}</div>
+                  )}
+                  {m.attachments && m.attachments.length > 0 && (
+                    <div className="chat-message-attachments">
+                      {m.attachments.map((attachment) => (
+                        <AttachmentPreview
+                          key={attachment.id}
+                          attachment={attachment}
+                        />
+                      ))}
                     </div>
-                    <p className="chat-memory-confirm-body">
-                      {t.memorySensitiveBody}
-                    </p>
-                    <div className="chat-memory-confirm-actions">
+                  )}
+                  {(m.text.trim().length > 0 || m.role === "user") && (
+                    <div className="chat-bubble">
+                      <ChatText text={m.text} />
+                    </div>
+                  )}
+                  {m.text.trim().length > 0 && (
+                    <div className="chat-msg-actions">
                       <button
                         type="button"
                         className="chat-memory-action"
-                        onClick={() => void rememberMessage(m, true)}
+                        onClick={() => void rememberMessage(m)}
+                        title={t.memoryRemember}
                       >
-                        {t.memorySensitiveConfirm}
+                        {t.memoryRemember}
                       </button>
-                      <button
-                        type="button"
-                        className="chat-memory-action"
-                        onClick={() => setSensitivePrompt(null)}
-                      >
-                        {t.memorySensitiveCancel}
-                      </button>
+                      {memoryReceipts[m.id] && (
+                        <button
+                          type="button"
+                          className="chat-memory-action chat-memory-action-danger"
+                          onClick={() =>
+                            void dropMemory(m.id, memoryReceipts[m.id].memoryId, false)
+                          }
+                          title={t.memoryForget}
+                        >
+                          {t.memoryForget}
+                        </button>
+                      )}
                     </div>
-                  </div>
-                )}
-              </div>
-            ))}
+                  )}
+                  {memoryReceipts[m.id] && (
+                    <div className="chat-memory-receipt" role="status" aria-live="polite">
+                      <span className="chat-memory-receipt-text">
+                        {t.memorySaved(memoryReceipts[m.id].content)}
+                      </span>
+                      {memoryReceipts[m.id].undoable && (
+                        <button
+                          type="button"
+                          className="chat-memory-undo"
+                          onClick={() =>
+                            void dropMemory(m.id, memoryReceipts[m.id].memoryId, true)
+                          }
+                        >
+                          {t.memoryUndo}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {sensitivePrompt?.messageId === m.id && (
+                    <div className="chat-memory-confirm" role="alertdialog">
+                      <div className="chat-memory-confirm-title">
+                        {t.memorySensitiveTitle}
+                      </div>
+                      <p className="chat-memory-confirm-body">
+                        {t.memorySensitiveBody}
+                      </p>
+                      <div className="chat-memory-confirm-actions">
+                        <button
+                          type="button"
+                          className="chat-memory-action"
+                          onClick={() => void rememberMessage(m, true)}
+                        >
+                          {t.memorySensitiveConfirm}
+                        </button>
+                        <button
+                          type="button"
+                          className="chat-memory-action"
+                          onClick={() => setSensitivePrompt(null)}
+                        >
+                          {t.memorySensitiveCancel}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
             {isPersonaTyping && (
               <div className="chat-typing" role="status" aria-live="polite">
                 {t.chatTyping}
@@ -1335,55 +1341,15 @@ export default function ChatApp() {
               onChange={handleFileInputChange}
             />
             <div className="chat-input-wrap">
-              {(attachments.length > 0 || attachmentError) && (
-                <div className="chat-attachment-tray" aria-live="polite">
-                  {attachments.map((attachment) => (
-                    <div
-                      className={`chat-attachment-chip chat-attachment-chip-${attachment.status}`}
-                      key={attachment.id}
-                    >
-                      <span className="chat-attachment-kind">
-                        {attachment.kind === "image"
-                          ? "图"
-                          : attachment.kind === "audio"
-                            ? "音"
-                            : "文"}
-                      </span>
-                      <span className="chat-attachment-name" title={attachment.name}>
-                        {attachment.name}
-                      </span>
-                      {attachment.status === "pending" ? (
-                        <span className="chat-attachment-status chat-attachment-status-pending">
-                          {t.chatAttachmentPending}
-                        </span>
-                      ) : attachment.status === "error" ? (
-                        <span
-                          className="chat-attachment-status chat-attachment-status-error"
-                          title={attachment.error}
-                        >
-                          {t.chatAttachmentError}
-                        </span>
-                      ) : (
-                        <span className="chat-attachment-size">
-                          {t.chatAttachmentReady} · {formatAttachmentSize(attachment.size)}
-                        </span>
-                      )}
-                      <button
-                        className="chat-attachment-remove"
-                        type="button"
-                        onClick={() => removeAttachment(attachment.id)}
-                        disabled={readingAttachments}
-                        aria-label={`${t.chatAttachmentRemove} ${attachment.name}`}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                  {attachmentError && (
-                    <div className="chat-attachment-error">{attachmentError}</div>
-                  )}
-                </div>
-              )}
+              <AttachmentTray
+                t={t}
+                items={chatAttachments.items}
+                error={attachmentError}
+                onConfirm={chatAttachments.confirm}
+                onCancel={chatAttachments.cancel}
+                onRemove={chatAttachments.remove}
+                onRetry={chatAttachments.retry}
+              />
               <div className="chat-textarea-wrap">
                 <textarea
                   className="chat-input"
@@ -1406,7 +1372,7 @@ export default function ChatApp() {
                   className="chat-attach"
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={status === "busy" || readingAttachments}
+                  disabled={status === "busy" || !currentSessionId || attachmentBusy}
                   aria-label={t.chatAttach}
                   title={t.chatAttachHint}
                 >
@@ -1429,8 +1395,8 @@ export default function ChatApp() {
                 onClick={() => void send()}
                 disabled={
                   status !== "ready" ||
-                  readingAttachments ||
-                  (!input.trim() && attachments.length === 0)
+                  attachmentBusy ||
+                  (!input.trim() && chatAttachments.items.length === 0)
                 }
               >
                 {t.chatSend}
@@ -1446,15 +1412,8 @@ export default function ChatApp() {
 function AttachmentPreview({
   attachment,
 }: {
-  attachment: ChatAttachment;
+  attachment: ModelReadyAttachment;
 }) {
-  if (attachment.status !== "ready" || !attachment.dataUrl) {
-    return (
-      <div className="chat-attachment-document">
-        {attachment.name} · {attachment.error ?? "读取中"}
-      </div>
-    );
-  }
   if (attachment.kind === "image") {
     return (
       <img
@@ -1465,21 +1424,44 @@ function AttachmentPreview({
       />
     );
   }
-  if (attachment.kind === "audio") {
-    return (
-      <audio
-        className="chat-attachment-audio"
-        controls
-        preload="metadata"
-        src={attachment.dataUrl}
-        aria-label={attachment.name}
-      />
-    );
-  }
   return <div className="chat-attachment-document">文档 · {attachment.name}</div>;
 }
 
+function attachmentPreviewFromPart(part: OpenCodeFilePart): ModelReadyAttachment {
+  switch (part.mime) {
+    case "image/gif":
+    case "image/jpeg":
+    case "image/png":
+    case "image/webp":
+      return {
+        id: part.filename,
+        name: part.filename,
+        mime: part.mime,
+        size: 0,
+        kind: "image",
+        status: "ready",
+        dataUrl: part.url,
+      };
+    default:
+      return {
+        id: part.filename,
+        name: part.filename,
+        mime: "text/plain",
+        size: 0,
+        kind: "text",
+        status: "ready",
+        dataUrl: part.url,
+        truncated: false,
+      };
+  }
+}
+
+function isTextChatMessage(message: ChatMessage): message is TextChatMessage {
+  return message.role === "user" || message.role === "assistant";
+}
+
 function hasVisibleMessageContent(message: ChatMessage): boolean {
+  if (message.role === "artifact") return true;
   return (
     message.text.trim().length > 0 ||
     (message.attachments !== undefined && message.attachments.length > 0)
@@ -1490,15 +1472,18 @@ function hasVisibleMessageContent(message: ChatMessage): boolean {
 function upsertAssistant(
   prev: ChatMessage[],
   messageID: string,
-  update: (m: ChatMessage) => ChatMessage,
+  update: (m: TextChatMessage) => TextChatMessage,
 ): ChatMessage[] {
   const idx = prev.findIndex((m) => m.id === messageID);
   if (idx >= 0) {
-    const next = [...prev];
-    next[idx] = update(next[idx]);
-    return next;
+    return prev.map((message, index) => (
+      index === idx && isTextChatMessage(message) ? update(message) : message
+    ));
   }
-  return [...prev, update({ id: messageID, role: "assistant", text: "" })];
+  return [
+    ...prev,
+    update({ id: messageID, role: "assistant", text: "" }),
+  ];
 }
 
 // ------------------------------------------------------------------- 历史
@@ -1507,10 +1492,12 @@ function HistoryPanel({
   t,
   onContinue,
   onNewChat,
+  onDelete,
 }: {
   t: ReturnType<typeof dict>;
   onContinue: (id: string) => void;
   onNewChat: () => void;
+  onDelete: (id: string) => Promise<void>;
 }) {
   const [sessions, setSessions] = useState<HistorySummary[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -1537,6 +1524,7 @@ function HistoryPanel({
 
   const remove = async (id: string) => {
     await historyDelete(id).catch(() => {});
+    await onDelete(id).catch(() => {});
     if (deleteMemories) {
       // A memory failure must not leave the conversation half-deleted.
       await memoryForgetConversation(id).catch(() => {});

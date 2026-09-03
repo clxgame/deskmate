@@ -28,6 +28,25 @@ struct ProviderOptions {
     base_url: Option<String>,
 }
 
+/// Mirrors cc-switch v3.20.1 `import_provider_from_deeplink`, which derives the
+/// OpenCode provider key as `<sanitized-name>-<unix-millis>` and writes no `name`.
+fn ccswitch_generated_id_prefix(provider_name: &str) -> String {
+    provider_name
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+        .collect::<String>()
+        .to_lowercase()
+}
+
+/// Returns the trailing millisecond stamp when `id` matches `<prefix>-<digits>`.
+fn generated_id_generation(id: &str, prefix: &str) -> Option<u64> {
+    let rest = id.strip_prefix(prefix)?.strip_prefix('-')?;
+    if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    rest.parse::<u64>().ok()
+}
+
 pub(crate) fn classify_changed_config(
     observation: FileObservation,
     bytes: Option<&[u8]>,
@@ -50,8 +69,10 @@ fn classify_document(
     target: &VerificationTarget,
 ) -> ExternalVerification {
     let expected_endpoint = normalize_endpoint(&target.endpoint);
+    let generated_prefix = ccswitch_generated_id_prefix(&target.provider_name);
     let mut matching_endpoint = false;
     let mut matching_provider = false;
+    let mut candidates = Vec::new();
     for (provider_id, provider) in document.provider {
         let endpoint_matches = provider
             .options
@@ -64,21 +85,29 @@ fn classify_document(
             continue;
         }
         matching_endpoint = true;
-        let observed_name = provider.name.as_deref().unwrap_or(provider_id.as_str());
-        if provider_id != target.provider_name && observed_name != target.provider_name {
+        let generation = generated_id_generation(&provider_id, &generated_prefix);
+        let identity_matches = provider.name.as_deref() == Some(target.provider_name.as_str())
+            || provider_id == target.provider_name
+            || generation.is_some();
+        if !identity_matches {
             continue;
         }
         matching_provider = true;
         if provider.models.contains_key(&target.model_id) {
-            let Some(current_hash) = current_hash else {
-                return changed_invalid(VerificationProblem::ProviderMissing, None);
-            };
-            return ExternalVerification::Verified {
-                provider_name: observed_name.to_owned(),
-                model_id: target.model_id.clone(),
-                current_hash,
-            };
+            let observed_name = provider.name.as_deref().unwrap_or(provider_id.as_str());
+            candidates.push((generation.unwrap_or(0), observed_name.to_owned()));
         }
+    }
+    candidates.sort_unstable_by(|left, right| right.0.cmp(&left.0));
+    if let Some((_, provider_name)) = candidates.into_iter().next() {
+        let Some(current_hash) = current_hash else {
+            return changed_invalid(VerificationProblem::ProviderMissing, None);
+        };
+        return ExternalVerification::Verified {
+            provider_name,
+            model_id: target.model_id.clone(),
+            current_hash,
+        };
     }
     changed_invalid(
         if matching_endpoint && matching_provider {

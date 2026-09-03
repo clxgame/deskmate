@@ -125,6 +125,12 @@ const zh = {
     if (code.includes("automation") || code.includes("import_ui") || code.includes("window_untrusted")) {
       return "未能安全完成 CC Switch 导入，请关闭 CC Switch 后重试。";
     }
+    if (code === "local_ai_configuration_provider_missing") return "CC Switch 未写入 YUME 的模型配置，请重试。";
+    if (code === "local_ai_configuration_model_missing") return "配置已写入但缺少所选模型，请重新选择模型后重试。";
+    if (code === "local_ai_configuration_auth_changed") {
+      return "检测到 OpenCode 登录信息在部署期间被改动，已中止。请关闭 OpenCode 后重试。";
+    }
+    if (code === "local_ai_configuration_malformed") return "OpenCode 配置文件无法解析，请检查后重试。";
     if (code.includes("configuration")) return "配置未能确认生效，请重试。";
     return "部署失败，请重试。";
   },
@@ -447,6 +453,18 @@ const en: Dict = {
     if (code.includes("ccswitch_install")) return "CC Switch installation failed. Try again.";
     if (code.includes("automation") || code.includes("import_ui") || code.includes("window_untrusted")) {
       return "YUME could not safely complete the CC Switch import. Close CC Switch and try again.";
+    }
+    if (code === "local_ai_configuration_provider_missing") {
+      return "CC Switch did not write YUME's model configuration. Try again.";
+    }
+    if (code === "local_ai_configuration_model_missing") {
+      return "The configuration was written but is missing the selected model. Select a model and try again.";
+    }
+    if (code === "local_ai_configuration_auth_changed") {
+      return "OpenCode login information changed during deployment, so deployment was stopped. Close OpenCode and try again.";
+    }
+    if (code === "local_ai_configuration_malformed") {
+      return "The OpenCode configuration file could not be parsed. Check it and try again.";
     }
     if (code.includes("configuration")) return "The configuration could not be verified. Try again.";
     return "Deployment failed. Try again.";
@@ -775,6 +793,18 @@ const ja: Dict = {
     if (code.includes("automation") || code.includes("import_ui") || code.includes("window_untrusted")) {
       return "CC Switch のインポートを安全に完了できませんでした。CC Switch を閉じて再試行してください。";
     }
+    if (code === "local_ai_configuration_provider_missing") {
+      return "CC Switch が YUME のモデル設定を書き込みませんでした。再試行してください。";
+    }
+    if (code === "local_ai_configuration_model_missing") {
+      return "設定は書き込まれましたが、選択したモデルがありません。モデルを選び直して再試行してください。";
+    }
+    if (code === "local_ai_configuration_auth_changed") {
+      return "導入中に OpenCode のログイン情報が変更されたため、中止しました。OpenCode を閉じて再試行してください。";
+    }
+    if (code === "local_ai_configuration_malformed") {
+      return "OpenCode の設定ファイルを解析できません。内容を確認して再試行してください。";
+    }
     if (code.includes("configuration")) return "設定の反映を確認できませんでした。再試行してください。";
     return "導入に失敗しました。再試行してください。";
   },
@@ -1097,6 +1127,18 @@ const ko: Dict = {
     if (code.includes("ccswitch_install")) return "CC Switch 설치에 실패했습니다. 다시 시도하세요.";
     if (code.includes("automation") || code.includes("import_ui") || code.includes("window_untrusted")) {
       return "CC Switch 가져오기를 안전하게 완료하지 못했습니다. CC Switch를 닫고 다시 시도하세요.";
+    }
+    if (code === "local_ai_configuration_provider_missing") {
+      return "CC Switch가 YUME 모델 설정을 기록하지 않았습니다. 다시 시도하세요.";
+    }
+    if (code === "local_ai_configuration_model_missing") {
+      return "설정은 기록되었지만 선택한 모델이 없습니다. 모델을 다시 선택한 후 시도하세요.";
+    }
+    if (code === "local_ai_configuration_auth_changed") {
+      return "배포 중 OpenCode 로그인 정보가 변경되어 중단했습니다. OpenCode를 닫고 다시 시도하세요.";
+    }
+    if (code === "local_ai_configuration_malformed") {
+      return "OpenCode 설정 파일을 분석할 수 없습니다. 확인한 후 다시 시도하세요.";
     }
     if (code.includes("configuration")) return "설정 적용을 확인하지 못했습니다. 다시 시도하세요.";
     return "배포에 실패했습니다. 다시 시도하세요.";

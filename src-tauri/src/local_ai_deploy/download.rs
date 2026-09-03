@@ -79,7 +79,7 @@ fn download_once(
             .sync_all()
             .map_err(|_| LocalAiDeploymentError::new("local_ai_ccswitch_cache_failed"))?;
         let digest = format!("{:x}", hasher.finalize());
-        if copied != package.size || digest != package.sha256 {
+        if digest != package.sha256 {
             return Err(LocalAiDeploymentError::new(
                 "local_ai_ccswitch_package_invalid",
             ));

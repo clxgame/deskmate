@@ -2,7 +2,7 @@ use crate::ccswitch::contract::{ModelChoice, ProviderSelectionInput};
 use crate::ccswitch::platform::SystemCcSwitchPlatform;
 use crate::ccswitch::recovery::{RecoveryRetention, SystemRecoveryKeyStore};
 use crate::ccswitch::verification::{
-    poll_external_change, ExternalVerification, VerificationTarget,
+    poll_external_change, ExternalVerification, VerificationProblem, VerificationTarget,
 };
 use crate::settings::SettingsState;
 use tauri::Manager;
@@ -116,9 +116,14 @@ pub(crate) fn verify_automatic_deployment(
     let observed = manager.observe_files().ok();
     let (kind, error) = match result {
         ExternalVerification::Verified { .. } => (CcSwitchRecoveryCompletionKind::Verified, None),
-        ExternalVerification::ChangedInvalid { .. } => (
+        ExternalVerification::ChangedInvalid { reason, .. } => (
             CcSwitchRecoveryCompletionKind::TimedOut,
-            Some(fixed_error("local_ai_configuration_invalid")),
+            Some(fixed_error(match reason {
+                VerificationProblem::ProviderMissing => "local_ai_configuration_provider_missing",
+                VerificationProblem::ModelMissing => "local_ai_configuration_model_missing",
+                VerificationProblem::AuthChanged => "local_ai_configuration_auth_changed",
+                VerificationProblem::MalformedConfig => "local_ai_configuration_malformed",
+            })),
         ),
         ExternalVerification::ReadFailure { .. } => (
             CcSwitchRecoveryCompletionKind::ReadFailed,

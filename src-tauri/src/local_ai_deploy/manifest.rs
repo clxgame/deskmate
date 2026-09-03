@@ -23,7 +23,7 @@ const ARM64: CcSwitchPackage = CcSwitchPackage {
     url: "https://dl.ccswitch.io/v3.20.1/CC-Switch-v3.20.1-Windows-arm64.msi",
     fallback_url: "https://github.com/farion1231/cc-switch/releases/download/v3.20.1/CC-Switch-v3.20.1-Windows-arm64.msi",
     sha256: "101a42cd7f554754d68d5a124305d3d71a3b417e69a64ea4d2b6f475e3b271e7",
-    size: 13_672_448,
+    size: 12_836_864,
 };
 
 pub(super) fn ccswitch_package_for_arch(arch: &str) -> Option<CcSwitchPackage> {

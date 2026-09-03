@@ -225,7 +225,8 @@ fn run_windows_deployment(
             DeploymentStep::VerifyConfiguration => {}
         }
     }
-    Err(LocalAiDeploymentError::new("local_ai_deploy_incomplete"))
+    // `deployment_steps` always includes `ImportProvider`, whose branch returns on every path.
+    unreachable!("ImportProvider must complete the deployment")
 }
 
 #[cfg(test)]
@@ -280,6 +281,7 @@ mod tests {
 
         let arm64 = ccswitch_package_for_arch("aarch64").expect("arm64 package");
         assert_eq!(arm64.version, "3.20.1");
+        assert_eq!(arm64.size, 12_836_864);
         assert_eq!(
             arm64.sha256,
             "101a42cd7f554754d68d5a124305d3d71a3b417e69a64ea4d2b6f475e3b271e7"

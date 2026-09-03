@@ -66,6 +66,139 @@ fn changed_config_is_verified_when_provider_identity_endpoint_and_model_match() 
 }
 
 #[test]
+fn ccswitch_generated_provider_id_without_name_field_is_verified() {
+    let current_hash = "c".repeat(64);
+    let config = r#"{
+  "provider": {
+    "kuro": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {"baseURL": "https://api.example.test/v1"},
+      "models": {"model-a": {"name": "model-a"}}
+    },
+    "testprovider-1788437547133": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {"baseURL": "https://api.example.test/v1"},
+      "models": {"model-a": {"name": "model-a"}}
+    }
+  }
+}"#;
+
+    let status = classify_changed_config(
+        FileObservation::Present {
+            sha256: current_hash.clone(),
+        },
+        Some(config.as_bytes()),
+        &target(missing_baseline()),
+    );
+
+    assert_eq!(
+        status,
+        ExternalVerification::Verified {
+            provider_name: "testprovider-1788437547133".to_owned(),
+            model_id: "model-a".to_owned(),
+            current_hash,
+        }
+    );
+}
+
+#[test]
+fn unrelated_provider_sharing_endpoint_and_model_is_not_accepted() {
+    let current_hash = "d".repeat(64);
+    let config = r#"{
+  "provider": {
+    "kuro": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {"baseURL": "https://api.example.test/v1"},
+      "models": {"model-a": {"name": "model-a"}}
+    }
+  }
+}"#;
+
+    let status = classify_changed_config(
+        FileObservation::Present {
+            sha256: current_hash.clone(),
+        },
+        Some(config.as_bytes()),
+        &target(missing_baseline()),
+    );
+
+    assert_eq!(
+        status,
+        ExternalVerification::ChangedInvalid {
+            reason: VerificationProblem::ProviderMissing,
+            current_hash: Some(current_hash),
+        }
+    );
+}
+
+#[test]
+fn newest_generated_provider_wins_when_multiple_generations_exist() {
+    let current_hash = "e".repeat(64);
+    let config = r#"{
+  "provider": {
+    "testprovider-1788437547133": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {"baseURL": "https://api.example.test/v1"},
+      "models": {"other-model": {"name": "other-model"}}
+    },
+    "testprovider-1788437599999": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {"baseURL": "https://api.example.test/v1"},
+      "models": {"model-a": {"name": "model-a"}}
+    }
+  }
+}"#;
+
+    let status = classify_changed_config(
+        FileObservation::Present {
+            sha256: current_hash.clone(),
+        },
+        Some(config.as_bytes()),
+        &target(missing_baseline()),
+    );
+
+    assert_eq!(
+        status,
+        ExternalVerification::Verified {
+            provider_name: "testprovider-1788437599999".to_owned(),
+            model_id: "model-a".to_owned(),
+            current_hash,
+        }
+    );
+}
+
+#[test]
+fn explicit_name_field_still_matches_for_forward_compatibility() {
+    let current_hash = "f".repeat(64);
+    let config = r#"{
+  "provider": {
+    "arbitrary-provider-id": {
+      "name": "Test Provider",
+      "options": {"baseURL": "https://api.example.test/v1"},
+      "models": {"model-a": {"name": "model-a"}}
+    }
+  }
+}"#;
+
+    let status = classify_changed_config(
+        FileObservation::Present {
+            sha256: current_hash.clone(),
+        },
+        Some(config.as_bytes()),
+        &target(missing_baseline()),
+    );
+
+    assert_eq!(
+        status,
+        ExternalVerification::Verified {
+            provider_name: "Test Provider".to_owned(),
+            model_id: "model-a".to_owned(),
+            current_hash,
+        }
+    );
+}
+
+#[test]
 fn same_endpoint_and_model_under_different_provider_identity_is_changed_invalid() {
     let current_hash = "c".repeat(64);
     let config = r#"{

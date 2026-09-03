@@ -4,6 +4,11 @@ use super::launch::launch_import_with_platform;
 use super::launch_fixture::{launch_env, valid_launch, valid_setup, FakePlatform};
 use crate::ccswitch::contract::{CcSwitchSetupState, MillisSinceEpoch, ModelChoice};
 
+#[cfg(windows)]
+use super::launch::LaunchEnvironment;
+#[cfg(windows)]
+use crate::ccswitch::platform::SystemCcSwitchPlatform;
+
 #[test]
 fn launches_official_opencode_deeplink_after_confirmation_without_leaking_receipt() {
     let state = CcSwitchSetupState::default();
@@ -19,6 +24,7 @@ fn launches_official_opencode_deeplink_after_confirmation_without_leaking_receip
     )
     .expect("handoff launches");
 
+    assert_eq!(platform.actions(), vec!["prepare", "open"]);
     let opened = platform.opened().expect("fake opener saw URL");
     let parsed = Url::parse(&opened).expect("handoff URL parses");
     let pairs = parsed
@@ -75,4 +81,29 @@ fn encodes_provider_endpoint_and_model_without_query_injection() {
         .map(|(_, value)| value.into_owned());
     assert_eq!(api_key_count, 1);
     assert_eq!(model.as_deref(), Some("model&apiKey=bad"));
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "manual QA: opens the installed CC Switch confirmation dialog"]
+fn manual_windows_cold_start_opens_confirmation_after_preparing_cc_switch() {
+    let state = CcSwitchSetupState::default();
+    let mut setup = valid_setup("nonsecret-cold-start-probe");
+    setup.provider_name = "YUME Cold Start Probe".into();
+    let staged = state
+        .stage_provider(setup, MillisSinceEpoch(1_000))
+        .expect("provider stages");
+    let platform = SystemCcSwitchPlatform;
+
+    let receipt = launch_import_with_platform(
+        LaunchEnvironment {
+            state: &state,
+            platform: &platform,
+            now: MillisSinceEpoch(2_000),
+        },
+        valid_launch(&staged.receipt),
+    )
+    .expect("cold-start handoff launches");
+
+    assert_eq!(receipt.provider_name, "YUME Cold Start Probe");
 }

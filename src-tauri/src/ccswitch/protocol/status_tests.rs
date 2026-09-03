@@ -12,6 +12,13 @@ impl CcSwitchPlatform for StatusPlatform {
         self.0.clone()
     }
 
+    fn prepare_import(
+        &self,
+        _installation: &CcSwitchInstallation,
+    ) -> Result<(), CcSwitchPlatformError> {
+        Ok(())
+    }
+
     fn open_import_url(&self, _url: &super::SecretImportUrl) -> Result<(), CcSwitchPlatformError> {
         Ok(())
     }

@@ -90,7 +90,7 @@ pub fn launch_import_with_platform<P: CcSwitchPlatform>(
             message: "Confirm the CC Switch process-argument disclosure before launching.",
         });
     }
-    require_supported_installation(environment.platform)?;
+    let installation = require_supported_installation(environment.platform)?;
     let switch_immediately = request.switch_immediately;
     let prepared = environment
         .state
@@ -98,6 +98,10 @@ pub fn launch_import_with_platform<P: CcSwitchPlatform>(
         .map_err(command_error_from_contract)?;
     let receipt = prepared.receipt();
     let url = SecretImportUrl::new(&receipt, prepared.api_key(), switch_immediately)?;
+    environment
+        .platform
+        .prepare_import(&installation)
+        .map_err(command_error_from_platform)?;
     environment
         .platform
         .open_import_url(&url)

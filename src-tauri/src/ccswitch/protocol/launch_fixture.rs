@@ -12,6 +12,7 @@ pub(super) struct FakePlatform {
     installation: Option<CcSwitchInstallation>,
     error: Option<CcSwitchPlatformError>,
     opened_url: Mutex<Option<String>>,
+    actions: Mutex<Vec<&'static str>>,
     open_error: bool,
 }
 
@@ -24,6 +25,7 @@ impl FakePlatform {
             }),
             error: None,
             opened_url: Mutex::new(None),
+            actions: Mutex::new(Vec::new()),
             open_error: false,
         }
     }
@@ -33,6 +35,7 @@ impl FakePlatform {
             installation: None,
             error: Some(CcSwitchPlatformError::MissingProtocol),
             opened_url: Mutex::new(None),
+            actions: Mutex::new(Vec::new()),
             open_error: false,
         }
     }
@@ -45,6 +48,7 @@ impl FakePlatform {
             }),
             error: None,
             opened_url: Mutex::new(None),
+            actions: Mutex::new(Vec::new()),
             open_error: false,
         }
     }
@@ -62,6 +66,13 @@ impl FakePlatform {
             .expect("fake platform mutex is not poisoned")
             .clone()
     }
+
+    pub(super) fn actions(&self) -> Vec<&'static str> {
+        self.actions
+            .lock()
+            .expect("fake platform mutex is not poisoned")
+            .clone()
+    }
 }
 
 impl CcSwitchPlatform for FakePlatform {
@@ -74,10 +85,25 @@ impl CcSwitchPlatform for FakePlatform {
             .ok_or(CcSwitchPlatformError::MissingProtocol)
     }
 
+    fn prepare_import(
+        &self,
+        _installation: &CcSwitchInstallation,
+    ) -> Result<(), CcSwitchPlatformError> {
+        self.actions
+            .lock()
+            .expect("fake platform mutex is not poisoned")
+            .push("prepare");
+        Ok(())
+    }
+
     fn open_import_url(&self, url: &super::SecretImportUrl) -> Result<(), CcSwitchPlatformError> {
         if self.open_error {
             return Err(CcSwitchPlatformError::OpenFailed);
         }
+        self.actions
+            .lock()
+            .expect("fake platform mutex is not poisoned")
+            .push("open");
         *self
             .opened_url
             .lock()

@@ -5755,6 +5755,7 @@ dependencies = [
  "ureq",
  "url",
  "uuid",
+ "windows-sys 0.61.2",
  "zip 8.6.0",
 ]
 

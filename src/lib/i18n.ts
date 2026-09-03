@@ -100,6 +100,34 @@ const zh = {
   ccSwitchStatusRecoverableError: "检查失败。可以重试",
   ccSwitchStatusRefresh: "重新检查",
   ccSwitchSetupOpen: "在聊天中配置",
+  localAiDeployHint: "只需填写上方 API 信息，YUME 会自动部署 CC Switch、OpenCode 并完成模型配置。",
+  localAiDeployAction: "一键部署",
+  localAiDeployWorking: "部署中…",
+  localAiDeployStage: (stage: string) => {
+    const stages: Record<string, string> = {
+      verifyingApi: "正在验证 API 与模型…",
+      installingOpenCode: "正在部署 OpenCode…",
+      installingCcSwitch: "正在部署 CC Switch…",
+      importingProvider: "正在导入已验证的模型配置…",
+      verifyingConfiguration: "正在确认配置已生效…",
+    };
+    return stages[stage] ?? "正在部署…";
+  },
+  localAiDeploySuccess: (ccSwitch: string, openCode: string) =>
+    `部署完成：CC Switch ${ccSwitch}，OpenCode ${openCode}`,
+  localAiDeployError: (code: string): string => {
+    if (code === "local_ai_deploy_busy") return "已有部署任务正在进行。";
+    if (code.includes("opencode")) return "OpenCode 部署失败，请重试。";
+    if (code.includes("ccswitch_download") || code.includes("ccswitch_package")) {
+      return "CC Switch 下载或校验失败，请检查网络后重试。";
+    }
+    if (code.includes("ccswitch_install")) return "CC Switch 安装失败，请重试。";
+    if (code.includes("automation") || code.includes("import_ui") || code.includes("window_untrusted")) {
+      return "未能安全完成 CC Switch 导入，请关闭 CC Switch 后重试。";
+    }
+    if (code.includes("configuration")) return "配置未能确认生效，请重试。";
+    return "部署失败，请重试。";
+  },
   ccSwitchSetupTitle: "安全配置 OpenCode",
   ccSwitchSetupUnavailable: "未检测到可用的 CC Switch。请先安装或重新检查。",
   ccSwitchSetupState: (state: string) => {
@@ -395,6 +423,34 @@ const en: Dict = {
   ccSwitchStatusRecoverableError: "Check failed. You can retry",
   ccSwitchStatusRefresh: "Check again",
   ccSwitchSetupOpen: "Configure in chat",
+  localAiDeployHint: "Enter the API details above; YUME installs CC Switch and OpenCode and applies the model configuration automatically.",
+  localAiDeployAction: "One-click deploy",
+  localAiDeployWorking: "Deploying…",
+  localAiDeployStage: (stage: string) => {
+    const stages: Record<string, string> = {
+      verifyingApi: "Verifying the API and models…",
+      installingOpenCode: "Installing OpenCode…",
+      installingCcSwitch: "Installing CC Switch…",
+      importingProvider: "Importing the verified model configuration…",
+      verifyingConfiguration: "Verifying the applied configuration…",
+    };
+    return stages[stage] ?? "Deploying…";
+  },
+  localAiDeploySuccess: (ccSwitch: string, openCode: string) =>
+    `Deployment complete: CC Switch ${ccSwitch}, OpenCode ${openCode}`,
+  localAiDeployError: (code: string): string => {
+    if (code === "local_ai_deploy_busy") return "A deployment is already running.";
+    if (code.includes("opencode")) return "OpenCode installation failed. Try again.";
+    if (code.includes("ccswitch_download") || code.includes("ccswitch_package")) {
+      return "CC Switch could not be downloaded or verified. Check the network and try again.";
+    }
+    if (code.includes("ccswitch_install")) return "CC Switch installation failed. Try again.";
+    if (code.includes("automation") || code.includes("import_ui") || code.includes("window_untrusted")) {
+      return "YUME could not safely complete the CC Switch import. Close CC Switch and try again.";
+    }
+    if (code.includes("configuration")) return "The configuration could not be verified. Try again.";
+    return "Deployment failed. Try again.";
+  },
   ccSwitchSetupTitle: "Secure OpenCode setup",
   ccSwitchSetupUnavailable: "No usable CC Switch was detected. Install it or check again first.",
   ccSwitchSetupState: (state) => {
@@ -694,6 +750,34 @@ const ja: Dict = {
   ccSwitchStatusRecoverableError: "確認に失敗しました。再試行できます",
   ccSwitchStatusRefresh: "再確認",
   ccSwitchSetupOpen: "チャットで設定",
+  localAiDeployHint: "上の API 情報を入力するだけで、YUME が CC Switch と OpenCode を導入し、モデル設定まで自動で完了します。",
+  localAiDeployAction: "ワンクリック導入",
+  localAiDeployWorking: "導入中…",
+  localAiDeployStage: (stage: string) => {
+    const stages: Record<string, string> = {
+      verifyingApi: "API とモデルを検証しています…",
+      installingOpenCode: "OpenCode を導入しています…",
+      installingCcSwitch: "CC Switch を導入しています…",
+      importingProvider: "検証済みモデル設定をインポートしています…",
+      verifyingConfiguration: "設定の反映を確認しています…",
+    };
+    return stages[stage] ?? "導入しています…";
+  },
+  localAiDeploySuccess: (ccSwitch: string, openCode: string) =>
+    `導入完了：CC Switch ${ccSwitch}、OpenCode ${openCode}`,
+  localAiDeployError: (code: string): string => {
+    if (code === "local_ai_deploy_busy") return "別の導入処理が実行中です。";
+    if (code.includes("opencode")) return "OpenCode の導入に失敗しました。再試行してください。";
+    if (code.includes("ccswitch_download") || code.includes("ccswitch_package")) {
+      return "CC Switch のダウンロードまたは検証に失敗しました。ネットワークを確認してください。";
+    }
+    if (code.includes("ccswitch_install")) return "CC Switch の導入に失敗しました。再試行してください。";
+    if (code.includes("automation") || code.includes("import_ui") || code.includes("window_untrusted")) {
+      return "CC Switch のインポートを安全に完了できませんでした。CC Switch を閉じて再試行してください。";
+    }
+    if (code.includes("configuration")) return "設定の反映を確認できませんでした。再試行してください。";
+    return "導入に失敗しました。再試行してください。";
+  },
   ccSwitchSetupTitle: "OpenCode の安全設定",
   ccSwitchSetupUnavailable: "利用可能な CC Switch を検出できません。先にインストールまたは再確認してください。",
   ccSwitchSetupState: (state) => {
@@ -989,6 +1073,34 @@ const ko: Dict = {
   ccSwitchStatusRecoverableError: "확인에 실패했습니다. 다시 시도할 수 있습니다",
   ccSwitchStatusRefresh: "다시 확인",
   ccSwitchSetupOpen: "채팅에서 설정",
+  localAiDeployHint: "위 API 정보만 입력하면 YUME가 CC Switch와 OpenCode를 설치하고 모델 설정까지 자동으로 완료합니다.",
+  localAiDeployAction: "원클릭 배포",
+  localAiDeployWorking: "배포 중…",
+  localAiDeployStage: (stage: string) => {
+    const stages: Record<string, string> = {
+      verifyingApi: "API와 모델을 검증하는 중…",
+      installingOpenCode: "OpenCode를 설치하는 중…",
+      installingCcSwitch: "CC Switch를 설치하는 중…",
+      importingProvider: "검증된 모델 설정을 가져오는 중…",
+      verifyingConfiguration: "적용된 설정을 확인하는 중…",
+    };
+    return stages[stage] ?? "배포 중…";
+  },
+  localAiDeploySuccess: (ccSwitch: string, openCode: string) =>
+    `배포 완료: CC Switch ${ccSwitch}, OpenCode ${openCode}`,
+  localAiDeployError: (code: string): string => {
+    if (code === "local_ai_deploy_busy") return "다른 배포 작업이 진행 중입니다.";
+    if (code.includes("opencode")) return "OpenCode 설치에 실패했습니다. 다시 시도하세요.";
+    if (code.includes("ccswitch_download") || code.includes("ccswitch_package")) {
+      return "CC Switch 다운로드 또는 검증에 실패했습니다. 네트워크를 확인하세요.";
+    }
+    if (code.includes("ccswitch_install")) return "CC Switch 설치에 실패했습니다. 다시 시도하세요.";
+    if (code.includes("automation") || code.includes("import_ui") || code.includes("window_untrusted")) {
+      return "CC Switch 가져오기를 안전하게 완료하지 못했습니다. CC Switch를 닫고 다시 시도하세요.";
+    }
+    if (code.includes("configuration")) return "설정 적용을 확인하지 못했습니다. 다시 시도하세요.";
+    return "배포에 실패했습니다. 다시 시도하세요.";
+  },
   ccSwitchSetupTitle: "OpenCode 보안 설정",
   ccSwitchSetupUnavailable: "사용 가능한 CC Switch를 찾지 못했습니다. 먼저 설치하거나 다시 확인하세요.",
   ccSwitchSetupState: (state) => {

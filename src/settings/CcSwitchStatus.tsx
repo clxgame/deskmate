@@ -10,15 +10,39 @@ export type CcSwitchCapabilityStatus =
   | { readonly kind: "unsupported" }
   | { readonly kind: "recoverable-error" };
 
+export type LocalAiDeploymentStage =
+  | "verifyingApi"
+  | "installingOpenCode"
+  | "installingCcSwitch"
+  | "importingProvider"
+  | "verifyingConfiguration";
+
+export type LocalAiDeploymentStatus =
+  | { readonly kind: "idle" }
+  | { readonly kind: "working"; readonly stage: LocalAiDeploymentStage }
+  | {
+      readonly kind: "success";
+      readonly ccSwitchVersion: string;
+      readonly openCodeVersion: string;
+    }
+  | { readonly kind: "error"; readonly message: string };
+
+export type LocalAiDeploymentReceipt = {
+  readonly ccSwitchVersion: string;
+  readonly openCodeVersion: string;
+  readonly modelId: string;
+};
+
 type NativeStatusRecord = {
   readonly [key: string]: unknown;
 };
 
 interface CcSwitchStatusProps {
   readonly status: CcSwitchCapabilityStatus;
+  readonly deployment: LocalAiDeploymentStatus;
+  readonly canDeploy: boolean;
   readonly t: Dict;
-  readonly onOpenSetup: () => void;
-  readonly onRefresh: () => void;
+  readonly onDeploy: () => void;
 }
 
 function assertNever(_value: never): never {
@@ -31,6 +55,64 @@ function isRecord(value: unknown): value is NativeStatusRecord {
 
 function unavailableUnknown(): CcSwitchCapabilityStatus {
   return { kind: "unavailable", reason: "unknown" };
+}
+
+const DEPLOYMENT_STAGES: readonly LocalAiDeploymentStage[] = [
+  "verifyingApi",
+  "installingOpenCode",
+  "installingCcSwitch",
+  "importingProvider",
+  "verifyingConfiguration",
+];
+
+export function normalizeLocalAiDeploymentStage(
+  value: unknown,
+): LocalAiDeploymentStage | null {
+  if (!isRecord(value) || typeof value["stage"] !== "string") return null;
+  return DEPLOYMENT_STAGES.find((stage) => stage === value["stage"]) ?? null;
+}
+
+function validVersion(value: unknown): value is string {
+  return typeof value === "string" && /^\d+\.\d+\.\d+$/.test(value);
+}
+
+export function normalizeLocalAiDeploymentReceipt(
+  value: unknown,
+): LocalAiDeploymentReceipt | null {
+  if (!isRecord(value)) return null;
+  const ccSwitchVersion = value["ccSwitchVersion"];
+  const openCodeVersion = value["openCodeVersion"];
+  const modelId = value["modelId"];
+  if (
+    !validVersion(ccSwitchVersion) ||
+    !validVersion(openCodeVersion) ||
+    typeof modelId !== "string" ||
+    modelId.trim().length === 0
+  ) {
+    return null;
+  }
+  return { ccSwitchVersion, openCodeVersion, modelId: modelId.trim() };
+}
+
+export function localAiDeploymentErrorCode(value: unknown): string {
+  if (isRecord(value) && typeof value["code"] === "string") {
+    return value["code"];
+  }
+  if (
+    value instanceof Error &&
+    [
+      "empty_key",
+      "bad_url",
+      "unauthorized",
+      "not_found",
+      "no_models",
+      "invalid_response",
+      "models_unavailable",
+    ].includes(value.message)
+  ) {
+    return value.message;
+  }
+  return typeof value === "string" ? value : "local_ai_deploy_failed";
 }
 
 export function normalizeCcSwitchCapabilityStatus(
@@ -97,39 +179,73 @@ function statusRole(status: CcSwitchCapabilityStatus): "status" | "alert" {
   }
 }
 
+function deploymentText(
+  deployment: LocalAiDeploymentStatus,
+  status: CcSwitchCapabilityStatus,
+  t: Dict,
+): string {
+  switch (deployment.kind) {
+    case "idle":
+      return statusText(status, t);
+    case "working":
+      return t.localAiDeployStage(deployment.stage);
+    case "success":
+      return t.localAiDeploySuccess(
+        deployment.ccSwitchVersion,
+        deployment.openCodeVersion,
+      );
+    case "error":
+      return deployment.message;
+    default:
+      return assertNever(deployment);
+  }
+}
+
+function deploymentRole(
+  deployment: LocalAiDeploymentStatus,
+  status: CcSwitchCapabilityStatus,
+): "status" | "alert" {
+  if (deployment.kind === "error") return "alert";
+  if (deployment.kind === "working" || deployment.kind === "success") return "status";
+  return statusRole(status);
+}
+
 export function CcSwitchStatus({
   status,
+  deployment,
+  canDeploy,
   t,
-  onOpenSetup,
-  onRefresh,
+  onDeploy,
 }: CcSwitchStatusProps) {
-  const canOpenSetup = status.kind === "ready";
-  const canRefresh =
-    status.kind === "unavailable" ||
-    status.kind === "unsupported" ||
-    status.kind === "recoverable-error";
+  const working = deployment.kind === "working";
+  const disabled =
+    working ||
+    !canDeploy ||
+    status.kind === "checking" ||
+    status.kind === "unsupported";
 
   return (
     <section
-      className={`set-ccswitch set-ccswitch-${status.kind}`}
+      className={`set-ccswitch set-ccswitch-${status.kind} set-ccswitch-deploy-${deployment.kind}`}
       aria-label={t.ccSwitchStatusTitle}
+      aria-busy={working}
     >
       <div className="set-ccswitch-head">
         <h3 className="set-section-head">{t.ccSwitchStatusTitle}</h3>
         <span className="set-ccswitch-app">OpenCode</span>
       </div>
-      <p className="set-ccswitch-status" role={statusRole(status)}>
-        {statusText(status, t)}
+      <p className="set-ccswitch-status" role={deploymentRole(deployment, status)}>
+        {deploymentText(deployment, status, t)}
       </p>
-      {(canOpenSetup || canRefresh) && (
-        <button
-          className="set-ccswitch-action"
-          type="button"
-          onClick={canOpenSetup ? onOpenSetup : onRefresh}
-        >
-          {canOpenSetup ? t.ccSwitchSetupOpen : t.ccSwitchStatusRefresh}
-        </button>
-      )}
+      <p className="set-ccswitch-description">{t.localAiDeployHint}</p>
+      <button
+        className="set-ccswitch-action"
+        type="button"
+        disabled={disabled}
+        onClick={onDeploy}
+      >
+        {working ? t.localAiDeployWorking : t.localAiDeployAction}
+      </button>
     </section>
   );
 }

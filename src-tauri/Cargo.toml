@@ -35,4 +35,5 @@ tauri-plugin-dialog = "2.7.2"
 tauri-plugin-single-instance = "2"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+uiautomation = { version = "0.25.0", default-features = false, features = ["control", "input"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }

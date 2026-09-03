@@ -20,14 +20,18 @@ import {
   type ProviderModel,
   type Settings,
 } from "../lib/settings";
-import { emit, listen } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
 import { dict, verifyError, LANGS, type Dict } from "../lib/i18n";
 import { UpdateFooter } from "./UpdateFooter";
 import { AiUsage } from "./AiUsage";
 import {
   CcSwitchStatus,
+  localAiDeploymentErrorCode,
   normalizeCcSwitchCapabilityStatus,
+  normalizeLocalAiDeploymentReceipt,
+  normalizeLocalAiDeploymentStage,
   type CcSwitchCapabilityStatus,
+  type LocalAiDeploymentStatus,
 } from "./CcSwitchStatus";
 import { MemoryTab } from "./MemoryTab";
 import { PersonaPacks } from "./PersonaPacks";
@@ -92,7 +96,7 @@ function themeLabel(t: Dict, id: ThemeId): string {
 }
 
 const SAVE_DELAY_MS = 400;
-const CC_SWITCH_SETUP_REQUEST_EVENT = "deskmate://ccswitch-setup-request";
+const LOCAL_AI_DEPLOY_PROGRESS_EVENT = "deskmate://local-ai-deploy-progress";
 
 // allow: SIZE_OK — this existing module is the settings composition root; extracting tabs is outside the UI-only patch.
 export default function SettingsApp() {
@@ -391,6 +395,9 @@ function AiTab({ settings, patch, t }: TabProps) {
   const [verifying, setVerifying] = useState(false);
   const [ccSwitchStatus, setCcSwitchStatus] =
     useState<CcSwitchCapabilityStatus>({ kind: "checking" });
+  const [deployment, setDeployment] = useState<LocalAiDeploymentStatus>({
+    kind: "idle",
+  });
   const [verifyResult, setVerifyResult] = useState<{
     ok: boolean;
     message: string;
@@ -413,25 +420,6 @@ function AiTab({ settings, patch, t }: TabProps) {
         setCcSwitchStatus({ kind: "unavailable", reason: "missing-handler" });
       }
     }
-  }, []);
-
-  const openCcSwitchSetup = useCallback(() => {
-    void (async () => {
-      try {
-        await invoke<void>("show_chat_window");
-      } catch (error) {
-        console.error(
-          error instanceof Error ? error : new Error(String(error)),
-        );
-      }
-      try {
-        await emit(CC_SWITCH_SETUP_REQUEST_EVENT, { source: "settings" });
-      } catch (error) {
-        console.error(
-          error instanceof Error ? error : new Error(String(error)),
-        );
-      }
-    })();
   }, []);
 
   const refreshModels = useCallback(async () => {
@@ -474,6 +462,22 @@ function AiTab({ settings, patch, t }: TabProps) {
     };
   }, [refreshCcSwitchStatus]);
 
+  useEffect(() => {
+    let closed = false;
+    let dispose: (() => void) | undefined;
+    void listen<unknown>(LOCAL_AI_DEPLOY_PROGRESS_EVENT, (event) => {
+      const stage = normalizeLocalAiDeploymentStage(event.payload);
+      if (!closed && stage) setDeployment({ kind: "working", stage });
+    }).then((unlisten) => {
+      if (closed) unlisten();
+      else dispose = unlisten;
+    });
+    return () => {
+      closed = true;
+      dispose?.();
+    };
+  }, []);
+
   const verify = async () => {
     setVerifying(true);
     setVerifyResult(null);
@@ -489,6 +493,54 @@ function AiTab({ settings, patch, t }: TabProps) {
       setVerifyResult({ ok: false, message: verifyError(t, message) });
     } finally {
       setVerifying(false);
+    }
+  };
+
+  const deployLocalAi = async () => {
+    setDeployment({ kind: "working", stage: "verifyingApi" });
+    setVerifyResult(null);
+    try {
+      const count = await verifyApiKey(settings.baseUrl, settings.apiKey);
+      const refreshed = await refreshModels();
+      if (!modelsMatchVerification(refreshed, count)) {
+        throw new Error("models_unavailable");
+      }
+      const available = refreshed.filter((model) => model.providerId === "yume");
+      const chosen = available.find(
+        (model) =>
+          settings.providerId === "yume" && model.modelId === settings.modelId,
+      ) ?? available[0];
+      if (!chosen) throw new Error("models_unavailable");
+      if (settings.providerId !== "yume" || settings.modelId !== chosen.modelId) {
+        patch("providerId", "yume");
+        patch("modelId", chosen.modelId);
+      }
+      setDeployment({ kind: "working", stage: "installingOpenCode" });
+      const raw = await invoke<unknown>("deploy_local_ai_stack", {
+        request: { modelId: chosen.modelId },
+      });
+      const receipt = normalizeLocalAiDeploymentReceipt(raw);
+      if (!receipt) throw new Error("local_ai_deploy_invalid_result");
+      setDeployment({
+        kind: "success",
+        ccSwitchVersion: receipt.ccSwitchVersion,
+        openCodeVersion: receipt.openCodeVersion,
+      });
+      await refreshCcSwitchStatus();
+    } catch (error) {
+      const code = localAiDeploymentErrorCode(error);
+      const message = [
+        "empty_key",
+        "bad_url",
+        "unauthorized",
+        "not_found",
+        "no_models",
+        "invalid_response",
+        "models_unavailable",
+      ].includes(code)
+        ? verifyError(t, code)
+        : t.localAiDeployError(code);
+      setDeployment({ kind: "error", message });
     }
   };
 
@@ -530,6 +582,7 @@ function AiTab({ settings, patch, t }: TabProps) {
           aria-label={t.baseUrl}
           onChange={(e) => {
             setVerifyResult(null);
+            setDeployment({ kind: "idle" });
             patch("baseUrl", e.target.value);
           }}
         />
@@ -543,6 +596,7 @@ function AiTab({ settings, patch, t }: TabProps) {
           aria-label={t.apiKey}
           onChange={(e) => {
             setVerifyResult(null);
+            setDeployment({ kind: "idle" });
             patch("apiKey", e.target.value);
           }}
         />
@@ -595,9 +649,10 @@ function AiTab({ settings, patch, t }: TabProps) {
       <p className="set-note set-note-warn">{t.yoloWarn}</p>
       <CcSwitchStatus
         status={ccSwitchStatus}
+        deployment={deployment}
+        canDeploy={Boolean(settings.apiKey.trim())}
         t={t}
-        onOpenSetup={openCcSwitchSetup}
-        onRefresh={refreshCcSwitchStatus}
+        onDeploy={() => void deployLocalAi()}
       />
       <AiUsage enabled={Boolean(settings.apiKey.trim())} t={t} />
     </>

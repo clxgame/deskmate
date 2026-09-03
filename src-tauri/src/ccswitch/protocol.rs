@@ -19,6 +19,7 @@ use super::recovery::{
 use super::verification::{verify_once, ExternalVerification, VerificationTarget};
 
 mod launch;
+mod settings_deploy;
 mod status;
 
 #[cfg(test)]
@@ -35,6 +36,11 @@ pub use launch::{
     launch_import_with_platform, CcSwitchCommandError, CcSwitchLaunchReceipt,
     LaunchCcSwitchImportRequest, LaunchEnvironment,
 };
+pub(crate) use settings_deploy::{
+    abandon_automatic_deployment, launch_automatic_deployment, prepare_automatic_deployment,
+    verify_automatic_deployment,
+};
+pub(crate) use status::supports_version as supports_version_for_deployment;
 pub use status::{
     ccswitch_capability_status_with_platform, CcSwitchUiStatus, CcSwitchUnavailableReason,
 };

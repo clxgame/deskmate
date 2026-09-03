@@ -15,6 +15,7 @@ mod ai_usage;
 pub mod ccswitch;
 mod chat_attachments;
 mod history;
+mod local_ai_deploy;
 /// Local memory: storage, policy, retrieval, and the frontend command surface.
 mod memory;
 /// User-installable persona packs imported from local `.dmpack` archives.
@@ -1156,6 +1157,7 @@ pub fn run() {
             ccswitch::protocol::complete_ccswitch_recovery,
             ccswitch::protocol::restore_ccswitch_recovery,
             ccswitch::protocol::discard_ccswitch_recovery,
+            local_ai_deploy::deploy_local_ai_stack,
             history::history_list,
             history::history_load,
             history::history_save,

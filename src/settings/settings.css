@@ -917,16 +917,19 @@ body,
 
 .set-ccswitch {
   display: grid;
-  gap: var(--s-2);
-  width: min(100%, var(--control-w));
-  margin-top: var(--s-5);
-  padding: var(--s-3);
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--s-4);
+  row-gap: var(--s-1);
+  width: 100%;
+  margin-top: var(--s-4);
+  padding: var(--s-3) var(--s-4);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   background: var(--surface-raised);
 }
 
 .set-ccswitch-head {
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -950,8 +953,27 @@ body,
   line-height: 1.5;
 }
 
+.set-ccswitch-description {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--t-small);
+  line-height: 1.5;
+}
+
 .set-ccswitch-ready .set-ccswitch-status {
   color: var(--success);
+}
+
+.set-ccswitch-deploy-working .set-ccswitch-status {
+  color: var(--accent-ink);
+}
+
+.set-ccswitch-deploy-success .set-ccswitch-status {
+  color: var(--success);
+}
+
+.set-ccswitch-deploy-error .set-ccswitch-status {
+  color: var(--danger);
 }
 
 .set-ccswitch-unavailable .set-ccswitch-status,
@@ -961,7 +983,11 @@ body,
 }
 
 .set-ccswitch-action {
-  justify-self: start;
+  grid-column: 2;
+  grid-row: 2 / span 2;
+  align-self: center;
+  justify-self: end;
+  min-width: 76px;
   padding: var(--s-1) var(--s-2);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
@@ -990,6 +1016,16 @@ body,
 .set-ccswitch-action:focus-visible {
   box-shadow: var(--shadow-focus);
   outline: none;
+}
+
+.set-ccswitch-action:disabled,
+.set-ccswitch-action:disabled:hover,
+.set-ccswitch-action:disabled:active {
+  border-color: var(--line);
+  background: var(--surface-disabled);
+  color: var(--text-disabled);
+  cursor: default;
+  transform: none;
 }
 
 

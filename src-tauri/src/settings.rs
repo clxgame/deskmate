@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{Emitter, Manager};
 
+mod ai_endpoint;
 mod update_repo;
+use ai_endpoint::{migrated_ai_base_url, normalize_base_url, DEFAULT_AI_BASE_URL};
 use update_repo::{migrated_update_repo, DEFAULT_UPDATE_REPO};
 
 const PET_SCALE_MIN: f64 = 0.1;
@@ -47,10 +49,6 @@ fn normalize_theme(theme: &str) -> String {
         "dark" | "mint" | "peach" | "lavender" => theme.to_owned(),
         _ => DEFAULT_THEME.to_owned(),
     }
-}
-
-fn normalize_base_url(base_url: &str) -> String {
-    base_url.trim().trim_end_matches('/').to_string()
 }
 
 fn settings_catalog_binding_changed(old: &Settings, new: &Settings) -> bool {
@@ -132,7 +130,7 @@ impl Default for Settings {
             provider_id: String::new(),
             model_id: String::new(),
             yolo: false,
-            base_url: "https://ai-gateway.kurogames.com".into(),
+            base_url: DEFAULT_AI_BASE_URL.into(),
             api_key: String::new(),
             pet_scale: DEFAULT_PET_SCALE,
             outline_width: DEFAULT_OUTLINE_WIDTH,
@@ -271,6 +269,8 @@ pub fn load(app: &tauri::AppHandle) -> Settings {
         DEFAULT_SPECULAR_INTENSITY,
     );
     settings.theme = normalize_theme(&settings.theme);
+    settings.base_url =
+        migrated_ai_base_url(&settings.provider_id, &settings.base_url).into_owned();
     settings.update_repo = migrated_update_repo(&settings.update_repo).into_owned();
 
     // Migrate a legacy plaintext key out of settings.json into the OS keystore,

@@ -1,3 +1,4 @@
+mod prune;
 mod support;
 
 use std::fs;
@@ -59,7 +60,13 @@ fn picks_the_newest_generation_when_multiple_yume_providers_exist() {
 
     let updated = home.document();
     assert_eq!(model_ids(&updated, newest).len(), 4);
-    assert_eq!(model_ids(&updated, YUME_ID), vec![SELECTED]);
+    // The older generation is now pruned rather than left behind; see
+    // `prune::superseded_yume_providers_are_pruned_in_the_same_write`.
+    assert!(!updated
+        .get("provider")
+        .and_then(Value::as_object)
+        .expect("provider object")
+        .contains_key(YUME_ID));
 }
 
 #[test]

@@ -239,6 +239,7 @@ fn run_windows_deployment(
                     ModelCatalogSyncOutcome {
                         model_count: 1,
                         ccswitch_sync_required: true,
+                        superseded_removed: 0,
                     }
                 });
                 return Ok(LocalAiDeploymentReceipt {

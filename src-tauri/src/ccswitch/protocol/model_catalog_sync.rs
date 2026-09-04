@@ -16,6 +16,8 @@ pub(crate) struct ModelCatalogSyncOutcome {
     pub(crate) model_count: usize,
     /// True while CC Switch still has to re-import so its database matches.
     pub(crate) ccswitch_sync_required: bool,
+    /// Superseded YUME providers dropped from the live config in this write.
+    pub(crate) superseded_removed: usize,
 }
 
 fn sync_error(code: &'static str) -> CcSwitchCommandError {
@@ -61,22 +63,32 @@ pub(crate) fn expand_provider_model_catalog(
 
     let provider_id = locate_provider_id(&document, provider_name, endpoint, selected_model)
         .ok_or_else(|| sync_error("local_ai_model_catalog_provider_not_found"))?;
+    let superseded = superseded_provider_ids(&document, provider_name, endpoint, &provider_id);
 
     let models = catalog_models(catalog);
     let model_count = models.len();
-    let provider = document
+    let providers = document
         .get_mut("provider")
         .and_then(Value::as_object_mut)
-        .and_then(|providers| providers.get_mut(&provider_id))
+        .ok_or_else(|| sync_error("local_ai_model_catalog_provider_not_found"))?;
+    for stale in &superseded {
+        providers.remove(stale);
+    }
+    let provider = providers
+        .get_mut(&provider_id)
         .and_then(Value::as_object_mut)
         .ok_or_else(|| sync_error("local_ai_model_catalog_provider_not_found"))?;
-    if provider.get("models").and_then(Value::as_object) == Some(&models) {
+    let models_already_current = provider.get("models").and_then(Value::as_object) == Some(&models);
+    if models_already_current && superseded.is_empty() {
         return Ok(ModelCatalogSyncOutcome {
             model_count,
             ccswitch_sync_required: true,
+            superseded_removed: 0,
         });
     }
-    provider.insert("models".to_owned(), Value::Object(models));
+    if !models_already_current {
+        provider.insert("models".to_owned(), Value::Object(models));
+    }
 
     // `serde_json` serializes maps in sorted-key order with the same two-space
     // indentation cc-switch itself writes, so untouched providers round-trip
@@ -93,7 +105,41 @@ pub(crate) fn expand_provider_model_catalog(
     Ok(ModelCatalogSyncOutcome {
         model_count,
         ccswitch_sync_required: true,
+        superseded_removed: superseded.len(),
     })
+}
+
+/// Every deployment mints a new `<sanitized-name>-<millis>` provider and
+/// cc-switch never deduplicates, so earlier generations pile up in the live
+/// config. Only entries YUME itself minted for this exact gateway are pruned;
+/// a generated id pointing elsewhere belongs to another import.
+fn superseded_provider_ids(
+    document: &Value,
+    provider_name: &str,
+    endpoint: &str,
+    keep: &str,
+) -> Vec<String> {
+    let Some(providers) = document.get("provider").and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    let Some(expected_endpoint) = normalize_endpoint(endpoint) else {
+        return Vec::new();
+    };
+    let prefix = ccswitch_generated_id_prefix(provider_name);
+    providers
+        .iter()
+        .filter(|(provider_id, provider)| {
+            provider_id.as_str() != keep
+                && generated_id_generation(provider_id, &prefix).is_some()
+                && provider
+                    .get("options")
+                    .and_then(|options| options.get("baseURL"))
+                    .and_then(Value::as_str)
+                    .and_then(normalize_endpoint)
+                    .is_some_and(|actual| actual == expected_endpoint)
+        })
+        .map(|(provider_id, _)| provider_id.clone())
+        .collect()
 }
 
 fn write_failed_error() -> CcSwitchCommandError {

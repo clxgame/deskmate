@@ -605,6 +605,339 @@ fn save(app: &tauri::AppHandle, settings: &Settings) -> Result<(), String> {
     std::fs::write(&path, json).map_err(|e| e.to_string())
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum StoredValueChange<T> {
+    Keep,
+    Put(T),
+    Remove,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProviderStorageChange {
+    provider_id: String,
+    key: StoredValueChange<String>,
+    catalog: StoredValueChange<Vec<u8>>,
+}
+
+struct SettingsStorageTransaction<'a> {
+    settings: &'a Settings,
+    providers: Vec<ProviderStorageChange>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProviderStorageSnapshot {
+    key: String,
+    catalog: Option<Vec<u8>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AppliedStorageChange {
+    Key(usize),
+    Catalog(usize),
+    Settings,
+}
+
+trait SettingsTransactionOps {
+    fn read_provider_key(&self, provider_id: &str) -> Result<String, String>;
+    fn store_provider_key(&self, provider_id: &str, api_key: &str) -> Result<(), String>;
+    fn delete_provider_key(&self, provider_id: &str) -> Result<(), String>;
+    fn read_provider_catalog(&self, provider_id: &str) -> Result<Option<Vec<u8>>, String>;
+    fn store_provider_catalog(&self, provider_id: &str, catalog: &[u8]) -> Result<(), String>;
+    fn delete_provider_catalog(&self, provider_id: &str) -> Result<(), String>;
+    fn read_settings_file(&self) -> Result<Option<Vec<u8>>, String>;
+    fn save_settings(&self, settings: &Settings) -> Result<(), String>;
+    fn restore_settings_file(&self, settings: Option<&[u8]>) -> Result<(), String>;
+}
+
+struct AppSettingsTransactionOps<'a> {
+    app: &'a tauri::AppHandle,
+}
+
+fn read_optional_file(path: &Path) -> Result<Option<Vec<u8>>, String> {
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn write_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
+    }
+    std::fs::write(path, bytes).map_err(|error| error.to_string())
+}
+
+fn restore_optional_file(path: &Path, bytes: Option<&[u8]>) -> Result<(), String> {
+    match bytes {
+        Some(bytes) => write_file(path, bytes),
+        None => match std::fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.to_string()),
+        },
+    }
+}
+
+impl SettingsTransactionOps for AppSettingsTransactionOps<'_> {
+    fn read_provider_key(&self, provider_id: &str) -> Result<String, String> {
+        read_api_key_user(&api_key_user_for(provider_id))
+    }
+
+    fn store_provider_key(&self, provider_id: &str, api_key: &str) -> Result<(), String> {
+        store_api_key(provider_id, api_key)
+    }
+
+    fn delete_provider_key(&self, provider_id: &str) -> Result<(), String> {
+        delete_api_key(provider_id)
+    }
+
+    fn read_provider_catalog(&self, provider_id: &str) -> Result<Option<Vec<u8>>, String> {
+        read_optional_file(&model_catalog_path_for_provider(self.app, provider_id))
+    }
+
+    fn store_provider_catalog(&self, provider_id: &str, catalog: &[u8]) -> Result<(), String> {
+        write_file(
+            &model_catalog_path_for_provider(self.app, provider_id),
+            catalog,
+        )
+    }
+
+    fn delete_provider_catalog(&self, provider_id: &str) -> Result<(), String> {
+        clear_model_catalog_for_provider(self.app, provider_id)
+    }
+
+    fn read_settings_file(&self) -> Result<Option<Vec<u8>>, String> {
+        read_optional_file(&settings_path(self.app))
+    }
+
+    fn save_settings(&self, settings: &Settings) -> Result<(), String> {
+        save(self.app, settings)
+    }
+
+    fn restore_settings_file(&self, settings: Option<&[u8]>) -> Result<(), String> {
+        restore_optional_file(&settings_path(self.app), settings)
+    }
+}
+
+fn restore_storage_transaction(
+    ops: &impl SettingsTransactionOps,
+    transaction: &SettingsStorageTransaction<'_>,
+    snapshots: &[ProviderStorageSnapshot],
+    settings_snapshot: Option<&[u8]>,
+    applied: &[AppliedStorageChange],
+) -> Vec<String> {
+    let mut errors = Vec::new();
+    for change in applied.iter().rev() {
+        let result = match *change {
+            AppliedStorageChange::Settings => ops.restore_settings_file(settings_snapshot),
+            AppliedStorageChange::Key(index) => {
+                let provider_id = &transaction.providers[index].provider_id;
+                let key = &snapshots[index].key;
+                if key.is_empty() {
+                    ops.delete_provider_key(provider_id)
+                } else {
+                    ops.store_provider_key(provider_id, key)
+                }
+            }
+            AppliedStorageChange::Catalog(index) => {
+                let provider_id = &transaction.providers[index].provider_id;
+                match snapshots[index].catalog.as_deref() {
+                    Some(catalog) => ops.store_provider_catalog(provider_id, catalog),
+                    None => ops.delete_provider_catalog(provider_id),
+                }
+            }
+        };
+        if let Err(error) = result {
+            errors.push(format!("{change:?}: {error}"));
+        }
+    }
+    errors
+}
+
+fn transaction_failure(
+    ops: &impl SettingsTransactionOps,
+    transaction: &SettingsStorageTransaction<'_>,
+    snapshots: &[ProviderStorageSnapshot],
+    settings_snapshot: Option<&[u8]>,
+    applied: &[AppliedStorageChange],
+    original: String,
+) -> String {
+    let rollback_errors =
+        restore_storage_transaction(ops, transaction, snapshots, settings_snapshot, applied);
+    if rollback_errors.is_empty() {
+        original
+    } else {
+        format!(
+            "{original}; rollback failed: {}",
+            rollback_errors.join("; ")
+        )
+    }
+}
+
+fn execute_settings_storage_transaction(
+    ops: &impl SettingsTransactionOps,
+    transaction: &SettingsStorageTransaction<'_>,
+) -> Result<(), String> {
+    let settings_snapshot = ops.read_settings_file()?;
+    let mut snapshots = Vec::with_capacity(transaction.providers.len());
+    for provider in &transaction.providers {
+        snapshots.push(ProviderStorageSnapshot {
+            key: ops.read_provider_key(&provider.provider_id)?,
+            catalog: ops.read_provider_catalog(&provider.provider_id)?,
+        });
+    }
+
+    let mut applied = Vec::new();
+    for (index, provider) in transaction.providers.iter().enumerate() {
+        let key_result = match &provider.key {
+            StoredValueChange::Keep => Ok(()),
+            StoredValueChange::Put(key) if snapshots[index].key == *key => Ok(()),
+            StoredValueChange::Put(key) => {
+                applied.push(AppliedStorageChange::Key(index));
+                ops.store_provider_key(&provider.provider_id, key)
+            }
+            StoredValueChange::Remove if snapshots[index].key.is_empty() => Ok(()),
+            StoredValueChange::Remove => {
+                applied.push(AppliedStorageChange::Key(index));
+                ops.delete_provider_key(&provider.provider_id)
+            }
+        };
+        if let Err(error) = key_result {
+            return Err(transaction_failure(
+                ops,
+                transaction,
+                &snapshots,
+                settings_snapshot.as_deref(),
+                &applied,
+                error,
+            ));
+        }
+
+        let catalog_result = match &provider.catalog {
+            StoredValueChange::Keep => Ok(()),
+            StoredValueChange::Put(catalog)
+                if snapshots[index].catalog.as_deref() == Some(catalog.as_slice()) =>
+            {
+                Ok(())
+            }
+            StoredValueChange::Put(catalog) => {
+                applied.push(AppliedStorageChange::Catalog(index));
+                ops.store_provider_catalog(&provider.provider_id, catalog)
+            }
+            StoredValueChange::Remove if snapshots[index].catalog.is_none() => Ok(()),
+            StoredValueChange::Remove => {
+                applied.push(AppliedStorageChange::Catalog(index));
+                ops.delete_provider_catalog(&provider.provider_id)
+            }
+        };
+        if let Err(error) = catalog_result {
+            return Err(transaction_failure(
+                ops,
+                transaction,
+                &snapshots,
+                settings_snapshot.as_deref(),
+                &applied,
+                error,
+            ));
+        }
+    }
+
+    applied.push(AppliedStorageChange::Settings);
+    if let Err(error) = ops.save_settings(transaction.settings) {
+        return Err(transaction_failure(
+            ops,
+            transaction,
+            &snapshots,
+            settings_snapshot.as_deref(),
+            &applied,
+            error,
+        ));
+    }
+    Ok(())
+}
+
+fn persist_settings_update(
+    ops: &impl SettingsTransactionOps,
+    old: &Settings,
+    new: &Settings,
+) -> Result<(), String> {
+    let catalogs_to_clear = providers_requiring_catalog_clear(old, new);
+    let mut providers = new
+        .providers
+        .iter()
+        .filter_map(|provider| {
+            let key_changed = old
+                .providers
+                .iter()
+                .find(|old_provider| old_provider.id == provider.id)
+                .is_none_or(|old_provider| old_provider.api_key != provider.api_key);
+            let clear_catalog = catalogs_to_clear.contains(&provider.id);
+            (key_changed || clear_catalog).then(|| ProviderStorageChange {
+                provider_id: provider.id.clone(),
+                key: if !key_changed {
+                    StoredValueChange::Keep
+                } else if provider.api_key.is_empty() {
+                    StoredValueChange::Remove
+                } else {
+                    StoredValueChange::Put(provider.api_key.clone())
+                },
+                catalog: if clear_catalog {
+                    StoredValueChange::Remove
+                } else {
+                    StoredValueChange::Keep
+                },
+            })
+        })
+        .collect::<Vec<_>>();
+    providers.extend(
+        old.providers
+            .iter()
+            .filter(|old_provider| {
+                !new.providers
+                    .iter()
+                    .any(|new_provider| new_provider.id == old_provider.id)
+            })
+            .map(|provider| ProviderStorageChange {
+                provider_id: provider.id.clone(),
+                key: StoredValueChange::Remove,
+                catalog: StoredValueChange::Remove,
+            }),
+    );
+    execute_settings_storage_transaction(
+        ops,
+        &SettingsStorageTransaction {
+            settings: new,
+            providers,
+        },
+    )
+}
+
+struct VerifiedSettingsWrite<'a> {
+    provider_id: &'a str,
+    api_key: &'a str,
+    catalog: &'a ModelCatalog,
+    settings: &'a Settings,
+}
+
+fn persist_verified_settings(
+    ops: &impl SettingsTransactionOps,
+    write: &VerifiedSettingsWrite<'_>,
+) -> Result<(), String> {
+    let catalog = serde_json::to_vec_pretty(write.catalog).map_err(|error| error.to_string())?;
+    execute_settings_storage_transaction(
+        ops,
+        &SettingsStorageTransaction {
+            settings: write.settings,
+            providers: vec![ProviderStorageChange {
+                provider_id: write.provider_id.into(),
+                key: StoredValueChange::Put(write.api_key.into()),
+                catalog: StoredValueChange::Put(catalog),
+            }],
+        },
+    )
+}
+
 #[tauri::command]
 pub fn get_settings(state: tauri::State<SettingsState>) -> Settings {
     // SAFE-UNWRAP: a poisoned settings mutex means an earlier command panicked.
@@ -664,32 +997,10 @@ pub fn set_settings(
             provider.api_key = key;
         }
     }
-    let catalogs_to_clear = providers_requiring_catalog_clear(&old, &settings);
-    for provider in &settings.providers {
-        store_api_key(&provider.id, &provider.api_key)?;
-    }
-    let removed_providers: Vec<String> = old
-        .providers
-        .iter()
-        .filter_map(|old_provider| {
-            let removed = !settings
-                .providers
-                .iter()
-                .any(|new_provider| new_provider.id == old_provider.id);
-            removed.then(|| old_provider.id.clone())
-        })
-        .collect();
     if settings.pet_position.is_none() {
         settings.pet_position = old.pet_position;
     }
-    save(&app, &settings)?;
-    for provider_id in removed_providers {
-        delete_api_key(&provider_id)?;
-        clear_model_catalog_for_provider(&app, &provider_id)?;
-    }
-    for provider_id in catalogs_to_clear {
-        clear_model_catalog_for_provider(&app, &provider_id)?;
-    }
+    persist_settings_update(&AppSettingsTransactionOps { app: &app }, &old, &settings)?;
     apply(&app, &old, &settings);
     // SAFE-UNWRAP: a poisoned settings mutex means an earlier command panicked.
     *state.0.lock().unwrap() = settings.clone();
@@ -748,15 +1059,6 @@ fn save_model_catalog_at(path: &Path, catalog: &ModelCatalog) -> Result<(), Stri
     std::fs::write(path, json).map_err(|e| e.to_string())
 }
 
-fn save_model_catalog_for_provider(
-    app: &tauri::AppHandle,
-    provider_id: &str,
-    catalog: &ModelCatalog,
-) -> Result<(), String> {
-    let path = model_catalog_path_for_provider(app, provider_id);
-    save_model_catalog_at(&path, catalog)
-}
-
 fn clear_model_catalog_for_provider(
     app: &tauri::AppHandle,
     provider_id: &str,
@@ -786,11 +1088,23 @@ fn migrate_legacy_model_catalog_in_dir(
         return Ok(false);
     };
     let provider_path = provider_model_catalog_path_in_dir(app_data_dir, provider_id);
-    save_model_catalog_at(&provider_path, &catalog)?;
-    let readback = load_model_catalog_at(&provider_path)?
-        .ok_or_else(|| "provider catalog missing after write".to_string())?;
-    if readback != catalog {
-        return Err("provider catalog read-back mismatch; legacy catalog was preserved".into());
+    match load_model_catalog_at(&provider_path)? {
+        Some(existing) if existing == catalog => {}
+        Some(_) => {
+            return Err(
+                "provider catalog conflict; legacy and provider catalogs were preserved".into(),
+            );
+        }
+        None => {
+            save_model_catalog_at(&provider_path, &catalog)?;
+            let readback = load_model_catalog_at(&provider_path)?
+                .ok_or_else(|| "provider catalog missing after write".to_string())?;
+            if readback != catalog {
+                return Err(
+                    "provider catalog read-back mismatch; legacy catalog was preserved".into(),
+                );
+            }
+        }
     }
     std::fs::remove_file(legacy_path).map_err(|e| e.to_string())?;
     Ok(true)
@@ -1119,19 +1433,22 @@ pub fn verify_api_key(
             .lock()
             .map_err(|_| "settings_unavailable".to_string())?;
         let provider_id = resolve_verify_provider_id(&current, Some(&provider_id))?;
-        store_api_key(&provider_id, &key)?;
-        save_model_catalog_for_provider(
-            &app,
-            &provider_id,
-            &ModelCatalog {
-                base_url: base.clone(),
-                api_key_fingerprint: api_key_fingerprint(&key),
-                models: models.clone(),
-            },
-        )?;
+        let catalog = ModelCatalog {
+            base_url: base.clone(),
+            api_key_fingerprint: api_key_fingerprint(&key),
+            models: models.clone(),
+        };
         let mut next = current.clone();
         reconcile_verified_settings_binding(&mut next, &provider_id, &base, &key);
-        save(&app, &next)?;
+        persist_verified_settings(
+            &AppSettingsTransactionOps { app: &app },
+            &VerifiedSettingsWrite {
+                provider_id: &provider_id,
+                api_key: &key,
+                catalog: &catalog,
+                settings: &next,
+            },
+        )?;
         *current = next.clone();
         next
     };
@@ -1244,12 +1561,14 @@ mod tests {
         hydrate_provider_api_keys, insert_verified_sidecar_provider,
         migrate_legacy_api_key_to_provider_after_persisted, migrate_legacy_model_catalog_in_dir,
         model_catalog_matches_verified_binding, normalize_pet_scale, normalize_render_value,
-        normalize_theme, parse_api_models, providers_requiring_catalog_clear,
-        reconcile_verified_settings_binding, redacted_for_disk, resolve_verify_provider_id,
-        saved_api_key, store_api_key, AiProvider, ApiModel, LegacyApiKeyMigrationOps, ModelCatalog,
-        PetPosition, Settings, SettingsState,
+        normalize_theme, parse_api_models, persist_settings_update, persist_verified_settings,
+        providers_requiring_catalog_clear, reconcile_verified_settings_binding, redacted_for_disk,
+        resolve_verify_provider_id, saved_api_key, store_api_key, AiProvider, ApiModel,
+        LegacyApiKeyMigrationOps, ModelCatalog, PetPosition, Settings, SettingsState,
+        SettingsTransactionOps, VerifiedSettingsWrite,
     };
     use std::cell::RefCell;
+    use std::collections::HashMap;
     use std::fs;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1311,6 +1630,207 @@ mod tests {
         fn delete_legacy_api_key(&self) -> Result<(), String> {
             self.events.borrow_mut().push(MigrationEvent::DeleteLegacy);
             self.delete_result.clone()
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum TransactionFailure {
+        StoreKey,
+        DeleteKey,
+        StoreCatalog,
+        DeleteCatalog,
+        SaveSettings,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    enum TransactionEvent {
+        ReadKey,
+        ReadCatalog,
+        ReadSettings,
+        StoreKey(String),
+        DeleteKey,
+        StoreCatalog(Vec<u8>),
+        DeleteCatalog,
+        SaveSettings,
+        RestoreSettings,
+    }
+
+    struct FakeSettingsTransactionOps {
+        keys: RefCell<HashMap<String, String>>,
+        catalogs: RefCell<HashMap<String, Vec<u8>>>,
+        settings: RefCell<Option<Vec<u8>>>,
+        fail_once: RefCell<Option<TransactionFailure>>,
+        fail_provider_id: RefCell<Option<String>>,
+        rollback_key_error: RefCell<Option<String>>,
+        events: RefCell<Vec<TransactionEvent>>,
+    }
+
+    impl FakeSettingsTransactionOps {
+        fn new(key: &str, catalog: Option<&[u8]>, settings: Option<&[u8]>) -> Self {
+            Self::with_providers(&[("provider-under-test", key, catalog)], settings)
+        }
+
+        fn with_providers(
+            providers: &[(&str, &str, Option<&[u8]>)],
+            settings: Option<&[u8]>,
+        ) -> Self {
+            Self {
+                keys: RefCell::new(HashMap::from_iter(
+                    providers
+                        .iter()
+                        .map(|(id, key, _)| ((*id).into(), (*key).into())),
+                )),
+                catalogs: RefCell::new(HashMap::from_iter(providers.iter().filter_map(
+                    |(id, _, catalog)| catalog.map(|bytes| ((*id).into(), bytes.to_vec())),
+                ))),
+                settings: RefCell::new(settings.map(<[u8]>::to_vec)),
+                fail_once: RefCell::new(None),
+                fail_provider_id: RefCell::new(None),
+                rollback_key_error: RefCell::new(None),
+                events: RefCell::new(Vec::new()),
+            }
+        }
+
+        fn fail_once(&self, failure: TransactionFailure) {
+            *self.fail_once.borrow_mut() = Some(failure);
+        }
+
+        fn fail_provider_once(&self, failure: TransactionFailure, provider_id: &str) {
+            self.fail_once(failure);
+            *self.fail_provider_id.borrow_mut() = Some(provider_id.into());
+        }
+
+        fn fail_if_configured(
+            &self,
+            failure: TransactionFailure,
+            provider_id: Option<&str>,
+        ) -> Result<(), String> {
+            let provider_matches = self
+                .fail_provider_id
+                .borrow()
+                .as_deref()
+                .is_none_or(|id| Some(id) == provider_id);
+            if *self.fail_once.borrow() == Some(failure) && provider_matches {
+                self.fail_once.borrow_mut().take();
+                Err(format!("{failure:?} failed"))
+            } else {
+                Ok(())
+            }
+        }
+
+        fn assert_restored(&self, key: &str, catalog: Option<&[u8]>, settings: Option<&[u8]>) {
+            self.assert_provider_restored("provider-under-test", key, catalog);
+            assert_eq!(self.settings.borrow().as_deref(), settings);
+        }
+
+        fn assert_provider_restored(&self, provider_id: &str, key: &str, catalog: Option<&[u8]>) {
+            assert_eq!(
+                self.keys.borrow().get(provider_id).map(String::as_str),
+                Some(key)
+            );
+            assert_eq!(
+                self.catalogs.borrow().get(provider_id).map(Vec::as_slice),
+                catalog
+            );
+        }
+
+        fn events(&self) -> Vec<TransactionEvent> {
+            self.events.borrow().clone()
+        }
+    }
+
+    impl SettingsTransactionOps for FakeSettingsTransactionOps {
+        fn read_provider_key(&self, provider_id: &str) -> Result<String, String> {
+            self.events.borrow_mut().push(TransactionEvent::ReadKey);
+            Ok(self
+                .keys
+                .borrow()
+                .get(provider_id)
+                .cloned()
+                .unwrap_or_default())
+        }
+
+        fn store_provider_key(&self, provider_id: &str, api_key: &str) -> Result<(), String> {
+            self.events
+                .borrow_mut()
+                .push(TransactionEvent::StoreKey(api_key.into()));
+            if api_key == "old-key" {
+                if let Some(error) = self.rollback_key_error.borrow_mut().take() {
+                    return Err(error);
+                }
+            }
+            self.keys
+                .borrow_mut()
+                .insert(provider_id.into(), api_key.into());
+            self.fail_if_configured(TransactionFailure::StoreKey, Some(provider_id))
+        }
+
+        fn delete_provider_key(&self, provider_id: &str) -> Result<(), String> {
+            self.events.borrow_mut().push(TransactionEvent::DeleteKey);
+            self.keys.borrow_mut().remove(provider_id);
+            self.fail_if_configured(TransactionFailure::DeleteKey, Some(provider_id))
+        }
+
+        fn read_provider_catalog(&self, provider_id: &str) -> Result<Option<Vec<u8>>, String> {
+            self.events.borrow_mut().push(TransactionEvent::ReadCatalog);
+            Ok(self.catalogs.borrow().get(provider_id).cloned())
+        }
+
+        fn store_provider_catalog(&self, provider_id: &str, catalog: &[u8]) -> Result<(), String> {
+            self.events
+                .borrow_mut()
+                .push(TransactionEvent::StoreCatalog(catalog.to_vec()));
+            self.catalogs
+                .borrow_mut()
+                .insert(provider_id.into(), catalog.to_vec());
+            self.fail_if_configured(TransactionFailure::StoreCatalog, Some(provider_id))
+        }
+
+        fn delete_provider_catalog(&self, provider_id: &str) -> Result<(), String> {
+            self.events
+                .borrow_mut()
+                .push(TransactionEvent::DeleteCatalog);
+            self.catalogs.borrow_mut().remove(provider_id);
+            self.fail_if_configured(TransactionFailure::DeleteCatalog, Some(provider_id))
+        }
+
+        fn read_settings_file(&self) -> Result<Option<Vec<u8>>, String> {
+            self.events
+                .borrow_mut()
+                .push(TransactionEvent::ReadSettings);
+            Ok(self.settings.borrow().clone())
+        }
+
+        fn save_settings(&self, settings: &Settings) -> Result<(), String> {
+            self.events
+                .borrow_mut()
+                .push(TransactionEvent::SaveSettings);
+            *self.settings.borrow_mut() = Some(
+                serde_json::to_vec(&redacted_for_disk(settings)).expect("settings serialization"),
+            );
+            self.fail_if_configured(TransactionFailure::SaveSettings, None)
+        }
+
+        fn restore_settings_file(&self, settings: Option<&[u8]>) -> Result<(), String> {
+            self.events
+                .borrow_mut()
+                .push(TransactionEvent::RestoreSettings);
+            *self.settings.borrow_mut() = settings.map(<[u8]>::to_vec);
+            Ok(())
+        }
+    }
+
+    fn provider_settings(api_key: &str, base_url: &str) -> Settings {
+        Settings {
+            providers: vec![AiProvider {
+                id: "provider-under-test".into(),
+                sidecar_id: "yume".into(),
+                label: "Test".into(),
+                base_url: base_url.into(),
+                api_key: api_key.into(),
+            }],
+            active_provider_id: "provider-under-test".into(),
+            ..Settings::default()
         }
     }
 
@@ -1737,6 +2257,235 @@ mod tests {
             catalog
         );
         fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn legacy_model_catalog_equal_target_only_removes_legacy() {
+        let root = std::env::temp_dir().join(format!(
+            "deskmate-settings-catalog-equal-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(root.join("model-catalogs")).expect("temp dir");
+        let legacy_path = root.join("model-catalog.json");
+        let provider_path = root.join("model-catalogs").join("provider-a.json");
+        let catalog = ModelCatalog {
+            base_url: "https://models.example.test/v1".into(),
+            api_key_fingerprint: api_key_fingerprint("secret-key"),
+            models: vec![ApiModel {
+                id: "model-a".into(),
+                name: "Model A".into(),
+            }],
+        };
+        let legacy_json = serde_json::to_string_pretty(&catalog).expect("legacy catalog json");
+        let target_json = serde_json::to_string(&catalog).expect("target catalog json");
+        fs::write(&legacy_path, legacy_json).expect("legacy write");
+        fs::write(&provider_path, &target_json).expect("target write");
+
+        let migrated = migrate_legacy_model_catalog_in_dir(&root, "provider-a");
+
+        assert_eq!(migrated, Ok(true));
+        assert!(!legacy_path.exists());
+        assert_eq!(
+            fs::read_to_string(&provider_path).expect("provider catalog"),
+            target_json,
+            "an equal provider catalog must not be rewritten"
+        );
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn legacy_model_catalog_conflict_preserves_both_catalogs() {
+        let root = std::env::temp_dir().join(format!(
+            "deskmate-settings-catalog-conflict-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(root.join("model-catalogs")).expect("temp dir");
+        let legacy_path = root.join("model-catalog.json");
+        let provider_path = root.join("model-catalogs").join("provider-a.json");
+        let legacy_catalog = ModelCatalog {
+            base_url: "https://legacy.example.test/v1".into(),
+            api_key_fingerprint: api_key_fingerprint("legacy-key"),
+            models: vec![ApiModel {
+                id: "legacy-model".into(),
+                name: "Legacy Model".into(),
+            }],
+        };
+        let provider_catalog = ModelCatalog {
+            base_url: "https://provider.example.test/v1".into(),
+            api_key_fingerprint: api_key_fingerprint("provider-key"),
+            models: vec![ApiModel {
+                id: "provider-model".into(),
+                name: "Provider Model".into(),
+            }],
+        };
+        let legacy_json =
+            serde_json::to_string_pretty(&legacy_catalog).expect("legacy catalog json");
+        let provider_json =
+            serde_json::to_string_pretty(&provider_catalog).expect("provider catalog json");
+        fs::write(&legacy_path, &legacy_json).expect("legacy write");
+        fs::write(&provider_path, &provider_json).expect("provider write");
+
+        let migrated = migrate_legacy_model_catalog_in_dir(&root, "provider-a");
+
+        assert!(migrated
+            .expect_err("different catalogs must conflict")
+            .contains("conflict"));
+        assert_eq!(
+            fs::read_to_string(&legacy_path).expect("legacy catalog preserved"),
+            legacy_json
+        );
+        assert_eq!(
+            fs::read_to_string(&provider_path).expect("provider catalog preserved"),
+            provider_json
+        );
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn settings_transaction_rolls_back_partial_key_store_failure() {
+        let ops =
+            FakeSettingsTransactionOps::new("old-key", Some(b"old-catalog"), Some(b"old-settings"));
+        ops.fail_once(TransactionFailure::StoreKey);
+        let old = provider_settings("old-key", "https://old.example.test");
+        let new = provider_settings("new-key", "https://old.example.test");
+
+        let result = persist_settings_update(&ops, &old, &new);
+
+        assert_eq!(result, Err("StoreKey failed".into()));
+        ops.assert_restored("old-key", Some(b"old-catalog"), Some(b"old-settings"));
+    }
+
+    #[test]
+    fn settings_transaction_rolls_back_both_providers_when_second_key_store_fails() {
+        let ops = FakeSettingsTransactionOps::with_providers(
+            &[
+                ("provider-a", "old-key-a", Some(b"old-catalog-a")),
+                ("provider-b", "old-key-b", Some(b"old-catalog-b")),
+            ],
+            Some(b"old-settings"),
+        );
+        ops.fail_provider_once(TransactionFailure::StoreKey, "provider-b");
+        let mut old = provider_settings("old-key-a", "https://a.example.test");
+        old.providers[0].id = "provider-a".into();
+        old.providers.push(AiProvider {
+            id: "provider-b".into(),
+            sidecar_id: "yume-2".into(),
+            label: "Provider B".into(),
+            base_url: "https://b.example.test".into(),
+            api_key: "old-key-b".into(),
+        });
+        let mut new = old.clone();
+        new.providers[0].api_key = "new-key-a".into();
+        new.providers[1].api_key = "new-key-b".into();
+
+        let result = persist_settings_update(&ops, &old, &new);
+
+        assert_eq!(result, Err("StoreKey failed".into()));
+        ops.assert_provider_restored("provider-a", "old-key-a", Some(b"old-catalog-a"));
+        ops.assert_provider_restored("provider-b", "old-key-b", Some(b"old-catalog-b"));
+        assert_eq!(
+            ops.settings.borrow().as_deref(),
+            Some(b"old-settings".as_slice())
+        );
+    }
+
+    #[test]
+    fn settings_transaction_rolls_back_partial_provider_key_delete_failure() {
+        let ops =
+            FakeSettingsTransactionOps::new("old-key", Some(b"old-catalog"), Some(b"old-settings"));
+        ops.fail_once(TransactionFailure::DeleteKey);
+        let old = provider_settings("old-key", "https://old.example.test");
+        let new = Settings::default();
+
+        let result = persist_settings_update(&ops, &old, &new);
+
+        assert_eq!(result, Err("DeleteKey failed".into()));
+        ops.assert_restored("old-key", Some(b"old-catalog"), Some(b"old-settings"));
+    }
+
+    #[test]
+    fn settings_transaction_rolls_back_partial_catalog_clear_failure() {
+        let ops =
+            FakeSettingsTransactionOps::new("old-key", Some(b"old-catalog"), Some(b"old-settings"));
+        ops.fail_once(TransactionFailure::DeleteCatalog);
+        let old = provider_settings("old-key", "https://old.example.test");
+        let new = provider_settings("new-key", "https://new.example.test");
+
+        let result = persist_settings_update(&ops, &old, &new);
+
+        assert_eq!(result, Err("DeleteCatalog failed".into()));
+        ops.assert_restored("old-key", Some(b"old-catalog"), Some(b"old-settings"));
+    }
+
+    #[test]
+    fn settings_transaction_rolls_back_provider_cleanup_when_settings_save_fails() {
+        let ops =
+            FakeSettingsTransactionOps::new("old-key", Some(b"old-catalog"), Some(b"old-settings"));
+        ops.fail_once(TransactionFailure::SaveSettings);
+        let old = provider_settings("old-key", "https://old.example.test");
+        let new = Settings::default();
+
+        let result = persist_settings_update(&ops, &old, &new);
+
+        assert_eq!(result, Err("SaveSettings failed".into()));
+        ops.assert_restored("old-key", Some(b"old-catalog"), Some(b"old-settings"));
+    }
+
+    #[test]
+    fn verify_settings_save_failure_restores_key_catalog_and_settings() {
+        let ops =
+            FakeSettingsTransactionOps::new("old-key", Some(b"old-catalog"), Some(b"old-settings"));
+        ops.fail_once(TransactionFailure::SaveSettings);
+        let settings = provider_settings("verified-key", "https://verified.example.test");
+        let catalog = ModelCatalog {
+            base_url: "https://verified.example.test".into(),
+            api_key_fingerprint: api_key_fingerprint("verified-key"),
+            models: vec![ApiModel {
+                id: "model-a".into(),
+                name: "Model A".into(),
+            }],
+        };
+        let write = VerifiedSettingsWrite {
+            provider_id: "provider-under-test",
+            api_key: "verified-key",
+            catalog: &catalog,
+            settings: &settings,
+        };
+
+        let result = persist_verified_settings(&ops, &write);
+
+        assert_eq!(result, Err("SaveSettings failed".into()));
+        ops.assert_restored("old-key", Some(b"old-catalog"), Some(b"old-settings"));
+    }
+
+    #[test]
+    fn settings_transaction_reports_original_and_rollback_errors() {
+        let ops = FakeSettingsTransactionOps::new("old-key", None, Some(b"old-settings"));
+        ops.fail_once(TransactionFailure::SaveSettings);
+        *ops.rollback_key_error.borrow_mut() = Some("key rollback failed".into());
+        let old = provider_settings("old-key", "https://old.example.test");
+        let new = provider_settings("new-key", "https://old.example.test");
+
+        let error = persist_settings_update(&ops, &old, &new)
+            .expect_err("settings save and key rollback should fail");
+
+        assert!(error.contains("SaveSettings failed"));
+        assert!(error.contains("key rollback failed"));
+    }
+
+    #[test]
+    fn settings_transaction_skips_unchanged_key() {
+        let ops = FakeSettingsTransactionOps::new("same-key", None, Some(b"old-settings"));
+        let old = provider_settings("same-key", "https://same.example.test");
+        let mut new = old.clone();
+        new.theme = "mint".into();
+
+        persist_settings_update(&ops, &old, &new).expect("settings transaction");
+
+        assert!(!ops
+            .events()
+            .iter()
+            .any(|event| matches!(event, TransactionEvent::StoreKey(_))));
     }
 
     #[test]

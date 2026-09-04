@@ -17,6 +17,7 @@ pub use types::{
 };
 
 pub(crate) use paths::{read_observed_file, OpenCodeFile};
+pub(crate) use store::replace_file_if_unchanged;
 
 const SNAPSHOT_SCHEMA_VERSION: u8 = 1;
 const SNAPSHOT_ALGORITHM: &str = "xchacha20poly1305-v1";

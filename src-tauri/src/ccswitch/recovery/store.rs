@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 
 use uuid::Uuid;
 
-use super::RecoveryError;
+use super::paths::{read_observed_path, validate_allowed_path};
+use super::{FileObservation, RecoveryError};
 
 pub(crate) struct PendingFile {
     path: PathBuf,
@@ -130,4 +131,31 @@ pub(crate) fn sync_directory(directory: &Path) -> Result<(), RecoveryError> {
 #[cfg(not(unix))]
 pub(crate) fn sync_directory(_directory: &Path) -> Result<(), RecoveryError> {
     Ok(())
+}
+
+/// Atomically rewrites a file inside `home` only while it still matches
+/// `expected`, so a third-party write between our read and our commit aborts
+/// instead of being silently clobbered.
+pub(crate) fn replace_file_if_unchanged(
+    home: &Path,
+    target: &Path,
+    expected: &FileObservation,
+    bytes: &[u8],
+) -> Result<(), RecoveryError> {
+    validate_allowed_path(home, target)?;
+    let directory = target.parent().ok_or(RecoveryError::PathRejected)?;
+    let pending = create_synced_temp(directory, "model-catalog", bytes)?;
+    replace_if_current(target, Some(pending), |claimed_path| {
+        let observed = match claimed_path {
+            Some(path) => read_observed_path(home, path)?.observation,
+            None => FileObservation::Missing,
+        };
+        if &observed != expected {
+            return Err(RecoveryError::StaleConflict {
+                current_hash: observed.hash().map(str::to_owned),
+            });
+        }
+        Ok(())
+    })?;
+    sync_directory(directory)
 }

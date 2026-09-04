@@ -27,6 +27,7 @@ const {
   CcSwitchStatus,
   localAiDeploymentErrorCode,
   normalizeCcSwitchCapabilityStatus,
+  normalizeLocalAiDeploymentReceipt,
 } = await import("./CcSwitchStatus");
 const { dict, LANGS } = await import("../lib/i18n");
 const SettingsApp = (await import("./SettingsApp")).default;
@@ -44,17 +45,22 @@ const settingsFixture = {
   memoryAutoExtract: true, memoryAiUse: true, updateRepo: "owner/repo",
 };
 
+const deployReceiptFixture = {
+  ccSwitchVersion: "3.20.1",
+  openCodeVersion: "1.18.21",
+  modelId: "gpt-5.4-mini",
+  modelCount: 47,
+  ccswitchSyncRequired: true,
+  ccswitchRunning: false,
+};
+
 function defaultInvoke(command: string): Promise<unknown> {
   if (command === "get_settings") return Promise.resolve(settingsFixture);
   if (command === "sidecar_base_url") return Promise.resolve("http://127.0.0.1:48111");
   if (command === "ccswitch_capability_status") return Promise.resolve({ kind: "ready", version: "3.20.0" });
   if (command === "verify_api_key") return Promise.resolve(1);
   if (command === "deploy_local_ai_stack") {
-    return Promise.resolve({
-      ccSwitchVersion: "3.20.1",
-      openCodeVersion: "1.18.21",
-      modelId: "gpt-5.4-mini",
-    });
+    return Promise.resolve(deployReceiptFixture);
   }
   if (command === "fetch_ai_usage") return Promise.reject(new Error("unauthorized"));
   return Promise.resolve(undefined);
@@ -124,11 +130,7 @@ function useInvokeFixture(fixture: InvokeFixture) {
       case "verify_api_key":
         return Promise.resolve(1);
       case "deploy_local_ai_stack":
-        return Promise.resolve({
-          ccSwitchVersion: "3.20.1",
-          openCodeVersion: "1.18.21",
-          modelId: "gpt-5.4-mini",
-        });
+        return Promise.resolve(deployReceiptFixture);
       case "fetch_ai_usage":
         return Promise.reject(new Error("unauthorized"));
       default:
@@ -201,11 +203,111 @@ describe("CC Switch status component", () => {
         kind: "success",
         ccSwitchVersion: "3.20.1",
         openCodeVersion: "1.18.21",
+        modelCount: 47,
+        ccSwitchSyncRequired: true,
+        ccSwitchRunning: false,
       },
     });
     expect(
       within(screen.getByLabelText("CC Switch")).getByRole("status").textContent,
     ).toContain("部署完成");
+  });
+
+  test("reports the configured model count and how CC Switch picks it up", () => {
+    renderCcSwitch({
+      status: { kind: "ready", version: "3.20.1" },
+      deployment: {
+        kind: "success",
+        ccSwitchVersion: "3.20.1",
+        openCodeVersion: "1.18.21",
+        modelCount: 47,
+        ccSwitchSyncRequired: true,
+        ccSwitchRunning: false,
+      },
+    });
+    const idle = screen.getByLabelText("CC Switch").textContent ?? "";
+    expect(idle).toContain("47 个模型");
+    expect(idle).toContain("下次启动时会自动同步");
+
+    cleanup();
+    renderCcSwitch({
+      status: { kind: "ready", version: "3.20.1" },
+      deployment: {
+        kind: "success",
+        ccSwitchVersion: "3.20.1",
+        openCodeVersion: "1.18.21",
+        modelCount: 47,
+        ccSwitchSyncRequired: true,
+        ccSwitchRunning: true,
+      },
+    });
+    expect(screen.getByLabelText("CC Switch").textContent ?? "").toContain(
+      "请重启 CC Switch",
+    );
+
+    cleanup();
+    renderCcSwitch({
+      status: { kind: "ready", version: "3.20.1" },
+      deployment: {
+        kind: "success",
+        ccSwitchVersion: "3.20.1",
+        openCodeVersion: "1.18.21",
+        modelCount: 47,
+        ccSwitchSyncRequired: false,
+        ccSwitchRunning: true,
+      },
+    });
+    const synchronized = screen.getByLabelText("CC Switch").textContent ?? "";
+    expect(synchronized).not.toContain("请重启 CC Switch");
+    expect(synchronized).not.toContain("模型清单未能自动扩展");
+  });
+
+  test("never claims a wide catalog when the expansion was skipped", () => {
+    renderCcSwitch({
+      status: { kind: "ready", version: "3.20.1" },
+      deployment: {
+        kind: "success",
+        ccSwitchVersion: "3.20.1",
+        openCodeVersion: "1.18.21",
+        modelCount: 1,
+        ccSwitchSyncRequired: true,
+        ccSwitchRunning: true,
+      },
+    });
+
+    const region = screen.getByLabelText("CC Switch").textContent ?? "";
+    expect(region).toContain("模型清单未能自动扩展");
+    expect(region).not.toContain("个模型。请重启");
+  });
+
+  test("rejects a receipt whose model metadata is missing or malformed", () => {
+    const base = {
+      ccSwitchVersion: "3.20.1",
+      openCodeVersion: "1.18.21",
+      modelId: "gpt-5.4-mini",
+      modelCount: 47,
+      ccswitchSyncRequired: true,
+      ccswitchRunning: false,
+    };
+
+    expect(normalizeLocalAiDeploymentReceipt(base)).toEqual({
+      ccSwitchVersion: "3.20.1",
+      openCodeVersion: "1.18.21",
+      modelId: "gpt-5.4-mini",
+      modelCount: 47,
+      ccSwitchSyncRequired: true,
+      ccSwitchRunning: false,
+    });
+    for (const invalid of [
+      { ...base, modelCount: undefined },
+      { ...base, modelCount: 0 },
+      { ...base, modelCount: 1.5 },
+      { ...base, modelCount: "47" },
+      { ...base, ccswitchSyncRequired: "yes" },
+      { ...base, ccswitchRunning: undefined },
+    ]) {
+      expect(normalizeLocalAiDeploymentReceipt(invalid)).toBeNull();
+    }
   });
 
   test("renders unsupported and recoverable-error states with alert semantics", () => {

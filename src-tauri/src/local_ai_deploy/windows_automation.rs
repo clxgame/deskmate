@@ -103,6 +103,28 @@ fn contains_expected(automation: &UIAutomation, window: &UIElement, value: &str)
         .is_ok()
 }
 
+/// True when a trusted CC Switch window is currently present, meaning the app
+/// must be restarted (or the provider re-imported by hand) before its database
+/// picks up the expanded model list. Probing failures report `false` so this can
+/// never block a deployment that already succeeded.
+pub(super) fn cc_switch_is_running(installation: &CcSwitchInstallation) -> bool {
+    let Ok(trusted_executable) = installation.executable.canonicalize() else {
+        return false;
+    };
+    let Ok(automation) = UIAutomation::new() else {
+        return false;
+    };
+    automation
+        .create_matcher()
+        .control_type(ControlType::Window)
+        .contains_name("CC Switch")
+        .timeout(0)
+        .find_all()
+        .unwrap_or_default()
+        .iter()
+        .any(|window| window_is_trusted(window, &trusted_executable))
+}
+
 fn window_is_trusted(window: &UIElement, trusted_executable: &Path) -> bool {
     let Ok(process_id) = window.get_process_id() else {
         return false;

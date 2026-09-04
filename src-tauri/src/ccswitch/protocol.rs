@@ -19,6 +19,7 @@ use super::recovery::{
 use super::verification::{verify_once, ExternalVerification, VerificationTarget};
 
 mod launch;
+mod model_catalog_sync;
 mod settings_deploy;
 mod status;
 
@@ -36,6 +37,9 @@ pub use launch::{
     launch_import_with_platform, CcSwitchCommandError, CcSwitchLaunchReceipt,
     LaunchCcSwitchImportRequest, LaunchEnvironment,
 };
+#[cfg(windows)]
+pub(crate) use model_catalog_sync::expand_deployed_provider_catalog;
+pub(crate) use model_catalog_sync::ModelCatalogSyncOutcome;
 pub(crate) use settings_deploy::{
     abandon_automatic_deployment, launch_automatic_deployment, prepare_automatic_deployment,
     verify_automatic_deployment,
@@ -650,10 +654,7 @@ fn command_error_from_recovery(error: RecoveryError) -> CcSwitchCommandError {
 fn now_millis() -> MillisSinceEpoch {
     match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(duration) => {
-            let millis = match u64::try_from(duration.as_millis()) {
-                Ok(value) => value,
-                Err(_) => u64::MAX,
-            };
+            let millis = u64::try_from(duration.as_millis()).unwrap_or(u64::MAX);
             MillisSinceEpoch(millis)
         }
         Err(_) => MillisSinceEpoch(0),

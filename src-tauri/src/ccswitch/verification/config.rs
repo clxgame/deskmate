@@ -3,7 +3,10 @@ use std::collections::HashMap;
 use serde::Deserialize;
 use url::Url;
 
-use super::{ExternalVerification, VerificationProblem, VerificationTarget};
+use super::{
+    ccswitch_generated_id_prefix, generated_id_generation, ExternalVerification,
+    VerificationProblem, VerificationTarget,
+};
 use crate::ccswitch::recovery::FileObservation;
 
 #[derive(Deserialize)]
@@ -28,25 +31,9 @@ struct ProviderOptions {
     base_url: Option<String>,
 }
 
-/// Mirrors cc-switch v3.20.1 `import_provider_from_deeplink`, which derives the
-/// OpenCode provider key as `<sanitized-name>-<unix-millis>` and writes no `name`.
-fn ccswitch_generated_id_prefix(provider_name: &str) -> String {
-    provider_name
-        .chars()
-        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
-        .collect::<String>()
-        .to_lowercase()
-}
-
-/// Returns the trailing millisecond stamp when `id` matches `<prefix>-<digits>`.
-fn generated_id_generation(id: &str, prefix: &str) -> Option<u64> {
-    let rest = id.strip_prefix(prefix)?.strip_prefix('-')?;
-    if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    rest.parse::<u64>().ok()
-}
-
+/// Provider identity mirrors cc-switch v3.20.1 `import_provider_from_deeplink`,
+/// which derives the OpenCode provider key as `<sanitized-name>-<unix-millis>`
+/// and writes no `name`; the shared helpers live in the parent module.
 pub(crate) fn classify_changed_config(
     observation: FileObservation,
     bytes: Option<&[u8]>,

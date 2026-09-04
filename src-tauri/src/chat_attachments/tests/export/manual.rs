@@ -45,7 +45,7 @@ fn manual_qa_exports_two_files_and_keeps_artifact_after_failed_export() {
         "TASK6_MANUAL_EXPORT first={} second={} sha256={} failure={} missing_exists={}",
         first_path.display(),
         second_path.display(),
-        format!("{:x}", Sha256::digest(&first_bytes)),
+        format_args!("{:x}", Sha256::digest(&first_bytes)),
         failed,
         missing.exists()
     );

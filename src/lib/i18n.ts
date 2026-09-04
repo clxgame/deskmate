@@ -110,11 +110,19 @@ const zh = {
       installingCcSwitch: "正在部署 CC Switch…",
       importingProvider: "正在导入已验证的模型配置…",
       verifyingConfiguration: "正在确认配置已生效…",
+      syncingModelCatalog: "正在同步模型清单…",
     };
     return stages[stage] ?? "正在部署…";
   },
   localAiDeploySuccess: (ccSwitch: string, openCode: string) =>
     `部署完成：CC Switch ${ccSwitch}，OpenCode ${openCode}`,
+  localAiDeployModelSyncHint: (modelCount: number, ccSwitchRunning: boolean) =>
+    ccSwitchRunning
+      ? `已为你配置 ${modelCount} 个模型。请重启 CC Switch，或在 CC Switch 的 OpenCode 供应商列表点击「从当前配置导入」，使其模型清单同步。`
+      : `已为你配置 ${modelCount} 个模型。CC Switch 下次启动时会自动同步模型清单。`,
+  localAiDeployModelSyncIncomplete:
+    "模型清单未能自动扩展，请在 CC Switch 中手动确认模型配置。",
+
   localAiDeployError: (code: string): string => {
     if (code === "local_ai_deploy_busy") return "已有部署任务正在进行。";
     if (code.includes("opencode")) return "OpenCode 部署失败，请重试。";
@@ -439,11 +447,19 @@ const en: Dict = {
       installingCcSwitch: "Installing CC Switch…",
       importingProvider: "Importing the verified model configuration…",
       verifyingConfiguration: "Verifying the applied configuration…",
+      syncingModelCatalog: "Syncing the model list…",
     };
     return stages[stage] ?? "Deploying…";
   },
   localAiDeploySuccess: (ccSwitch: string, openCode: string) =>
     `Deployment complete: CC Switch ${ccSwitch}, OpenCode ${openCode}`,
+  localAiDeployModelSyncHint: (modelCount: number, ccSwitchRunning: boolean) =>
+    ccSwitchRunning
+      ? `${modelCount} models were configured. Restart CC Switch, or click "Import from current config" in its OpenCode provider list, so its model list matches.`
+      : `${modelCount} models were configured. CC Switch will sync the model list the next time it starts.`,
+  localAiDeployModelSyncIncomplete:
+    "The model list could not be expanded automatically. Check the model configuration in CC Switch.",
+
   localAiDeployError: (code: string): string => {
     if (code === "local_ai_deploy_busy") return "A deployment is already running.";
     if (code.includes("opencode")) return "OpenCode installation failed. Try again.";
@@ -778,11 +794,19 @@ const ja: Dict = {
       installingCcSwitch: "CC Switch を導入しています…",
       importingProvider: "検証済みモデル設定をインポートしています…",
       verifyingConfiguration: "設定の反映を確認しています…",
+      syncingModelCatalog: "モデル一覧を同期しています…",
     };
     return stages[stage] ?? "導入しています…";
   },
   localAiDeploySuccess: (ccSwitch: string, openCode: string) =>
     `導入完了：CC Switch ${ccSwitch}、OpenCode ${openCode}`,
+  localAiDeployModelSyncHint: (modelCount: number, ccSwitchRunning: boolean) =>
+    ccSwitchRunning
+      ? `${modelCount} 個のモデルを設定しました。CC Switch を再起動するか、OpenCode プロバイダー一覧で「現在の設定からインポート」を実行してモデル一覧を同期してください。`
+      : `${modelCount} 個のモデルを設定しました。CC Switch は次回起動時にモデル一覧を同期します。`,
+  localAiDeployModelSyncIncomplete:
+    "モデル一覧を自動で拡張できませんでした。CC Switch でモデル設定を確認してください。",
+
   localAiDeployError: (code: string): string => {
     if (code === "local_ai_deploy_busy") return "別の導入処理が実行中です。";
     if (code.includes("opencode")) return "OpenCode の導入に失敗しました。再試行してください。";
@@ -1113,11 +1137,19 @@ const ko: Dict = {
       installingCcSwitch: "CC Switch를 설치하는 중…",
       importingProvider: "검증된 모델 설정을 가져오는 중…",
       verifyingConfiguration: "적용된 설정을 확인하는 중…",
+      syncingModelCatalog: "모델 목록을 동기화하는 중…",
     };
     return stages[stage] ?? "배포 중…";
   },
   localAiDeploySuccess: (ccSwitch: string, openCode: string) =>
     `배포 완료: CC Switch ${ccSwitch}, OpenCode ${openCode}`,
+  localAiDeployModelSyncHint: (modelCount: number, ccSwitchRunning: boolean) =>
+    ccSwitchRunning
+      ? `모델 ${modelCount}개를 설정했습니다. CC Switch를 다시 시작하거나 OpenCode 공급자 목록에서 "현재 설정에서 가져오기"를 실행해 모델 목록을 동기화하세요.`
+      : `모델 ${modelCount}개를 설정했습니다. CC Switch는 다음 실행 시 모델 목록을 동기화합니다.`,
+  localAiDeployModelSyncIncomplete:
+    "모델 목록을 자동으로 확장하지 못했습니다. CC Switch에서 모델 설정을 확인하세요.",
+
   localAiDeployError: (code: string): string => {
     if (code === "local_ai_deploy_busy") return "다른 배포 작업이 진행 중입니다.";
     if (code.includes("opencode")) return "OpenCode 설치에 실패했습니다. 다시 시도하세요.";

@@ -960,6 +960,12 @@ body,
   line-height: 1.5;
 }
 
+.set-ccswitch-model-sync {
+  display: block;
+  margin-top: var(--s-1);
+  color: var(--text-dim);
+}
+
 .set-ccswitch-ready .set-ccswitch-status {
   color: var(--success);
 }

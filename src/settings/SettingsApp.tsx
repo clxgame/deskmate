@@ -525,6 +525,9 @@ function AiTab({ settings, patch, t }: TabProps) {
         kind: "success",
         ccSwitchVersion: receipt.ccSwitchVersion,
         openCodeVersion: receipt.openCodeVersion,
+        modelCount: receipt.modelCount,
+        ccSwitchSyncRequired: receipt.ccSwitchSyncRequired,
+        ccSwitchRunning: receipt.ccSwitchRunning,
       });
       await refreshCcSwitchStatus();
     } catch (error) {

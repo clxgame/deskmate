@@ -35,17 +35,16 @@ fn target(initial: ObservedFiles) -> VerificationTarget {
 #[test]
 fn changed_config_is_verified_when_provider_identity_endpoint_and_model_match() {
     let current_hash = "b".repeat(64);
-    let config = format!(
-        r#"{{
-  "provider": {{
-    "generated-provider-id": {{
+    let config = r#"{
+  "provider": {
+    "generated-provider-id": {
       "name": "Test Provider",
-      "options": {{"baseURL": "https://api.example.test/v1"}},
-      "models": {{"model-a": {{"display": "Model A"}}}}
-    }}
-  }}
-}}"#
-    );
+      "options": {"baseURL": "https://api.example.test/v1"},
+      "models": {"model-a": {"display": "Model A"}}
+    }
+  }
+}"#
+    .to_owned();
 
     let status = classify_changed_config(
         FileObservation::Present {

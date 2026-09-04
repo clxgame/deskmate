@@ -74,6 +74,7 @@ enum LocalAiDeploymentStage {
     InstallingCcSwitch,
     ImportingProvider,
     VerifyingConfiguration,
+    SyncingModelCatalog,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -88,6 +89,15 @@ pub struct LocalAiDeploymentReceipt {
     cc_switch_version: String,
     open_code_version: String,
     model_id: String,
+    /// Models configured for the imported provider. Falls back to 1 when the
+    /// catalog expansion could not run, so the UI never overstates the result.
+    model_count: usize,
+    /// True while CC Switch still has to re-import before its own database
+    /// reflects the expanded model list.
+    ccswitch_sync_required: bool,
+    /// True when a CC Switch window is live, so the user has to restart it (or
+    /// import manually) instead of waiting for the next launch.
+    ccswitch_running: bool,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -158,8 +168,9 @@ fn run_windows_deployment(
     use crate::ccswitch::platform::{CcSwitchPlatform, SystemCcSwitchPlatform};
     use crate::ccswitch::protocol::supports_version_for_deployment;
     use crate::ccswitch::protocol::{
-        abandon_automatic_deployment, launch_automatic_deployment, prepare_automatic_deployment,
-        verify_automatic_deployment,
+        abandon_automatic_deployment, expand_deployed_provider_catalog,
+        launch_automatic_deployment, prepare_automatic_deployment, verify_automatic_deployment,
+        ModelCatalogSyncOutcome,
     };
 
     let platform = SystemCcSwitchPlatform;
@@ -212,6 +223,24 @@ fn run_windows_deployment(
                 }
                 emit_progress(app, LocalAiDeploymentStage::VerifyingConfiguration);
                 verify_automatic_deployment(app, &prepared, &launched)?;
+                // cc-switch's deep link can only carry one model, so widen the
+                // provider now that the import is verified. A failure here is
+                // not fatal: OpenCode, CC Switch and the provider are all
+                // genuinely in place, and reporting failure would be a lie.
+                emit_progress(app, LocalAiDeploymentStage::SyncingModelCatalog);
+                let sync = expand_deployed_provider_catalog(
+                    app,
+                    &launched.provider_name,
+                    &launched.endpoint,
+                    &launched.selected_model,
+                )
+                .unwrap_or_else(|error| {
+                    eprintln!("local AI model catalog expansion skipped: {}", error.code);
+                    ModelCatalogSyncOutcome {
+                        model_count: 1,
+                        ccswitch_sync_required: true,
+                    }
+                });
                 return Ok(LocalAiDeploymentReceipt {
                     cc_switch_version: cc_switch_version.ok_or_else(|| {
                         LocalAiDeploymentError::new("local_ai_ccswitch_install_unverified")
@@ -220,6 +249,9 @@ fn run_windows_deployment(
                         LocalAiDeploymentError::new("local_ai_opencode_install_unverified")
                     })?,
                     model_id: launched.selected_model,
+                    model_count: sync.model_count,
+                    ccswitch_sync_required: sync.ccswitch_sync_required,
+                    ccswitch_running: windows_automation::cc_switch_is_running(&installation),
                 });
             }
             DeploymentStep::VerifyConfiguration => {}

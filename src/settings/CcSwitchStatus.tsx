@@ -1,4 +1,16 @@
 import type { Dict } from "../lib/i18n";
+import type { LocalAiDeploymentStatus } from "./localAiDeployment";
+
+export {
+  localAiDeploymentErrorCode,
+  normalizeLocalAiDeploymentReceipt,
+  normalizeLocalAiDeploymentStage,
+} from "./localAiDeployment";
+export type {
+  LocalAiDeploymentReceipt,
+  LocalAiDeploymentStage,
+  LocalAiDeploymentStatus,
+} from "./localAiDeployment";
 
 export type CcSwitchCapabilityStatus =
   | { readonly kind: "checking" }
@@ -9,29 +21,6 @@ export type CcSwitchCapabilityStatus =
     }
   | { readonly kind: "unsupported" }
   | { readonly kind: "recoverable-error" };
-
-export type LocalAiDeploymentStage =
-  | "verifyingApi"
-  | "installingOpenCode"
-  | "installingCcSwitch"
-  | "importingProvider"
-  | "verifyingConfiguration";
-
-export type LocalAiDeploymentStatus =
-  | { readonly kind: "idle" }
-  | { readonly kind: "working"; readonly stage: LocalAiDeploymentStage }
-  | {
-      readonly kind: "success";
-      readonly ccSwitchVersion: string;
-      readonly openCodeVersion: string;
-    }
-  | { readonly kind: "error"; readonly message: string };
-
-export type LocalAiDeploymentReceipt = {
-  readonly ccSwitchVersion: string;
-  readonly openCodeVersion: string;
-  readonly modelId: string;
-};
 
 type NativeStatusRecord = {
   readonly [key: string]: unknown;
@@ -55,64 +44,6 @@ function isRecord(value: unknown): value is NativeStatusRecord {
 
 function unavailableUnknown(): CcSwitchCapabilityStatus {
   return { kind: "unavailable", reason: "unknown" };
-}
-
-const DEPLOYMENT_STAGES: readonly LocalAiDeploymentStage[] = [
-  "verifyingApi",
-  "installingOpenCode",
-  "installingCcSwitch",
-  "importingProvider",
-  "verifyingConfiguration",
-];
-
-export function normalizeLocalAiDeploymentStage(
-  value: unknown,
-): LocalAiDeploymentStage | null {
-  if (!isRecord(value) || typeof value["stage"] !== "string") return null;
-  return DEPLOYMENT_STAGES.find((stage) => stage === value["stage"]) ?? null;
-}
-
-function validVersion(value: unknown): value is string {
-  return typeof value === "string" && /^\d+\.\d+\.\d+$/.test(value);
-}
-
-export function normalizeLocalAiDeploymentReceipt(
-  value: unknown,
-): LocalAiDeploymentReceipt | null {
-  if (!isRecord(value)) return null;
-  const ccSwitchVersion = value["ccSwitchVersion"];
-  const openCodeVersion = value["openCodeVersion"];
-  const modelId = value["modelId"];
-  if (
-    !validVersion(ccSwitchVersion) ||
-    !validVersion(openCodeVersion) ||
-    typeof modelId !== "string" ||
-    modelId.trim().length === 0
-  ) {
-    return null;
-  }
-  return { ccSwitchVersion, openCodeVersion, modelId: modelId.trim() };
-}
-
-export function localAiDeploymentErrorCode(value: unknown): string {
-  if (isRecord(value) && typeof value["code"] === "string") {
-    return value["code"];
-  }
-  if (
-    value instanceof Error &&
-    [
-      "empty_key",
-      "bad_url",
-      "unauthorized",
-      "not_found",
-      "no_models",
-      "invalid_response",
-      "models_unavailable",
-    ].includes(value.message)
-  ) {
-    return value.message;
-  }
-  return typeof value === "string" ? value : "local_ai_deploy_failed";
 }
 
 export function normalizeCcSwitchCapabilityStatus(
@@ -210,6 +141,21 @@ function deploymentRole(
   return statusRole(status);
 }
 
+/// The deep link can only carry one model, so the success state has to say
+/// whether the wider catalog landed and whether CC Switch still needs a nudge.
+function modelSyncHint(
+  deployment: LocalAiDeploymentStatus,
+  t: Dict,
+): string | null {
+  if (deployment.kind !== "success") return null;
+  if (!deployment.ccSwitchSyncRequired) return null;
+  if (deployment.modelCount <= 1) return t.localAiDeployModelSyncIncomplete;
+  return t.localAiDeployModelSyncHint(
+    deployment.modelCount,
+    deployment.ccSwitchRunning,
+  );
+}
+
 export function CcSwitchStatus({
   status,
   deployment,
@@ -223,6 +169,7 @@ export function CcSwitchStatus({
     !canDeploy ||
     status.kind === "checking" ||
     status.kind === "unsupported";
+  const syncHint = modelSyncHint(deployment, t);
 
   return (
     <section
@@ -236,6 +183,9 @@ export function CcSwitchStatus({
       </div>
       <p className="set-ccswitch-status" role={deploymentRole(deployment, status)}>
         {deploymentText(deployment, status, t)}
+        {syncHint !== null && (
+          <span className="set-ccswitch-model-sync">{syncHint}</span>
+        )}
       </p>
       <p className="set-ccswitch-description">{t.localAiDeployHint}</p>
       <button

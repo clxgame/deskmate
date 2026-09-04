@@ -221,16 +221,21 @@ pub(crate) fn expand_deployed_provider_catalog(
 
     use crate::settings::SettingsState;
 
-    let base_url = app
-        .state::<SettingsState>()
-        .0
-        .lock()
-        .map_err(|_| sync_error("local_ai_model_catalog_missing"))?
-        .base_url
-        .clone();
-    let api_key = crate::settings::saved_api_key();
-    let catalog = crate::settings::load_verified_model_catalog(app, &base_url, &api_key)
+    let state = app.state::<SettingsState>();
+    let provider = crate::settings::active_provider_clone(&state)
         .ok_or_else(|| sync_error("local_ai_model_catalog_missing"))?;
+    let api_key = if provider.api_key.trim().is_empty() {
+        crate::settings::saved_api_key(&provider.id)
+    } else {
+        provider.api_key.clone()
+    };
+    let catalog = crate::settings::load_verified_model_catalog_for_provider(
+        app,
+        &provider.id,
+        &provider.base_url,
+        &api_key,
+    )
+    .ok_or_else(|| sync_error("local_ai_model_catalog_missing"))?;
     let paths = super::recovery_manager(app)?;
     expand_provider_model_catalog(
         paths.paths(),

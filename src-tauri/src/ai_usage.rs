@@ -1,4 +1,6 @@
-use crate::settings::{load_verified_model_catalog, saved_api_key, ModelCatalog, SettingsState};
+use crate::settings::{
+    load_verified_model_catalog_for_provider, saved_api_key, ModelCatalog, SettingsState,
+};
 use chrono::{Datelike, Local};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -162,14 +164,36 @@ fn verified_usage_target(
 pub async fn fetch_ai_usage(
     app: tauri::AppHandle,
     state: State<'_, SettingsState>,
+    provider_id: String,
 ) -> Result<AiUsage, String> {
     let settings = state
         .0
         .lock()
         .map_err(|_| "settings_state".to_string())?
         .clone();
-    let saved_key = saved_api_key();
-    let catalog = load_verified_model_catalog(&app, &settings.base_url, &saved_key);
+    // An empty id means "whichever gateway is in focus", so the usage card can
+    // render before the front-end has a concrete provider selected.
+    let provider = if provider_id.trim().is_empty() {
+        crate::settings::active_provider(&settings).cloned()
+    } else {
+        settings
+            .providers
+            .iter()
+            .find(|p| p.id == provider_id)
+            .cloned()
+    }
+    .ok_or_else(|| "unverified_settings".to_string())?;
+    let saved_key = if provider.api_key.trim().is_empty() {
+        saved_api_key(&provider.id)
+    } else {
+        provider.api_key.clone()
+    };
+    let catalog = load_verified_model_catalog_for_provider(
+        &app,
+        &provider.id,
+        &provider.base_url,
+        &saved_key,
+    );
     let (base_url, api_key) = verified_usage_target(catalog, &saved_key)?;
     tauri::async_runtime::spawn_blocking(move || fetch_usage(&base_url, &api_key))
         .await

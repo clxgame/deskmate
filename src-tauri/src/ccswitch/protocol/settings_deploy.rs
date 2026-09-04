@@ -24,18 +24,23 @@ pub(crate) fn prepare_automatic_deployment(
 ) -> Result<CcSwitchPreparedProvider, CcSwitchCommandError> {
     let setup_state = app.state::<crate::ccswitch::contract::CcSwitchSetupState>();
     let settings_state = app.state::<SettingsState>();
-    let base_url = settings_state
-        .0
-        .lock()
-        .map_err(|_| fixed_error("ccswitch_settings_unavailable"))?
-        .base_url
-        .clone();
-    let api_key = crate::settings::saved_api_key();
+    let provider = crate::settings::active_provider_clone(&settings_state)
+        .ok_or_else(|| fixed_error("ccswitch_saved_api_key_missing"))?;
+    let api_key = if provider.api_key.trim().is_empty() {
+        crate::settings::saved_api_key(&provider.id)
+    } else {
+        provider.api_key.clone()
+    };
     if api_key.trim().is_empty() {
         return Err(fixed_error("ccswitch_saved_api_key_missing"));
     }
-    let catalog = crate::settings::load_verified_model_catalog(app, &base_url, &api_key)
-        .ok_or_else(|| fixed_error("ccswitch_verified_model_catalog_missing"))?;
+    let catalog = crate::settings::load_verified_model_catalog_for_provider(
+        app,
+        &provider.id,
+        &provider.base_url,
+        &api_key,
+    )
+    .ok_or_else(|| fixed_error("ccswitch_verified_model_catalog_missing"))?;
     let chosen_model = if requested_model.trim().is_empty() {
         catalog.models.first().map(|model| model.id.clone())
     } else {

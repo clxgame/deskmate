@@ -143,17 +143,33 @@ pub fn prepare_ccswitch_opencode_provider_from_settings(
         code: "ccswitch_settings_unavailable",
         message: "Settings are unavailable.",
     })?;
-    let base_url = settings.base_url.clone();
+    let provider =
+        crate::settings::active_provider(&settings).ok_or_else(|| CcSwitchCommandError {
+            code: "ccswitch_saved_api_key_missing",
+            message: "A verified saved API key is required.",
+        })?;
+    let provider_id = provider.id.clone();
+    let base_url = provider.base_url.clone();
+    let in_memory_key = provider.api_key.clone();
     drop(settings);
-    let api_key = crate::settings::saved_api_key();
+    let api_key = if in_memory_key.trim().is_empty() {
+        crate::settings::saved_api_key(&provider_id)
+    } else {
+        in_memory_key
+    };
     if api_key.trim().is_empty() {
         return Err(CcSwitchCommandError {
             code: "ccswitch_saved_api_key_missing",
             message: "A verified saved API key is required.",
         });
     }
-    let catalog = crate::settings::load_verified_model_catalog(&app, &base_url, &api_key)
-        .ok_or_else(missing_verified_catalog_error)?;
+    let catalog = crate::settings::load_verified_model_catalog_for_provider(
+        &app,
+        &provider_id,
+        &base_url,
+        &api_key,
+    )
+    .ok_or_else(missing_verified_catalog_error)?;
     let source = SettingsProviderSource {
         provider_name: request.provider_name,
         endpoint: catalog.base_url,

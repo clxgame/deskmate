@@ -99,8 +99,14 @@ fn a_single_provider_deployment_prunes_nothing() {
 #[test]
 fn pruning_is_idempotent_across_repeated_runs() {
     let home = Home::new(&document_with(vec![
-        ("yumeopencode-1788493686070".to_owned(), yume_provider(SELECTED)),
-        ("yumeopencode-1788507103258".to_owned(), yume_provider(SELECTED)),
+        (
+            "yumeopencode-1788493686070".to_owned(),
+            yume_provider(SELECTED),
+        ),
+        (
+            "yumeopencode-1788507103258".to_owned(),
+            yume_provider(SELECTED),
+        ),
     ]));
 
     let first = expand(&home, &full_catalog()).expect("first expansion");
@@ -117,12 +123,19 @@ fn pruning_is_idempotent_across_repeated_runs() {
 #[test]
 fn the_surviving_provider_still_carries_the_selected_model() {
     let home = Home::new(&document_with(vec![
-        ("yumeopencode-1788493686070".to_owned(), yume_provider(SELECTED)),
-        ("yumeopencode-1788507103258".to_owned(), yume_provider(SELECTED)),
+        (
+            "yumeopencode-1788493686070".to_owned(),
+            yume_provider(SELECTED),
+        ),
+        (
+            "yumeopencode-1788507103258".to_owned(),
+            yume_provider(SELECTED),
+        ),
     ]));
 
     expand(&home, &full_catalog()).expect("expand catalog");
 
-    assert!(model_ids(&home.document(), "yumeopencode-1788507103258")
-        .contains(&SELECTED.to_owned()));
+    assert!(
+        model_ids(&home.document(), "yumeopencode-1788507103258").contains(&SELECTED.to_owned())
+    );
 }

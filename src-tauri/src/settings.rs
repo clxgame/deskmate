@@ -51,14 +51,78 @@ fn normalize_theme(theme: &str) -> String {
     }
 }
 
-fn settings_catalog_binding_changed(old: &Settings, new: &Settings) -> bool {
-    normalize_base_url(&old.base_url) != normalize_base_url(&new.base_url)
-        || old.api_key.trim() != new.api_key.trim()
+/// A configured AI gateway. Multiple providers are injected into the sidecar
+/// and each renders its own usage card. `id` is a stable uuid used to address
+/// the keystore entry and catalog file; `sidecar_id` is the key in the
+/// opencode provider map (`yume`, `yume-2`, …) and must be unique across all
+/// providers so model selection (`providerID` in the prompt contract) routes
+/// to the right gateway.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AiProvider {
+    pub id: String,
+    pub sidecar_id: String,
+    pub label: String,
+    pub base_url: String,
+    /// In-memory only; `redacted_for_disk` clears it before persisting.
+    pub api_key: String,
 }
 
-fn reconcile_verified_settings_binding(settings: &mut Settings, base_url: &str, api_key: &str) {
-    settings.base_url = normalize_base_url(base_url);
-    settings.api_key = api_key.trim().to_owned();
+impl Default for AiProvider {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            sidecar_id: "yume".into(),
+            label: String::new(),
+            base_url: DEFAULT_AI_BASE_URL.into(),
+            api_key: String::new(),
+        }
+    }
+}
+
+/// The sidecar provider key for the first (legacy-migrated) gateway stays
+/// `yume` so existing configs keep working; later gateways get `yume-2`, …
+fn frontier_sidecar_id(existing: &[AiProvider]) -> String {
+    if existing.is_empty() {
+        return "yume".into();
+    }
+    let mut n = existing.len() + 1;
+    loop {
+        let candidate = format!("yume-{n}");
+        if !existing.iter().any(|p| p.sidecar_id == candidate) {
+            return candidate;
+        }
+        n += 1;
+    }
+}
+
+fn settings_catalog_binding_changed(old: &Settings, new: &Settings) -> bool {
+    let old_map: Vec<(String, String)> = old
+        .providers
+        .iter()
+        .map(|p| (p.id.clone(), normalize_base_url(&p.base_url)))
+        .collect();
+    let new_map: Vec<(String, String)> = new
+        .providers
+        .iter()
+        .map(|p| (p.id.clone(), normalize_base_url(&p.base_url)))
+        .collect();
+    old_map != new_map
+}
+
+fn reconcile_verified_settings_binding(
+    settings: &mut Settings,
+    provider_id: &str,
+    base_url: &str,
+    api_key: &str,
+) {
+    let Some(provider) = settings.providers.iter_mut().find(|p| p.id == provider_id) else {
+        return;
+    };
+    provider.base_url = normalize_base_url(base_url);
+    if !api_key.trim().is_empty() {
+        provider.api_key = api_key.trim().to_owned();
+    }
 }
 
 /// A scheduled task: at `time` (HH:MM, daily), auto-send `prompt` to the AI.
@@ -93,6 +157,12 @@ pub struct Settings {
     pub yolo: bool,
     pub base_url: String,
     pub api_key: String,
+    /// Configured gateways; the first is the legacy-migrated one.
+    pub providers: Vec<AiProvider>,
+    /// The provider currently in focus (default model / initial usage card);
+    /// routing follows the selected model's own gateway, so this is a focus
+    /// marker, not a routing gate.
+    pub active_provider_id: String,
     // 小组件
     pub pet_scale: f64,
     pub outline_width: f64,
@@ -132,6 +202,8 @@ impl Default for Settings {
             yolo: false,
             base_url: DEFAULT_AI_BASE_URL.into(),
             api_key: String::new(),
+            providers: Vec::new(),
+            active_provider_id: String::new(),
             pet_scale: DEFAULT_PET_SCALE,
             outline_width: DEFAULT_OUTLINE_WIDTH,
             rim_width: DEFAULT_RIM_WIDTH,
@@ -159,8 +231,9 @@ impl Default for Settings {
 
 pub struct SettingsState(pub Mutex<Settings>);
 
-const MODEL_CATALOG_FILE: &str = "model-catalog.json";
-const YUME_PROVIDER_ID: &str = "yume";
+const MODEL_CATALOG_DIR: &str = "model-catalogs";
+/// Legacy single-file catalog path; used only to migrate into per-provider files.
+const LEGACY_MODEL_CATALOG_FILE: &str = "model-catalog.json";
 const CCSWITCH_PREPARE_OPENCODE_PROVIDER_TOOL: &str = "ccswitch_prepare_opencode_provider";
 const DENIED_OPENCODE_PERMISSIONS: &[&str] = &[
     "bash",
@@ -195,21 +268,60 @@ impl Default for SettingsState {
 /// The API key is a credential, not a preference: it lives in the OS keystore
 /// (Windows Credential Manager / macOS Keychain) instead of settings.json.
 const KEYRING_SERVICE: &str = "com.deskmate.desktop";
-const KEYRING_USER: &str = "ai-api-key";
+/// Legacy single-key entry; superseded by per-provider entries once a
+/// provider list exists. Kept only to migrate an existing key into
+/// `providers[0]`.
+const LEGACY_KEYRING_USER: &str = "ai-api-key";
 
-fn api_key_entry() -> Option<keyring::Entry> {
-    keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER).ok()
+fn api_key_entry(user: &str) -> Option<keyring::Entry> {
+    keyring::Entry::new(KEYRING_SERVICE, user).ok()
 }
 
-pub(crate) fn saved_api_key() -> String {
-    api_key_entry()
+/// The keystore username for a given provider, e.g. `ai-api-key.<provider_id>`.
+fn api_key_user_for(provider_id: &str) -> String {
+    format!("ai-api-key.{provider_id}")
+}
+
+fn read_api_key_user(user: &str) -> Result<String, String> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, user)
+        .map_err(|e| format!("无法访问系统凭据存储: {e}"))?;
+    match entry.get_password() {
+        Ok(api_key) => Ok(api_key),
+        Err(keyring::Error::NoEntry) => Ok(String::new()),
+        Err(e) => Err(format!("无法读取 API Key: {e}")),
+    }
+}
+
+/// Read the API key for a single provider from the OS keystore.
+pub(crate) fn saved_api_key(provider_id: &str) -> String {
+    api_key_entry(&api_key_user_for(provider_id))
         .and_then(|entry| entry.get_password().ok())
         .unwrap_or_default()
 }
 
-/// Persist (or clear) the API key in the OS keystore.
-fn store_api_key(api_key: &str) -> Result<(), String> {
-    let Some(entry) = api_key_entry() else {
+/// The active provider (the one in focus for deployment/usage). Falls back to
+/// the first provider when none is marked active.
+pub(crate) fn active_provider(settings: &Settings) -> Option<&AiProvider> {
+    if settings.providers.is_empty() {
+        return None;
+    }
+    settings
+        .providers
+        .iter()
+        .find(|p| p.id == settings.active_provider_id)
+        .or_else(|| settings.providers.first())
+}
+
+/// Convenience for call sites holding a `SettingsState`: clone the active
+/// provider, or `None` when unavailable.
+pub(crate) fn active_provider_clone(state: &SettingsState) -> Option<AiProvider> {
+    let settings = state.0.lock().ok()?;
+    active_provider(&settings).cloned()
+}
+
+/// Persist (or clear) the API key for one provider in the OS keystore.
+fn store_api_key(provider_id: &str, api_key: &str) -> Result<(), String> {
+    let Some(entry) = api_key_entry(&api_key_user_for(provider_id)) else {
         return Err("无法访问系统凭据存储，API Key 未能保存".to_string());
     };
     if api_key.is_empty() {
@@ -222,6 +334,80 @@ fn store_api_key(api_key: &str) -> Result<(), String> {
     entry
         .set_password(api_key)
         .map_err(|e| format!("无法保存 API Key 到系统凭据存储: {e}"))
+}
+
+/// Delete one provider's keystore entry. Not found is treated as success so
+/// removing a provider that never had a key is idempotent.
+fn delete_api_key(provider_id: &str) -> Result<(), String> {
+    let Some(entry) = api_key_entry(&api_key_user_for(provider_id)) else {
+        return Ok(());
+    };
+    match entry.delete_credential() {
+        Ok(()) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(format!("无法清除已保存的 API Key: {e}")),
+    }
+}
+
+/// Delete the legacy single-key entry after it has been migrated into a
+/// provider's own slot, so the secret doesn't linger under the old name.
+fn delete_legacy_api_key() -> Result<(), String> {
+    let Some(entry) = api_key_entry(LEGACY_KEYRING_USER) else {
+        return Ok(());
+    };
+    match entry.delete_credential() {
+        Ok(()) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(format!("无法清除旧的 API Key: {e}")),
+    }
+}
+
+trait LegacyApiKeyMigrationOps {
+    fn read_legacy_api_key(&self) -> Result<String, String>;
+    fn store_provider_api_key(&self, provider_id: &str, api_key: &str) -> Result<(), String>;
+    fn read_provider_api_key(&self, provider_id: &str) -> Result<String, String>;
+    fn delete_legacy_api_key(&self) -> Result<(), String>;
+}
+
+struct KeyringLegacyApiKeyMigrationOps;
+
+impl LegacyApiKeyMigrationOps for KeyringLegacyApiKeyMigrationOps {
+    fn read_legacy_api_key(&self) -> Result<String, String> {
+        read_api_key_user(LEGACY_KEYRING_USER)
+    }
+
+    fn store_provider_api_key(&self, provider_id: &str, api_key: &str) -> Result<(), String> {
+        store_api_key(provider_id, api_key)
+    }
+
+    fn read_provider_api_key(&self, provider_id: &str) -> Result<String, String> {
+        read_api_key_user(&api_key_user_for(provider_id))
+    }
+
+    fn delete_legacy_api_key(&self) -> Result<(), String> {
+        delete_legacy_api_key()
+    }
+}
+
+fn migrate_legacy_api_key_to_provider(
+    ops: &impl LegacyApiKeyMigrationOps,
+    provider_id: &str,
+) -> Result<Option<String>, String> {
+    let legacy_key = ops.read_legacy_api_key()?;
+    if legacy_key.is_empty() {
+        return Ok(None);
+    }
+
+    ops.store_provider_api_key(provider_id, &legacy_key)?;
+    let scoped_key = ops.read_provider_api_key(provider_id)?;
+    if scoped_key != legacy_key {
+        return Err(
+            "provider-scoped API Key read-back mismatch; legacy API Key was preserved".into(),
+        );
+    }
+
+    ops.delete_legacy_api_key()?;
+    Ok(Some(legacy_key))
 }
 
 fn settings_path(app: &tauri::AppHandle) -> PathBuf {
@@ -273,28 +459,57 @@ pub fn load(app: &tauri::AppHandle) -> Settings {
         migrated_ai_base_url(&settings.provider_id, &settings.base_url).into_owned();
     settings.update_repo = migrated_update_repo(&settings.update_repo).into_owned();
 
-    // Migrate a legacy plaintext key out of settings.json into the OS keystore,
-    // then rewrite the file so the secret stops living on disk.
-    let legacy_key = std::mem::take(&mut settings.api_key);
-    if !legacy_key.trim().is_empty() {
-        match store_api_key(legacy_key.trim()) {
-            Ok(()) => {
-                settings.api_key = legacy_key.trim().to_string();
-                if let Err(e) = save(app, &settings) {
-                    eprintln!("could not scrub legacy api key from settings.json: {e}");
-                }
-            }
-            Err(e) => {
-                // Keystore unavailable: keep the key usable in memory this run
-                // rather than silently locking the user out of their model.
-                eprintln!("api key migration failed: {e}");
-                settings.api_key = legacy_key;
-            }
-        }
-    } else {
-        settings.api_key = saved_api_key();
+    // Migrate a legacy plaintext key out of settings.json into the OS keystore
+    // (under the provider's own slot), then rewrite the file so the secret
+    // stops living on disk. If no provider list exists yet, seed `providers[0]`
+    // from the legacy single-value fields.
+    if let Err(e) = migrate_legacy_key_and_catalog(app, &mut settings) {
+        eprintln!("api key migration failed: {e}");
     }
     settings
+}
+
+/// One-time upgrade from the single-value `base_url`/`api_key` era to the
+/// provider list, moving the credential out of settings.json into the
+/// per-provider keystore slot and seeding the verified catalog file.
+fn migrate_legacy_key_and_catalog(
+    app: &tauri::AppHandle,
+    settings: &mut Settings,
+) -> Result<(), String> {
+    if settings.providers.is_empty() {
+        let id = uuid::Uuid::new_v4().to_string();
+        let sidecar_id = frontier_sidecar_id(&[]);
+        settings.providers.push(AiProvider {
+            id: id.clone(),
+            sidecar_id,
+            label: String::new(),
+            base_url: settings.base_url.clone(),
+            api_key: std::mem::take(&mut settings.api_key),
+        });
+        settings.active_provider_id = id.clone();
+    }
+
+    // The credential source for providers[0]: a legacy plaintext key in
+    // settings.json (pre-keystore era), else the per-provider keystore slot,
+    // else the old single `ai-api-key` entry.
+    let provider_id = settings.providers[0].id.clone();
+    let in_memory = settings.providers[0].api_key.trim().to_owned();
+    let migrated_legacy =
+        migrate_legacy_api_key_to_provider(&KeyringLegacyApiKeyMigrationOps, &provider_id)?;
+
+    if let Some(key) = migrated_legacy.as_ref() {
+        if settings.providers[0].api_key.trim().is_empty() {
+            settings.providers[0].api_key = key.clone();
+        }
+    }
+    if !in_memory.is_empty() {
+        store_api_key(&provider_id, &in_memory)?;
+    }
+    if migrated_legacy.is_some() || !in_memory.is_empty() {
+        // Persist once so the migrated state becomes the on-disk truth.
+        save(app, settings)?;
+    }
+    Ok(())
 }
 
 pub fn persist_pet_position(app: &tauri::AppHandle, position: tauri::PhysicalPosition<i32>) {
@@ -320,10 +535,12 @@ pub fn persist_pet_position(app: &tauri::AppHandle, position: tauri::PhysicalPos
 
 /// The on-disk form of the settings: identical except the credential is removed.
 fn redacted_for_disk(settings: &Settings) -> Settings {
-    Settings {
-        api_key: String::new(),
-        ..settings.clone()
+    let mut on_disk = settings.clone();
+    on_disk.api_key.clear();
+    for provider in &mut on_disk.providers {
+        provider.api_key.clear();
     }
+    on_disk
 }
 
 fn save(app: &tauri::AppHandle, settings: &Settings) -> Result<(), String> {
@@ -380,9 +597,24 @@ pub fn set_settings(
     // SAFE-UNWRAP: a poisoned settings mutex means an earlier command panicked.
     let old = { state.0.lock().unwrap().clone() };
     let catalog_binding_changed = settings_catalog_binding_changed(&old, &settings);
-    // Store the credential in the OS keystore before anything else, so a
-    // keystore failure surfaces to the user instead of being lost silently.
-    store_api_key(&settings.api_key)?;
+    // Store every provider's credential in the OS keystore before anything
+    // else, so a keystore failure surfaces to the user instead of being lost
+    // silently.
+    for provider in &settings.providers {
+        store_api_key(&provider.id, &provider.api_key)?;
+    }
+    // Clean up providers that were removed: drop their keystore entry and
+    // catalog file so the credential never lingers. Providers that were merely
+    // edited keep their entries.
+    for removed in old.providers.iter().filter(|old_provider| {
+        !settings
+            .providers
+            .iter()
+            .any(|new_provider| new_provider.id == old_provider.id)
+    }) {
+        let _ = delete_api_key(&removed.id);
+        clear_model_catalog_for_provider_best_effort(&app, &removed.id);
+    }
     if settings.pet_position.is_none() {
         settings.pet_position = old.pet_position;
     }
@@ -403,11 +635,24 @@ fn model_catalog_path(app: &tauri::AppHandle) -> PathBuf {
         .app_data_dir()
         // SAFE-EXPECT: Tauri provides an app data directory after app setup.
         .expect("app data dir unavailable")
-        .join(MODEL_CATALOG_FILE)
+        .join(LEGACY_MODEL_CATALOG_FILE)
 }
 
-fn save_model_catalog(app: &tauri::AppHandle, catalog: &ModelCatalog) -> Result<(), String> {
-    let path = model_catalog_path(app);
+fn model_catalog_path_for_provider(app: &tauri::AppHandle, provider_id: &str) -> PathBuf {
+    app.path()
+        .app_data_dir()
+        // SAFE-EXPECT: Tauri provides an app data directory after app setup.
+        .expect("app data dir unavailable")
+        .join(MODEL_CATALOG_DIR)
+        .join(format!("{provider_id}.json"))
+}
+
+fn save_model_catalog_for_provider(
+    app: &tauri::AppHandle,
+    provider_id: &str,
+    catalog: &ModelCatalog,
+) -> Result<(), String> {
+    let path = model_catalog_path_for_provider(app, provider_id);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
@@ -423,6 +668,14 @@ fn clear_model_catalog_best_effort(app: &tauri::AppHandle) {
     }
 }
 
+fn clear_model_catalog_for_provider_best_effort(app: &tauri::AppHandle, provider_id: &str) {
+    match std::fs::remove_file(model_catalog_path_for_provider(app, provider_id)) {
+        Ok(()) => {}
+        Err(e) if e.kind() == ErrorKind::NotFound => {}
+        Err(e) => eprintln!("could not clear verified model catalog: {e}"),
+    }
+}
+
 fn fingerprint_is_sha256(fingerprint: &str) -> bool {
     fingerprint.len() == 64 && fingerprint.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
@@ -431,8 +684,16 @@ fn api_key_fingerprint(api_key: &str) -> String {
     format!("{:x}", Sha256::digest(api_key.trim().as_bytes()))
 }
 
-pub(crate) fn load_model_catalog(app: &tauri::AppHandle) -> Option<ModelCatalog> {
-    std::fs::read_to_string(model_catalog_path(app))
+pub(crate) fn load_model_catalog_for_provider(
+    app: &tauri::AppHandle,
+    provider_id: &str,
+) -> Option<ModelCatalog> {
+    let path = if provider_id.is_empty() {
+        model_catalog_path(app)
+    } else {
+        model_catalog_path_for_provider(app, provider_id)
+    };
+    std::fs::read_to_string(path)
         .ok()
         .and_then(|raw| serde_json::from_str::<ModelCatalog>(&raw).ok())
         .filter(|catalog| {
@@ -451,12 +712,13 @@ fn model_catalog_matches_verified_binding(
         && catalog.api_key_fingerprint == api_key_fingerprint(api_key)
 }
 
-pub(crate) fn load_verified_model_catalog(
+pub(crate) fn load_verified_model_catalog_for_provider(
     app: &tauri::AppHandle,
+    provider_id: &str,
     expected_base_url: &str,
     api_key: &str,
 ) -> Option<ModelCatalog> {
-    let catalog = load_model_catalog(app)?;
+    let catalog = load_model_catalog_for_provider(app, provider_id)?;
     if model_catalog_matches_verified_binding(&catalog, expected_base_url, api_key) {
         Some(catalog)
     } else {
@@ -465,26 +727,134 @@ pub(crate) fn load_verified_model_catalog(
 }
 
 pub(crate) fn sidecar_environment(app: &tauri::AppHandle) -> Option<(String, String)> {
-    let api_key = saved_api_key();
     let state = app.try_state::<SettingsState>()?;
     let settings = state.0.lock().ok()?.clone();
-    let catalog = load_verified_model_catalog(app, &settings.base_url, &api_key)?;
-    build_sidecar_environment(&catalog, &api_key)
+    build_multi_provider_sidecar_environment(app, &settings)
 }
 
-pub(crate) fn build_sidecar_environment(
-    catalog: &ModelCatalog,
-    api_key: &str,
+/// Injects **every** verified gateway into the sidecar so a model picked from
+/// any of them routes to its own provider (`providerID` in the prompt
+/// contract). Providers whose catalog is missing or unverified are skipped
+/// rather than failing the whole environment.
+pub(crate) fn build_multi_provider_sidecar_environment(
+    app: &tauri::AppHandle,
+    settings: &Settings,
 ) -> Option<(String, String)> {
-    if api_key.trim().is_empty() || catalog.models.is_empty() {
-        return None;
+    let mut verified_providers = Vec::new();
+
+    for provider in &settings.providers {
+        let key = {
+            let in_memory = provider.api_key.trim();
+            if in_memory.is_empty() {
+                saved_api_key(&provider.id)
+            } else {
+                in_memory.to_owned()
+            }
+        };
+        if key.trim().is_empty() {
+            continue;
+        }
+        let Some(catalog) =
+            load_verified_model_catalog_for_provider(app, &provider.id, &provider.base_url, &key)
+        else {
+            continue;
+        };
+        if catalog.models.is_empty() {
+            continue;
+        }
+        let display_name = if provider.label.trim().is_empty() {
+            "YUME".to_owned()
+        } else {
+            provider.label.trim().to_owned()
+        };
+        verified_providers.push(VerifiedSidecarProvider {
+            sidecar_id: provider.sidecar_id.clone(),
+            display_name,
+            catalog,
+            api_key: key,
+        });
     }
 
+    build_verified_multi_provider_sidecar_environment(&verified_providers)
+}
+
+pub(crate) struct VerifiedSidecarProvider {
+    pub(crate) sidecar_id: String,
+    pub(crate) display_name: String,
+    pub(crate) catalog: ModelCatalog,
+    pub(crate) api_key: String,
+}
+
+pub(crate) fn build_verified_multi_provider_sidecar_environment(
+    verified_providers: &[VerifiedSidecarProvider],
+) -> Option<(String, String)> {
+    let mut providers = serde_json::Map::new();
+    let mut auth = serde_json::Map::new();
+
+    for provider in verified_providers {
+        insert_verified_sidecar_provider(
+            &mut providers,
+            &mut auth,
+            &provider.sidecar_id,
+            &provider.display_name,
+            &provider.catalog,
+            &provider.api_key,
+        );
+    }
+
+    finalize_sidecar_environment(providers, auth)
+}
+
+fn insert_verified_sidecar_provider(
+    providers: &mut serde_json::Map<String, serde_json::Value>,
+    auth: &mut serde_json::Map<String, serde_json::Value>,
+    sidecar_id: &str,
+    display_name: &str,
+    catalog: &ModelCatalog,
+    api_key: &str,
+) {
     let models = catalog
         .models
         .iter()
         .map(|model| (model.id.clone(), serde_json::json!({ "name": model.name })))
         .collect::<serde_json::Map<String, serde_json::Value>>();
+    providers.insert(
+        sidecar_id.to_owned(),
+        serde_json::json!({
+            "npm": "@ai-sdk/openai-compatible",
+            "name": display_name,
+            "options": { "baseURL": catalog.base_url },
+            "models": models,
+        }),
+    );
+    auth.insert(
+        sidecar_id.to_owned(),
+        serde_json::json!({ "type": "api", "key": api_key.trim() }),
+    );
+}
+
+fn finalize_sidecar_environment(
+    providers: serde_json::Map<String, serde_json::Value>,
+    auth: serde_json::Map<String, serde_json::Value>,
+) -> Option<(String, String)> {
+    if providers.is_empty() {
+        return None;
+    }
+
+    let config = serde_json::json!({
+        "$schema": "https://opencode.ai/config.json",
+        "permission": sidecar_permission_policy(),
+        "provider": providers,
+    });
+    Some((
+        config.to_string(),
+        serde_json::Value::Object(auth).to_string(),
+    ))
+}
+
+/// The permission policy is global to the sidecar and independent of how many
+/// providers are injected: deny everything except YUME's dedicated tool.
+fn sidecar_permission_policy() -> serde_json::Map<String, serde_json::Value> {
     let mut permission = serde_json::Map::new();
     permission.insert("*".to_string(), serde_json::json!("deny"));
     permission.insert(
@@ -494,22 +864,7 @@ pub(crate) fn build_sidecar_environment(
     for permission_id in DENIED_OPENCODE_PERMISSIONS {
         permission.insert((*permission_id).to_string(), serde_json::json!("deny"));
     }
-    let config = serde_json::json!({
-        "$schema": "https://opencode.ai/config.json",
-        "permission": permission,
-        "provider": {
-            YUME_PROVIDER_ID: {
-                "npm": "@ai-sdk/openai-compatible",
-                "name": "YUME",
-                "options": { "baseURL": catalog.base_url },
-                "models": models,
-            }
-        }
-    });
-    let auth = serde_json::json!({
-        YUME_PROVIDER_ID: { "type": "api", "key": api_key.trim() }
-    });
-    Some((config.to_string(), auth.to_string()))
+    permission
 }
 
 /// Apply side-effectful settings (autostart, shortcuts, window state).
@@ -618,6 +973,7 @@ fn fetch_api_models(base_url: &str, api_key: &str) -> Result<Vec<ApiModel>, Stri
 pub fn verify_api_key(
     app: tauri::AppHandle,
     state: tauri::State<SettingsState>,
+    provider_id: String,
     base_url: String,
     api_key: String,
 ) -> Result<Option<usize>, String> {
@@ -630,9 +986,10 @@ pub fn verify_api_key(
     if models.is_empty() {
         return Err("no_models".into());
     }
-    store_api_key(&key)?;
-    save_model_catalog(
+    store_api_key(&provider_id, &key)?;
+    save_model_catalog_for_provider(
         &app,
+        &provider_id,
         &ModelCatalog {
             base_url: base.clone(),
             api_key_fingerprint: api_key_fingerprint(&key),
@@ -645,7 +1002,7 @@ pub fn verify_api_key(
             .lock()
             .map_err(|_| "settings_unavailable".to_string())?;
         let mut next = current.clone();
-        reconcile_verified_settings_binding(&mut next, &base, &key);
+        reconcile_verified_settings_binding(&mut next, &provider_id, &base, &key);
         save(&app, &next)?;
         *current = next.clone();
         next
@@ -755,11 +1112,89 @@ pub fn register_shortcuts(app: &tauri::AppHandle, settings: &Settings) {
 #[cfg(test)]
 mod tests {
     use super::{
-        api_key_fingerprint, build_sidecar_environment, model_catalog_matches_verified_binding,
-        normalize_pet_scale, normalize_render_value, normalize_theme, parse_api_models,
-        reconcile_verified_settings_binding, redacted_for_disk, settings_catalog_binding_changed,
-        ApiModel, ModelCatalog, PetPosition, Settings, SettingsState,
+        api_key_fingerprint, delete_api_key, finalize_sidecar_environment,
+        insert_verified_sidecar_provider, migrate_legacy_api_key_to_provider,
+        model_catalog_matches_verified_binding, normalize_pet_scale, normalize_render_value,
+        normalize_theme, parse_api_models, reconcile_verified_settings_binding, redacted_for_disk,
+        saved_api_key, settings_catalog_binding_changed, store_api_key, AiProvider, ApiModel,
+        LegacyApiKeyMigrationOps, ModelCatalog, PetPosition, Settings, SettingsState,
     };
+    use std::cell::RefCell;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum MigrationEvent {
+        ReadLegacy,
+        StoreScoped,
+        ReadScoped,
+        DeleteLegacy,
+    }
+
+    struct FakeLegacyKeyOps {
+        legacy_result: Result<String, String>,
+        store_result: Result<(), String>,
+        scoped_result: Result<String, String>,
+        delete_result: Result<(), String>,
+        events: RefCell<Vec<MigrationEvent>>,
+    }
+
+    impl FakeLegacyKeyOps {
+        fn success(legacy_key: &str) -> Self {
+            Self {
+                legacy_result: Ok(legacy_key.into()),
+                store_result: Ok(()),
+                scoped_result: Ok(legacy_key.into()),
+                delete_result: Ok(()),
+                events: RefCell::new(Vec::new()),
+            }
+        }
+
+        fn events(&self) -> Vec<MigrationEvent> {
+            self.events.borrow().clone()
+        }
+    }
+
+    impl LegacyApiKeyMigrationOps for FakeLegacyKeyOps {
+        fn read_legacy_api_key(&self) -> Result<String, String> {
+            self.events.borrow_mut().push(MigrationEvent::ReadLegacy);
+            self.legacy_result.clone()
+        }
+
+        fn store_provider_api_key(&self, _provider_id: &str, _api_key: &str) -> Result<(), String> {
+            self.events.borrow_mut().push(MigrationEvent::StoreScoped);
+            self.store_result.clone()
+        }
+
+        fn read_provider_api_key(&self, _provider_id: &str) -> Result<String, String> {
+            self.events.borrow_mut().push(MigrationEvent::ReadScoped);
+            self.scoped_result.clone()
+        }
+
+        fn delete_legacy_api_key(&self) -> Result<(), String> {
+            self.events.borrow_mut().push(MigrationEvent::DeleteLegacy);
+            self.delete_result.clone()
+        }
+    }
+
+    fn single_provider_sidecar_environment(
+        catalog: &ModelCatalog,
+        api_key: &str,
+    ) -> Option<(String, String)> {
+        if api_key.trim().is_empty() || catalog.models.is_empty() {
+            return None;
+        }
+
+        let mut providers = serde_json::Map::new();
+        let mut auth = serde_json::Map::new();
+        insert_verified_sidecar_provider(
+            &mut providers,
+            &mut auth,
+            "yume",
+            "YUME",
+            catalog,
+            api_key,
+        );
+        finalize_sidecar_environment(providers, auth)
+    }
 
     #[test]
     fn parses_openai_model_catalog_into_stable_display_metadata() {
@@ -793,8 +1228,8 @@ mod tests {
             }],
         };
 
-        let (config, auth) =
-            build_sidecar_environment(&catalog, "secret-key").expect("configured provider");
+        let (config, auth) = single_provider_sidecar_environment(&catalog, "secret-key")
+            .expect("configured provider");
         let config = serde_json::from_str::<serde_json::Value>(&config).expect("valid config");
         let auth = serde_json::from_str::<serde_json::Value>(&auth).expect("valid auth");
 
@@ -822,8 +1257,8 @@ mod tests {
             }],
         };
 
-        let (config, _) =
-            build_sidecar_environment(&catalog, "secret-key").expect("configured provider");
+        let (config, _) = single_provider_sidecar_environment(&catalog, "secret-key")
+            .expect("configured provider");
         let config = serde_json::from_str::<serde_json::Value>(&config).expect("valid config");
         let permission = config["permission"].as_object().expect("permission map");
 
@@ -896,27 +1331,154 @@ mod tests {
     }
 
     #[test]
+    fn provider_scoped_keyring_round_trips_and_deletes_with_uuid_user() {
+        let provider_id = format!("test-{}", uuid::Uuid::new_v4());
+        let api_key = "provider-scoped-test-key";
+
+        let store_result = store_api_key(&provider_id, api_key);
+        let stored_value = saved_api_key(&provider_id);
+        let delete_result = delete_api_key(&provider_id);
+        let deleted_value = saved_api_key(&provider_id);
+        let cleanup_result = delete_api_key(&provider_id);
+
+        assert_eq!(store_result, Ok(()));
+        assert_eq!(stored_value, api_key);
+        assert_eq!(delete_result, Ok(()));
+        assert_eq!(deleted_value, "");
+        assert_eq!(cleanup_result, Ok(()));
+    }
+
+    #[test]
+    fn legacy_key_migration_deletes_legacy_after_scoped_readback_matches() {
+        let ops = FakeLegacyKeyOps::success("legacy-key");
+        let provider_id = "provider-under-test";
+
+        let migrated = migrate_legacy_api_key_to_provider(&ops, provider_id);
+
+        assert_eq!(migrated, Ok(Some("legacy-key".into())));
+        assert_eq!(
+            ops.events(),
+            vec![
+                MigrationEvent::ReadLegacy,
+                MigrationEvent::StoreScoped,
+                MigrationEvent::ReadScoped,
+                MigrationEvent::DeleteLegacy
+            ]
+        );
+    }
+
+    #[test]
+    fn legacy_key_migration_preserves_legacy_when_scoped_readback_mismatches() {
+        let ops = FakeLegacyKeyOps {
+            scoped_result: Ok("different-key".into()),
+            ..FakeLegacyKeyOps::success("legacy-key")
+        };
+        let provider_id = "provider-under-test";
+
+        let migrated = migrate_legacy_api_key_to_provider(&ops, provider_id);
+
+        assert!(migrated
+            .expect_err("mismatch should fail")
+            .contains("read-back mismatch"));
+        assert_eq!(
+            ops.events(),
+            vec![
+                MigrationEvent::ReadLegacy,
+                MigrationEvent::StoreScoped,
+                MigrationEvent::ReadScoped
+            ]
+        );
+    }
+
+    #[test]
+    fn legacy_key_migration_preserves_legacy_when_scoped_write_fails() {
+        let ops = FakeLegacyKeyOps {
+            store_result: Err("write failed".into()),
+            ..FakeLegacyKeyOps::success("legacy-key")
+        };
+        let provider_id = "provider-under-test";
+
+        let migrated = migrate_legacy_api_key_to_provider(&ops, provider_id);
+
+        assert_eq!(migrated, Err("write failed".into()));
+        assert_eq!(
+            ops.events(),
+            vec![MigrationEvent::ReadLegacy, MigrationEvent::StoreScoped]
+        );
+    }
+
+    #[test]
+    fn legacy_key_migration_preserves_legacy_when_scoped_read_fails() {
+        let ops = FakeLegacyKeyOps {
+            scoped_result: Err("read failed".into()),
+            ..FakeLegacyKeyOps::success("legacy-key")
+        };
+        let provider_id = "provider-under-test";
+
+        let migrated = migrate_legacy_api_key_to_provider(&ops, provider_id);
+
+        assert_eq!(migrated, Err("read failed".into()));
+        assert_eq!(
+            ops.events(),
+            vec![
+                MigrationEvent::ReadLegacy,
+                MigrationEvent::StoreScoped,
+                MigrationEvent::ReadScoped
+            ]
+        );
+    }
+
+    #[test]
+    fn legacy_key_migration_reports_delete_failure_after_verified_equality() {
+        let ops = FakeLegacyKeyOps {
+            delete_result: Err("delete failed".into()),
+            ..FakeLegacyKeyOps::success("legacy-key")
+        };
+        let provider_id = "provider-under-test";
+
+        let migrated = migrate_legacy_api_key_to_provider(&ops, provider_id);
+
+        assert_eq!(migrated, Err("delete failed".into()));
+        assert_eq!(
+            ops.events(),
+            vec![
+                MigrationEvent::ReadLegacy,
+                MigrationEvent::StoreScoped,
+                MigrationEvent::ReadScoped,
+                MigrationEvent::DeleteLegacy
+            ]
+        );
+    }
+
+    #[test]
     fn verified_settings_reconciliation_makes_identical_pending_settings_safe() {
+        let provider_id = "provider-under-test";
         let mut current = Settings {
-            base_url: "https://models.example.test/v1/".into(),
-            api_key: " stale-key ".into(),
+            providers: vec![AiProvider {
+                id: provider_id.into(),
+                sidecar_id: "yume".into(),
+                label: String::new(),
+                base_url: "https://models.example.test/v1/".into(),
+                api_key: " stale-key ".into(),
+            }],
+            active_provider_id: provider_id.into(),
             ..Settings::default()
         };
 
         reconcile_verified_settings_binding(
             &mut current,
+            provider_id,
             " https://models.example.test/v1/ ",
             " verified-key ",
         );
 
-        let pending = Settings {
-            base_url: "https://models.example.test/v1".into(),
-            api_key: "verified-key".into(),
-            ..current.clone()
-        };
+        let pending = current.clone();
 
-        assert_eq!(current.base_url, "https://models.example.test/v1");
-        assert_eq!(current.api_key, "verified-key");
+        assert_eq!(
+            current.providers[0].base_url,
+            "https://models.example.test/v1"
+        );
+        assert_eq!(current.providers[0].api_key, "verified-key");
         assert!(!settings_catalog_binding_changed(&current, &pending));
     }
 
@@ -962,16 +1524,26 @@ mod tests {
         let settings = Settings {
             api_key: "super-secret-key".into(),
             base_url: "https://example.invalid".into(),
+            providers: vec![AiProvider {
+                id: "provider-under-test".into(),
+                sidecar_id: "yume".into(),
+                label: "Test".into(),
+                base_url: "https://models.example.test".into(),
+                api_key: "provider-secret-key".into(),
+            }],
             ..Settings::default()
         };
 
         let on_disk = redacted_for_disk(&settings);
         assert_eq!(on_disk.api_key, "");
+        assert_eq!(on_disk.providers[0].api_key, "");
         // Non-secret preferences must survive the redaction untouched.
         assert_eq!(on_disk.base_url, "https://example.invalid");
+        assert_eq!(on_disk.providers[0].base_url, "https://models.example.test");
 
         let json = serde_json::to_string(&on_disk).expect("settings serialize");
         assert!(!json.contains("super-secret-key"));
+        assert!(!json.contains("provider-secret-key"));
     }
 
     #[test]

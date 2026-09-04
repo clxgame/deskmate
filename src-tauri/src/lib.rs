@@ -146,7 +146,7 @@ mod tests {
         should_follow_chat_on_window_event, should_hide_chat, should_restore_settings_focus,
         RESOURCE_ERROR_EVENT,
     };
-    use crate::settings::{self, ApiModel, ModelCatalog};
+    use crate::settings::{self, ApiModel, ModelCatalog, VerifiedSidecarProvider};
     use std::ffi::OsStr;
     use std::path::Path;
     use std::process::Command;
@@ -352,16 +352,21 @@ mod tests {
         assert_eq!(event, RESOURCE_ERROR_EVENT);
         assert_eq!(payload, "无法刷新内置 OpenCode 工具: bad");
 
-        let catalog = ModelCatalog {
-            base_url: "https://models.example.test".into(),
-            api_key_fingerprint: "4c806362b613f7496abf284146efd31da90e4b16169fe001841ca17290f427c4"
-                .into(),
-            models: vec![ApiModel {
-                id: "model-a".into(),
-                name: "Model A".into(),
-            }],
+        let provider = VerifiedSidecarProvider {
+            sidecar_id: "yume".into(),
+            display_name: "YUME".into(),
+            catalog: ModelCatalog {
+                base_url: "https://models.example.test".into(),
+                api_key_fingerprint:
+                    "4c806362b613f7496abf284146efd31da90e4b16169fe001841ca17290f427c4".into(),
+                models: vec![ApiModel {
+                    id: "model-a".into(),
+                    name: "Model A".into(),
+                }],
+            },
+            api_key: "test-api-key".into(),
         };
-        let (config, _) = settings::build_sidecar_environment(&catalog, "test-api-key")
+        let (config, _) = settings::build_verified_multi_provider_sidecar_environment(&[provider])
             .expect("sidecar config should still be produced after resource sync failure");
         let config: serde_json::Value =
             serde_json::from_str(&config).expect("sidecar config should be JSON");

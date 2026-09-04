@@ -1,6 +1,6 @@
 [package]
 name = "yume"
-version = "0.2.4"
+version = "0.2.5"
 description = "Desktop AI pet powered by an embedded OpenCode sidecar"
 edition = "2021"
 

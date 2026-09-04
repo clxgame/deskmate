@@ -160,29 +160,35 @@ fn verified_usage_target(
     Ok((catalog.base_url, key.to_string()))
 }
 
+fn resolve_usage_provider(
+    settings: &crate::settings::Settings,
+    provider_id: Option<String>,
+) -> Result<crate::settings::AiProvider, String> {
+    let requested_provider_id = provider_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty());
+    let provider = match requested_provider_id {
+        Some(id) => settings.providers.iter().find(|provider| provider.id == id),
+        _ => crate::settings::active_provider(settings),
+    };
+    provider
+        .cloned()
+        .ok_or_else(|| "unverified_settings".to_string())
+}
+
 #[tauri::command]
 pub async fn fetch_ai_usage(
     app: tauri::AppHandle,
     state: State<'_, SettingsState>,
-    provider_id: String,
+    provider_id: Option<String>,
 ) -> Result<AiUsage, String> {
     let settings = state
         .0
         .lock()
         .map_err(|_| "settings_state".to_string())?
         .clone();
-    // An empty id means "whichever gateway is in focus", so the usage card can
-    // render before the front-end has a concrete provider selected.
-    let provider = if provider_id.trim().is_empty() {
-        crate::settings::active_provider(&settings).cloned()
-    } else {
-        settings
-            .providers
-            .iter()
-            .find(|p| p.id == provider_id)
-            .cloned()
-    }
-    .ok_or_else(|| "unverified_settings".to_string())?;
+    let provider = resolve_usage_provider(&settings, provider_id)?;
     let saved_key = if provider.api_key.trim().is_empty() {
         saved_api_key(&provider.id)
     } else {
@@ -202,8 +208,31 @@ pub async fn fetch_ai_usage(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_usage_payload, usage_url, verified_usage_target};
-    use crate::settings::{ApiModel, ModelCatalog};
+    use super::{parse_usage_payload, resolve_usage_provider, usage_url, verified_usage_target};
+    use crate::settings::{AiProvider, ApiModel, ModelCatalog, Settings};
+
+    fn usage_settings_fixture() -> Settings {
+        Settings {
+            providers: vec![
+                AiProvider {
+                    id: "legacy-provider".to_string(),
+                    sidecar_id: "yume".to_string(),
+                    label: "Legacy".to_string(),
+                    base_url: "https://legacy.example.test/v1".to_string(),
+                    api_key: "legacy-key".to_string(),
+                },
+                AiProvider {
+                    id: "stage-c-uuid".to_string(),
+                    sidecar_id: "yume-2".to_string(),
+                    label: "Stage C".to_string(),
+                    base_url: "https://stage-c.example.test/v1".to_string(),
+                    api_key: "stage-c-key".to_string(),
+                },
+            ],
+            active_provider_id: "stage-c-uuid".to_string(),
+            ..Settings::default()
+        }
+    }
 
     #[test]
     fn rejects_usage_without_a_verified_model_catalog() {
@@ -231,6 +260,35 @@ mod tests {
                 "saved-secret".to_string(),
             ))
         );
+    }
+
+    #[test]
+    fn resolves_active_usage_provider_when_legacy_ipc_omits_provider_id() {
+        let settings = usage_settings_fixture();
+
+        let provider =
+            resolve_usage_provider(&settings, None).expect("active provider should resolve");
+
+        assert_eq!(provider.id, "stage-c-uuid");
+    }
+
+    #[test]
+    fn resolves_active_usage_provider_when_legacy_ipc_sends_empty_provider_id() {
+        let settings = usage_settings_fixture();
+
+        let provider = resolve_usage_provider(&settings, Some("   ".to_string()))
+            .expect("empty provider id should fall back to active provider");
+
+        assert_eq!(provider.id, "stage-c-uuid");
+    }
+
+    #[test]
+    fn rejects_unknown_usage_provider_id_from_stage_c_ipc() {
+        let settings = usage_settings_fixture();
+
+        let result = resolve_usage_provider(&settings, Some("missing-provider".to_string()));
+
+        assert_eq!(result, Err("unverified_settings".to_string()));
     }
 
     #[test]

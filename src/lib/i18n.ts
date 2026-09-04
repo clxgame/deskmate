@@ -118,8 +118,8 @@ const zh = {
     `部署完成：CC Switch ${ccSwitch}，OpenCode ${openCode}`,
   localAiDeployModelSyncHint: (modelCount: number, ccSwitchRunning: boolean) =>
     ccSwitchRunning
-      ? `已为你配置 ${modelCount} 个模型。请重启 CC Switch，或在 CC Switch 的 OpenCode 供应商列表点击「从当前配置导入」，使其模型清单同步。`
-      : `已为你配置 ${modelCount} 个模型。CC Switch 下次启动时会自动同步模型清单。`,
+      ? `已配置 ${modelCount} 个模型。请重启 CC Switch，或在 OpenCode 中导入当前配置。`
+      : `已配置 ${modelCount} 个模型。CC Switch 下次启动时会自动同步。`,
   localAiDeployModelSyncIncomplete:
     "模型清单未能自动扩展，请在 CC Switch 中手动确认模型配置。",
 
@@ -742,7 +742,7 @@ const ja: Dict = {
   tabAi: "AI",
   tabWidget: "ウィジェット",
   tabShortcuts: "ショートカット",
-  tabAccount: "デスクトップペット",
+  tabAccount: "デスクトップ",
   tabAbout: "情報",
   tabHistory: "履歴",
   historyEmpty: "履歴はまだありません",
@@ -802,8 +802,8 @@ const ja: Dict = {
     `導入完了：CC Switch ${ccSwitch}、OpenCode ${openCode}`,
   localAiDeployModelSyncHint: (modelCount: number, ccSwitchRunning: boolean) =>
     ccSwitchRunning
-      ? `${modelCount} 個のモデルを設定しました。CC Switch を再起動するか、OpenCode プロバイダー一覧で「現在の設定からインポート」を実行してモデル一覧を同期してください。`
-      : `${modelCount} 個のモデルを設定しました。CC Switch は次回起動時にモデル一覧を同期します。`,
+      ? `${modelCount} 個のモデルを設定しました。CC Switch を再起動するか、OpenCode 一覧で「現在の設定からインポート」を実行してください。`
+      : `${modelCount} 個のモデルを設定済みです。CC Switch は次回起動時に同期します。`,
   localAiDeployModelSyncIncomplete:
     "モデル一覧を自動で拡張できませんでした。CC Switch でモデル設定を確認してください。",
 
@@ -1145,8 +1145,8 @@ const ko: Dict = {
     `배포 완료: CC Switch ${ccSwitch}, OpenCode ${openCode}`,
   localAiDeployModelSyncHint: (modelCount: number, ccSwitchRunning: boolean) =>
     ccSwitchRunning
-      ? `모델 ${modelCount}개를 설정했습니다. CC Switch를 다시 시작하거나 OpenCode 공급자 목록에서 "현재 설정에서 가져오기"를 실행해 모델 목록을 동기화하세요.`
-      : `모델 ${modelCount}개를 설정했습니다. CC Switch는 다음 실행 시 모델 목록을 동기화합니다.`,
+      ? `모델 ${modelCount}개를 설정했습니다. CC Switch를 다시 시작하거나 OpenCode 목록에서 "현재 설정에서 가져오기"를 실행하세요.`
+      : `모델 ${modelCount}개 설정 완료. CC Switch는 다음 실행 시 동기화됩니다.`,
   localAiDeployModelSyncIncomplete:
     "모델 목록을 자동으로 확장하지 못했습니다. CC Switch에서 모델 설정을 확인하세요.",
 

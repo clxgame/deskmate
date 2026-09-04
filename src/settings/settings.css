@@ -964,6 +964,7 @@ body,
   display: block;
   margin-top: var(--s-1);
   color: var(--text-dim);
+  text-wrap: pretty;
 }
 
 .set-ccswitch-ready .set-ccswitch-status {

@@ -3,6 +3,7 @@
 }
 
 .set-ai-usage {
+  min-width: 0;
   width: min(100%, var(--control-w));
   margin-top: var(--s-5);
 }
@@ -15,7 +16,11 @@
 }
 
 .set-ai-usage-head .set-section-head {
+  min-width: 0;
+  overflow: hidden;
   margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .set-ai-usage-list {
@@ -29,6 +34,7 @@
 }
 
 .set-ai-usage-refresh {
+  flex-shrink: 0;
   padding: var(--s-1) var(--s-2);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);

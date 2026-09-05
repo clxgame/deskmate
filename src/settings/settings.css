@@ -701,7 +701,7 @@ body,
     color var(--ease);
 }
 
-.set-btn:hover {
+.set-btn:hover:not(:disabled) {
   background: var(--surface-hover);
   border-color: var(--accent-ink);
 }
@@ -716,7 +716,19 @@ body,
   outline-offset: 1px;
 }
 
-.set-btn-danger:hover {
+.set-btn:disabled {
+  background: var(--surface-disabled);
+  border-color: var(--line);
+  color: var(--text-disabled);
+  cursor: default;
+}
+
+.set-btn-danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.set-btn-danger:hover:not(:disabled) {
   border-color: var(--danger);
   color: var(--danger);
 }
@@ -867,11 +879,8 @@ body,
   box-shadow: var(--shadow-tooltip);
 }
 
-.set-confirm-backdrop {
+.set-confirm::backdrop {
   background: var(--dialog-backdrop);
-  inset: 0;
-  position: fixed;
-  z-index: 2;
 }
 
 .set-confirm-body {
@@ -978,9 +987,8 @@ body,
   color: var(--danger);
 }
 
-/* key input + 60px verify button + 12px gap = --control-w, aligned with other controls. */
-.set-input-key {
-  width: 168px;
+.set-ai-provider-remove:disabled {
+  color: var(--text-disabled);
 }
 
 .set-verify {
@@ -1232,8 +1240,7 @@ body,
 
   .set-row-control,
   .set-select,
-  .set-input,
-  .set-input-key {
+  .set-input {
     width: 100%;
   }
 

@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { dict } from "../lib/i18n";
 import {
@@ -82,10 +89,15 @@ describe("AI provider list", () => {
     });
     await user.click(removeButtons[1]);
     const dialog = screen.getByRole("alertdialog");
+    await waitFor(() => expect(dialog).toHaveProperty("open", true));
+    expect(document.activeElement).toBe(
+      within(dialog).getByRole("button", { name: t.aiProviderRemoveCancel }),
+    );
     await user.click(
       within(dialog).getByRole("button", { name: t.aiProviderRemoveCancel }),
     );
     expect(replace).not.toHaveBeenCalled();
+    await waitFor(() => expect(document.activeElement).toBe(removeButtons[1]));
 
     await user.click(removeButtons[1]);
     await user.click(

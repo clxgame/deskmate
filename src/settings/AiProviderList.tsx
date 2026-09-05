@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Dict } from "../lib/i18n";
 import type { Settings } from "../lib/settings";
 import type { LocalAiDeploymentStatus } from "./CcSwitchStatus";
@@ -38,6 +38,33 @@ export function AiProviderList({
 }: AiProviderListProps) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const deleteDialogRef = useRef<HTMLDialogElement>(null);
+  const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (pendingDeleteId === null) return;
+    const dialog = deleteDialogRef.current;
+    if (dialog === null) return;
+
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+    cancelButtonRef.current?.focus();
+
+    return () => {
+      if (dialog.open && typeof dialog.close === "function") dialog.close();
+    };
+  }, [pendingDeleteId]);
+
+  const closeDeleteDialog = () => {
+    const trigger = deleteTriggerRef.current;
+    setPendingDeleteId(null);
+    window.requestAnimationFrame(() => {
+      if (trigger?.isConnected) trigger.focus();
+      else addButtonRef.current?.focus();
+    });
+  };
 
   const updateProvider = (
     providerId: string,
@@ -66,7 +93,7 @@ export function AiProviderList({
     if (pendingDeleteId === null) return;
     onChange?.();
     replace(settingsWithDeletedProvider(settings, pendingDeleteId));
-    setPendingDeleteId(null);
+    closeDeleteDialog();
   };
 
   return (
@@ -75,7 +102,12 @@ export function AiProviderList({
         <h3 id="ai-provider-section" className="set-section-head">
           {t.aiProviderSection}
         </h3>
-        <button className="set-btn" type="button" onClick={addProvider}>
+        <button
+          ref={addButtonRef}
+          className="set-btn"
+          type="button"
+          onClick={addProvider}
+        >
           {t.aiProviderAdd}
         </button>
       </div>
@@ -93,7 +125,13 @@ export function AiProviderList({
               removeDisabled={removeDisabled}
               t={t}
               onToggle={() => toggleProvider(provider.id)}
-              onDelete={() => setPendingDeleteId(provider.id)}
+              onDelete={() => {
+                deleteTriggerRef.current =
+                  document.activeElement instanceof HTMLButtonElement
+                    ? document.activeElement
+                    : null;
+                setPendingDeleteId(provider.id);
+              }}
               onFieldChange={(field, value) =>
                 updateProvider(provider.id, field, value)
               }
@@ -107,40 +145,41 @@ export function AiProviderList({
         })}
       </div>
       {pendingDeleteId !== null && (
-        <>
-          <div className="set-confirm-backdrop" aria-hidden="true" />
-          <dialog
-            className="set-confirm"
-            open
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="ai-provider-remove-confirm-title"
-            onCancel={() => setPendingDeleteId(null)}
+        <dialog
+          ref={deleteDialogRef}
+          className="set-confirm"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="ai-provider-remove-confirm-title"
+          onCancel={(event) => {
+            event.preventDefault();
+            closeDeleteDialog();
+          }}
+        >
+          <p
+            id="ai-provider-remove-confirm-title"
+            className="set-confirm-body"
           >
-            <p
-              id="ai-provider-remove-confirm-title"
-              className="set-confirm-body"
+            {t.aiProviderRemoveConfirm}
+          </p>
+          <div className="set-confirm-actions">
+            <button
+              className="set-btn set-btn-danger"
+              type="button"
+              onClick={confirmDelete}
             >
-              {t.aiProviderRemoveConfirm}
-            </p>
-            <div className="set-confirm-actions">
-              <button
-                className="set-btn set-btn-danger"
-                type="button"
-                onClick={confirmDelete}
-              >
-                {t.aiProviderRemove}
-              </button>
-              <button
-                className="set-btn"
-                type="button"
-                onClick={() => setPendingDeleteId(null)}
-              >
-                {t.aiProviderRemoveCancel}
-              </button>
-            </div>
-          </dialog>
-        </>
+              {t.aiProviderRemove}
+            </button>
+            <button
+              ref={cancelButtonRef}
+              className="set-btn"
+              type="button"
+              onClick={closeDeleteDialog}
+            >
+              {t.aiProviderRemoveCancel}
+            </button>
+          </div>
+        </dialog>
       )}
     </section>
   );

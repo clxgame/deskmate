@@ -1199,3 +1199,63 @@ body,
   color: var(--danger);
   opacity: 1;
 }
+
+@media (max-width: 560px) {
+  .set-root {
+    --sidebar-w: var(--s-14);
+  }
+
+  .set-sidebar {
+    padding-inline: var(--s-1);
+  }
+
+  .set-tab {
+    justify-content: center;
+    gap: var(--s-0);
+    padding-inline: var(--s-2);
+    font-size: 0;
+  }
+
+  .set-tab-glyph {
+    font-size: var(--t-small);
+  }
+
+  .set-panel {
+    padding: var(--s-4) var(--s-3);
+  }
+
+  .set-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: var(--s-2);
+  }
+
+  .set-row-control,
+  .set-select,
+  .set-input,
+  .set-input-key {
+    width: 100%;
+  }
+
+  .set-row-control {
+    justify-content: flex-end;
+  }
+
+  .set-ai-provider-head {
+    flex-wrap: wrap;
+  }
+
+  .set-ai-provider-field {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .set-ccswitch {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .set-ccswitch-action {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: stretch;
+  }
+}

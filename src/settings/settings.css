@@ -917,6 +917,7 @@ body,
   background: var(--surface-raised);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
+  min-width: 0;
   padding: var(--s-3);
 }
 

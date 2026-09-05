@@ -43,6 +43,7 @@ export function AiTab({ settings, patch, replace, persist, t }: AiTabProps) {
         <select
           className="set-select"
           value={controller.currentModelValue}
+          disabled={controller.operationBusy}
           onChange={(e) => controller.pickModel(e.target.value)}
         >
           <option value="">{t.modelDefault}</option>

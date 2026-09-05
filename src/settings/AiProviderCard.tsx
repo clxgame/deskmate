@@ -61,7 +61,7 @@ export function AiProviderCard({
           <button
             className="set-btn set-btn-danger set-ai-provider-remove"
             type="button"
-            disabled={removeDisabled}
+            disabled={removeDisabled || operationLocked}
             title={removeDisabled ? t.aiProviderRemoveLast : t.aiProviderRemove}
             aria-label={
               removeDisabled ? t.aiProviderRemoveLast : t.aiProviderRemove

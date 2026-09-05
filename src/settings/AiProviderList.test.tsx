@@ -90,11 +90,19 @@ describe("AI provider list", () => {
     await user.click(removeButtons[1]);
     const dialog = screen.getByRole("alertdialog");
     await waitFor(() => expect(dialog).toHaveProperty("open", true));
-    expect(document.activeElement).toBe(
-      within(dialog).getByRole("button", { name: t.aiProviderRemoveCancel }),
-    );
+    const confirmRemove = within(dialog).getByRole("button", {
+      name: t.aiProviderRemove,
+    });
+    const cancelRemove = within(dialog).getByRole("button", {
+      name: t.aiProviderRemoveCancel,
+    });
+    expect(document.activeElement).toBe(cancelRemove);
+    await user.tab();
+    expect(document.activeElement).toBe(confirmRemove);
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(cancelRemove);
     await user.click(
-      within(dialog).getByRole("button", { name: t.aiProviderRemoveCancel }),
+      cancelRemove,
     );
     expect(replace).not.toHaveBeenCalled();
     await waitFor(() => expect(document.activeElement).toBe(removeButtons[1]));

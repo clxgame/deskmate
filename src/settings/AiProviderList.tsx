@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { Dict } from "../lib/i18n";
 import type { Settings } from "../lib/settings";
 import type { LocalAiDeploymentStatus } from "./CcSwitchStatus";
@@ -42,6 +42,7 @@ export function AiProviderList({
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const confirmButtonRef = useRef<HTMLButtonElement>(null);
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
   const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -98,6 +99,20 @@ export function AiProviderList({
     closeDeleteDialog();
   };
 
+  const trapDeleteDialogFocus = (event: KeyboardEvent<HTMLDialogElement>) => {
+    if (event.key !== "Tab") return;
+    if (event.shiftKey && document.activeElement === confirmButtonRef.current) {
+      event.preventDefault();
+      cancelButtonRef.current?.focus();
+    } else if (
+      !event.shiftKey &&
+      document.activeElement === cancelButtonRef.current
+    ) {
+      event.preventDefault();
+      confirmButtonRef.current?.focus();
+    }
+  };
+
   return (
     <section aria-labelledby="ai-provider-section">
       <div className="set-ai-provider-title-row">
@@ -108,6 +123,7 @@ export function AiProviderList({
           ref={addButtonRef}
           className="set-btn"
           type="button"
+          disabled={operationBusy}
           onClick={addProvider}
         >
           {t.aiProviderAdd}
@@ -154,6 +170,7 @@ export function AiProviderList({
           role="alertdialog"
           aria-modal="true"
           aria-labelledby="ai-provider-remove-confirm-title"
+          onKeyDown={trapDeleteDialogFocus}
           onCancel={(event) => {
             event.preventDefault();
             closeDeleteDialog();
@@ -167,6 +184,7 @@ export function AiProviderList({
           </p>
           <div className="set-confirm-actions">
             <button
+              ref={confirmButtonRef}
               className="set-btn set-btn-danger"
               type="button"
               onClick={confirmDelete}

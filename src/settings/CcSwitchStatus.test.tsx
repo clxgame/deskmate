@@ -607,6 +607,46 @@ describe("CC Switch entry in AI settings", () => {
     ]);
   });
 
+  test("locks provider routing controls while native deployment is running", async () => {
+    const settings = multiProviderSettingsFixture({ language: "zh-CN" });
+    let resolveDeployment: ((receipt: typeof deployReceiptFixture) => void) | undefined;
+    invoke.mockImplementation((command) => {
+      if (command === "get_settings") return Promise.resolve(settings);
+      if (command === "deploy_local_ai_stack") {
+        return new Promise((resolve) => {
+          resolveDeployment = resolve;
+        });
+      }
+      return defaultInvoke(command);
+    });
+
+    const user = await openAiSettings();
+    const providerCard = await screen.findByRole("article", { name: "Kuro" });
+    await user.click(within(providerCard).getByRole("button", { name: "部署" }));
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("deploy_local_ai_stack", {
+        request: { modelId: "gpt-5.4-mini" },
+      });
+    });
+
+    expect(screen.getByRole("button", { name: "添加供应商" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(screen.getByRole("combobox")).toHaveProperty("disabled", true);
+    for (const button of screen.getAllByRole("button", { name: "删除" })) {
+      expect(button).toHaveProperty("disabled", true);
+    }
+
+    await act(async () => resolveDeployment?.(deployReceiptFixture));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "添加供应商" })).toHaveProperty(
+        "disabled",
+        false,
+      );
+    });
+  });
+
   test("keeps the current route when another provider fails verification", async () => {
     const settings = multiProviderSettingsFixture({ language: "zh-CN" });
     invoke.mockImplementation((command) => {

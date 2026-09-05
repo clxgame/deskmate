@@ -4,7 +4,6 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
-  type ReactNode,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -35,6 +34,7 @@ import {
 } from "./CcSwitchStatus";
 import { MemoryTab } from "./MemoryTab";
 import { PersonaPacks } from "./PersonaPacks";
+import { Row, Switch, type TabProps } from "./settingsPrimitives";
 import type { InstalledPack } from "../lib/packs";
 import {
   DEFAULT_PERSONA_ID,
@@ -234,29 +234,6 @@ export default function SettingsApp() {
 
 // ---------------------------------------------------------------- primitives
 
-type Patch = <K extends keyof Settings>(key: K, value: Settings[K]) => void;
-interface TabProps {
-  settings: Settings;
-  patch: Patch;
-  t: Dict;
-}
-
-interface RowProps {
-  readonly label: string;
-  readonly children: ReactNode;
-  readonly className?: string;
-}
-
-function Row({ label, children, className }: RowProps) {
-  const rowClassName = className === undefined ? "set-row" : `set-row ${className}`;
-  return (
-    <div className={rowClassName}>
-      <span className="set-row-label">{label}</span>
-      <div className="set-row-control">{children}</div>
-    </div>
-  );
-}
-
 function RenderSlider({
   label,
   value,
@@ -288,28 +265,6 @@ function RenderSlider({
       />
       <span className="set-slider-value">{format(value)}</span>
     </Row>
-  );
-}
-
-function Switch({
-  checked,
-  onChange,
-  label,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  label: string;
-}) {
-  return (
-    <label className="set-switch">
-      <input
-        type="checkbox"
-        checked={checked}
-        aria-label={label}
-        onChange={(e) => onChange(e.target.checked)}
-      />
-      <span className="set-switch-track" />
-    </label>
   );
 }
 

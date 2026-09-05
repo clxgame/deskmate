@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { dict } from "../lib/i18n";
 import type { ProviderModel } from "../lib/settings";
 import {
   kuroProviderFixture,
@@ -8,10 +9,16 @@ import {
 import {
   configuredProviderBySidecarId,
   displayProviderLabel,
+  frontierSidecarId,
   groupModelsByConfiguredProvider,
   selectedModelValue,
+  settingsWithAddedProvider,
+  settingsWithDeletedProvider,
   settingsWithSelectedModel,
+  settingsWithUpdatedProvider,
 } from "./aiProviderModel";
+
+const t = dict("en-US");
 
 const modelCatalog: readonly ProviderModel[] = [
   {
@@ -35,8 +42,22 @@ const modelCatalog: readonly ProviderModel[] = [
 ];
 
 describe("ai provider model helpers", () => {
-  test("displays the configured provider label when rendering model groups", () => {
-    expect(displayProviderLabel(omoKuroProviderFixture)).toBe("OMO Kuro");
+  test("displays explicit label, URL host, then localized provider number", () => {
+    expect(displayProviderLabel(omoKuroProviderFixture, 1, t)).toBe("OMO Kuro");
+    expect(
+      displayProviderLabel(
+        { ...omoKuroProviderFixture, label: "" },
+        1,
+        t,
+      ),
+    ).toBe("omo-kuro.example.test");
+    expect(
+      displayProviderLabel(
+        { ...omoKuroProviderFixture, label: "", baseUrl: "not a url" },
+        1,
+        t,
+      ),
+    ).toBe("Provider 2");
   });
 
   test("finds configured providers by sidecar id instead of display name", () => {
@@ -54,6 +75,7 @@ describe("ai provider model helpers", () => {
     const groups = groupModelsByConfiguredProvider(
       [kuroProviderFixture, omoKuroProviderFixture],
       modelCatalog,
+      t,
     );
 
     expect(groups).toEqual([
@@ -70,6 +92,45 @@ describe("ai provider model helpers", () => {
         models: [modelCatalog[1]],
       },
     ]);
+  });
+
+  test("allocates frontier sidecar ids with the backend sequence", () => {
+    expect(frontierSidecarId([])).toBe("yume");
+    expect(frontierSidecarId([kuroProviderFixture])).toBe("yume-2");
+    expect(
+      frontierSidecarId([
+        kuroProviderFixture,
+        { ...omoKuroProviderFixture, sidecarId: "yume-3" },
+      ]),
+    ).toBe("yume-4");
+  });
+
+  test("adds and edits providers without mutating existing provider objects", () => {
+    const settings = multiProviderSettingsFixture();
+    const added = settingsWithAddedProvider(settings, "provider-new");
+    expect(added.providers).toHaveLength(3);
+    expect(added.providers[2]).toEqual({
+      id: "provider-new",
+      sidecarId: "yume-3",
+      label: "",
+      baseUrl: "",
+      apiKey: "",
+    });
+    expect(settings.providers).toHaveLength(2);
+
+    const edited = settingsWithUpdatedProvider(added, "provider-new", {
+      label: "Frontier",
+      baseUrl: "https://frontier.example.test/v1",
+      apiKey: "frontier-key",
+    });
+    expect(edited.providers[2]).toEqual({
+      id: "provider-new",
+      sidecarId: "yume-3",
+      label: "Frontier",
+      baseUrl: "https://frontier.example.test/v1",
+      apiKey: "frontier-key",
+    });
+    expect(edited.providers[0]).toBe(settings.providers[0]);
   });
 
   test("formats the selected sidecar model value from legacy routing fields", () => {
@@ -107,5 +168,20 @@ describe("ai provider model helpers", () => {
     expect(blank.activeProviderId).toBe("provider-omo-kuro");
 
     expect(settingsWithSelectedModel(settings, "unknown/model-x")).toBe(settings);
+  });
+
+  test("deletes with confirmation semantics while preserving the last provider", () => {
+    const settings = multiProviderSettingsFixture({
+      activeProviderId: "provider-omo-kuro",
+      providerId: "yume-2",
+      modelId: "claude-sonnet-4.5",
+    });
+
+    const deleted = settingsWithDeletedProvider(settings, "provider-omo-kuro");
+    expect(deleted.providers).toEqual([kuroProviderFixture]);
+    expect(deleted.providerId).toBe("");
+    expect(deleted.modelId).toBe("");
+    expect(deleted.activeProviderId).toBe("provider-kuro");
+    expect(settingsWithDeletedProvider(deleted, "provider-kuro")).toBe(deleted);
   });
 });

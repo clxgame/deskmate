@@ -1,5 +1,7 @@
 import { AiUsage } from "./AiUsage";
+import { AiProviderList } from "./AiProviderList";
 import { CcSwitchStatus } from "./CcSwitchStatus";
+import { displayProviderLabel } from "./aiProviderModel";
 import {
   Row,
   Switch,
@@ -14,43 +16,22 @@ type AiTabProps = TabProps & {
 
 export function AiTab({ settings, patch, replace, t }: AiTabProps) {
   const controller = useAiTabController({ settings, patch, replace, t });
+  const activeProvider =
+    settings.providers.find(
+      (provider) => provider.id === controller.activeProviderId,
+    ) ?? settings.providers[0];
 
   return (
     <>
       <h2 className="set-panel-head">{t.tabAi}</h2>
-      <Row label={t.baseUrl}>
-        <input
-          className="set-input set-ai-base-url"
-          type="text"
-          value={settings.baseUrl}
-          placeholder="https://ai-gateway.kurogames.com"
-          aria-label={t.baseUrl}
-          onChange={(e) => {
-            controller.clearVerificationState();
-            patch("baseUrl", e.target.value);
-          }}
-        />
-      </Row>
-      <Row label={t.apiKey}>
-        <input
-          className="set-input set-input-key"
-          type="password"
-          value={settings.apiKey}
-          placeholder={t.apiKeyPlaceholder}
-          aria-label={t.apiKey}
-          onChange={(e) => {
-            controller.clearVerificationState();
-            patch("apiKey", e.target.value);
-          }}
-        />
-        <button
-          className="set-verify"
-          onClick={() => void controller.verify()}
-          disabled={controller.verifying || !settings.apiKey.trim()}
-        >
-          {controller.verifying ? t.verifying : t.verify}
-        </button>
-      </Row>
+      <AiProviderList
+        settings={settings}
+        replace={replace}
+        t={t}
+        onChange={controller.clearVerificationState}
+        onVerify={(providerId) => void controller.verify(providerId)}
+        onDeploy={(providerId) => void controller.deployLocalAi(providerId)}
+      />
       {controller.verifyResult && (
         <p
           className={`set-note ${controller.verifyResult.ok ? "set-note-ok" : "set-note-error"}`}
@@ -95,17 +76,22 @@ export function AiTab({ settings, patch, replace, t }: AiTabProps) {
       <CcSwitchStatus
         status={controller.ccSwitchStatus}
         deployment={controller.deployment}
-        canDeploy={Boolean(settings.apiKey.trim())}
+        canDeploy={Boolean(activeProvider?.apiKey.trim())}
         t={t}
-        onDeploy={() => void controller.deployLocalAi()}
+        onDeploy={() => {
+          if (activeProvider) void controller.deployLocalAi(activeProvider.id);
+        }}
       />
-      <AiUsage
-        enabled={Boolean(settings.apiKey.trim() && controller.activeProviderId)}
-        providerId={controller.activeProviderId}
-        label={controller.activeProviderLabel}
-        index={0}
-        t={t}
-      />
+      {settings.providers.map((provider, index) => (
+        <AiUsage
+          key={provider.id}
+          enabled={Boolean(provider.apiKey.trim())}
+          providerId={provider.id}
+          label={displayProviderLabel(provider, index, t)}
+          index={index}
+          t={t}
+        />
+      ))}
     </>
   );
 }

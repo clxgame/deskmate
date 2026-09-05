@@ -60,8 +60,6 @@ export function useAiTabController({
     settings.providers[0] ??
     null;
   const activeProviderId = activeProvider?.id ?? settings.activeProviderId;
-  const activeProviderSidecarId = activeProvider?.sidecarId ?? settings.providerId;
-  const activeProviderLabel = activeProvider?.label ?? t.aiProviderActive;
 
   const refreshCcSwitchStatus = useCallback(async () => {
     const requestId = ccSwitchRequest.current + 1;
@@ -131,17 +129,19 @@ export function useAiTabController({
     };
   }, []);
 
-  const verify = async () => {
+  const verify = async (providerId: string) => {
     setVerifying(true);
     setVerifyResult(null);
     try {
+      const provider = settings.providers.find((entry) => entry.id === providerId);
+      if (!provider) throw new Error("provider_missing");
       const count = await verifyApiKey(
-        activeProviderId,
-        settings.baseUrl,
-        settings.apiKey,
+        provider.id,
+        provider.baseUrl,
+        provider.apiKey,
       );
       const refreshed = await refreshModels();
-      if (!modelsMatchVerification(refreshed, activeProviderSidecarId, count)) {
+      if (!modelsMatchVerification(refreshed, provider.sidecarId, count)) {
         throw new Error("models_unavailable");
       }
       setVerifyResult({ ok: true, message: t.verifyOk(count) });
@@ -153,34 +153,36 @@ export function useAiTabController({
     }
   };
 
-  const deployLocalAi = async () => {
+  const deployLocalAi = async (providerId: string) => {
     setDeployment({ kind: "working", stage: "verifyingApi" });
     setVerifyResult(null);
     try {
+      const provider = settings.providers.find((entry) => entry.id === providerId);
+      if (!provider) throw new Error("provider_missing");
       const count = await verifyApiKey(
-        activeProviderId,
-        settings.baseUrl,
-        settings.apiKey,
+        provider.id,
+        provider.baseUrl,
+        provider.apiKey,
       );
       const refreshed = await refreshModels();
-      if (!modelsMatchVerification(refreshed, activeProviderSidecarId, count)) {
+      if (!modelsMatchVerification(refreshed, provider.sidecarId, count)) {
         throw new Error("models_unavailable");
       }
       const available = refreshed.filter(
-        (model) => model.sidecarId === activeProviderSidecarId,
+        (model) => model.sidecarId === provider.sidecarId,
       );
       const chosen =
         available.find(
           (model) =>
-            settings.providerId === activeProviderSidecarId &&
+            settings.providerId === provider.sidecarId &&
             model.modelId === settings.modelId,
         ) ?? available[0];
       if (!chosen) throw new Error("models_unavailable");
       if (
-        settings.providerId !== activeProviderSidecarId ||
+        settings.providerId !== provider.sidecarId ||
         settings.modelId !== chosen.modelId
       ) {
-        patch("providerId", activeProviderSidecarId);
+        patch("providerId", provider.sidecarId);
         patch("modelId", chosen.modelId);
       }
       setDeployment({ kind: "working", stage: "installingOpenCode" });
@@ -227,12 +229,11 @@ export function useAiTabController({
 
   return {
     activeProviderId,
-    activeProviderLabel,
     ccSwitchStatus,
     currentModelValue: selectedModelValue(settings),
     deployment,
     failed,
-    groups: groupModelsByConfiguredProvider(settings.providers, models),
+    groups: groupModelsByConfiguredProvider(settings.providers, models, t),
     pickModel,
     clearVerificationState,
     deployLocalAi,

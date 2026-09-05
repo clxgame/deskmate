@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import * as tauriCore from "@tauri-apps/api/core";
 import * as tauriEvent from "@tauri-apps/api/event";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect, useRef } from "react";
 import { dict } from "../lib/i18n";
@@ -140,7 +140,7 @@ describe("AI settings tab extraction", () => {
     );
   });
 
-  test("passes the active provider UUID to usage and verification calls", async () => {
+  test("renders usage per provider and verifies the selected provider card", async () => {
     const user = userEvent.setup();
     const settings = multiProviderSettingsFixture({
       activeProviderId: "provider-omo-kuro",
@@ -161,11 +161,16 @@ describe("AI settings tab extraction", () => {
     ).toBeDefined();
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("fetch_ai_usage", {
-        providerId: "provider-omo-kuro",
+        providerId: "provider-kuro",
       });
     });
 
-    await user.click(screen.getByRole("button", { name: t.verify }));
+    await user.click(
+      within(screen.getByRole("article", { name: "OMO Kuro" })).getByRole(
+        "button",
+        { name: t.verify },
+      ),
+    );
 
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("verify_api_key", {

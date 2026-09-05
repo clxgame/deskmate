@@ -132,10 +132,12 @@ write-ahead log is flushed so nothing lingers. Only a content-free audit record
 ### What is sent to the AI
 
 When a memory is relevant to what you are saying, it is included in the request
-to whichever AI gateway you configured in Settings → AI. At most 8 memories and
-1,200 characters are sent per message, always inside a clearly delimited
-untrusted-data block that the model is told is factual background and not
-instructions.
+to the AI provider that owns the model selected in Settings → AI. You can keep
+multiple gateways configured; selecting a model switches the provider and model
+together, while each provider's usage card refreshes independently. At most 8
+memories and 1,200 characters are sent per message, always inside a clearly
+delimited untrusted-data block that the model is told is factual background and
+not instructions.
 
 Turn off **允许 AI 使用记忆** in Settings → 记忆 to stop sending memories
 entirely. Local memory management keeps working.

@@ -424,11 +424,15 @@ export default function ChatApp() {
         void (async () => {
           const settings =
             settingsRef.current ?? (await getSettings().catch(() => null));
+          const activeProvider =
+            settings?.providers.find(
+              (provider) => provider.id === settings.activeProviderId,
+            ) ?? settings?.providers[0];
           const draft: CcSwitchProviderDraft = {
             callID: "settings",
             credentialMode: "saved-settings",
             providerName: "YUME OpenCode",
-            baseUrl: settings?.baseUrl,
+            baseUrl: activeProvider?.baseUrl ?? settings?.baseUrl,
             modelHint: settings?.modelId,
           };
           ccSwitchDraftRef.current = draft;

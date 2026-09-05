@@ -18,6 +18,10 @@ type PromptPart = {
 
 type PromptRequest = {
   readonly parts?: readonly PromptPart[];
+  readonly model?: {
+    readonly providerID?: string;
+    readonly modelID?: string;
+  };
 };
 
 const promptRequests: PromptRequest[] = [];
@@ -75,8 +79,8 @@ const SETTINGS = {
   autostart: false,
   language: "zh-CN",
   theme: "dark",
-  providerId: "",
-  modelId: "",
+  providerId: "yume-2",
+  modelId: "claude-sonnet-4.5",
   yolo: false,
   baseUrl: "",
   apiKey: "",
@@ -186,6 +190,19 @@ async function expectAttachmentPrompt(expectedText: string): Promise<void> {
 }
 
 describe("dropped attachment sending", () => {
+  test("routes an ordinary prompt through the selected provider and model", async () => {
+    render(<ChatApp />);
+    const input = await screen.findByPlaceholderText("输入消息,Enter 发送");
+    fireEvent.change(input, { target: { value: "请概括今天的工作重点" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => expect(promptRequests).toHaveLength(1));
+    expect(promptRequests[0]?.model).toEqual({
+      providerID: "yume-2",
+      modelID: "claude-sonnet-4.5",
+    });
+  });
+
   test("sends a dropped file without typed text", async () => {
     render(<ChatApp />);
     await screen.findByPlaceholderText("输入消息,Enter 发送");

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, jest, mock, test } from "bun:test";
 import * as tauriCore from "@tauri-apps/api/core";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const invoke = mock<(command: string, args?: unknown) => Promise<unknown>>(
@@ -110,6 +110,56 @@ describe("AI usage", () => {
     expect(
       await screen.findByText("This API key cannot access usage details"),
     ).toBeDefined();
+  });
+
+  test("keeps one provider's 401 isolated from another provider's summary", async () => {
+    invoke.mockImplementation((_command, args) => {
+      const providerId = (args as { readonly providerId?: string } | undefined)
+        ?.providerId;
+      if (providerId === "provider-kuro") {
+        return Promise.reject(new Error("status:401"));
+      }
+      return Promise.resolve({
+        remainingCny: 5000000,
+        limitCny: 10000000,
+        remainingPct: 50,
+        daysUntilReset: 1,
+        todayCostCny: 100000,
+        todayRequests: 2,
+        topModels: [],
+      });
+    });
+    const english = dict("en-US");
+
+    render(
+      <>
+        <AiUsage
+          enabled
+          providerId="provider-kuro"
+          label="Kuro"
+          index={0}
+          t={english}
+        />
+        <AiUsage
+          enabled
+          providerId="provider-omo-kuro"
+          label="OMO Kuro"
+          index={0}
+          t={english}
+        />
+      </>,
+    );
+
+    const rejected = await screen.findByRole("region", {
+      name: "AI usage · Kuro",
+    });
+    const healthy = await screen.findByRole("region", {
+      name: "AI usage · OMO Kuro",
+    });
+    expect(
+      within(rejected).getByText("This API key cannot access usage details"),
+    ).toBeDefined();
+    expect(within(healthy).getByText("¥500 / ¥1000")).toBeDefined();
   });
 
   test("localizes the ai-usage title", async () => {

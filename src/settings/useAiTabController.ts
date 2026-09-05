@@ -105,7 +105,10 @@ export function useAiTabController({
 
   const pickModel = (raw: string) => {
     const next = settingsWithSelectedModel(settings, raw);
-    if (next !== settings) replace(next);
+    if (next !== settings) {
+      actions.clearOperationState();
+      replace(next);
+    }
   };
 
   const clearVerificationState = () => {

@@ -16,10 +16,11 @@ export function displayProviderLabel(
   const explicitLabel = provider.label.trim();
   if (explicitLabel) return explicitLabel;
 
-  try {
-    const host = new URL(provider.baseUrl).hostname;
+  const candidate = provider.baseUrl.trim();
+  if (URL.canParse(candidate)) {
+    const host = new URL(candidate).hostname;
     if (host) return host;
-  } catch {}
+  }
 
   return t.aiProviderDefault(index + 1);
 }
@@ -121,7 +122,9 @@ export function settingsWithDeletedProvider(
 }
 
 export function selectedModelValue(settings: Settings): string {
-  return settings.providerId ? `${settings.providerId}/${settings.modelId}` : "";
+  return settings.providerId && settings.modelId
+    ? `${settings.providerId}/${settings.modelId}`
+    : "";
 }
 
 export function settingsWithSelectedModel(

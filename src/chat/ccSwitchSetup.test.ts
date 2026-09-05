@@ -55,6 +55,9 @@ describe("CC Switch setup tool handling in chat", () => {
 
     expect(await screen.findByRole("region", { name: "安全配置 OpenCode" })).toBeDefined();
     expect(screen.queryByLabelText("API Key")).toBeNull();
+    expect((screen.getByLabelText("Base URL") as HTMLInputElement).value).toBe(
+      "https://active.example.test/v1",
+    );
     expect(screen.getByRole("button", { name: "使用已验证设置" })).toBeDefined();
     expect(
       invoke.mock.calls.some(

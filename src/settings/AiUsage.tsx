@@ -76,7 +76,8 @@ export function AiUsage({ enabled, providerId, label, index, t }: AiUsageProps) 
     <section className="set-ai-usage" aria-labelledby={titleId}>
       <div className="set-ai-usage-head">
         <h3 id={titleId} className="set-section-head">
-          {`${t.aiUsageTitle} · ${label}`}
+          {t.aiUsageTitle}
+          <span className="set-ai-usage-provider-label">{` · ${label}`}</span>
         </h3>
         <button
           className="set-ai-usage-refresh"

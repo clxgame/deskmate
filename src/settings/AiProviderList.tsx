@@ -22,6 +22,7 @@ type AiProviderListProps = {
   readonly verifyingProviderId?: string | null;
   readonly verifyResultFor?: (providerId: string) => ProviderVerifyResult | null;
   readonly deploymentFor?: (providerId: string) => LocalAiDeploymentStatus;
+  readonly operationBusy?: boolean;
 };
 
 export function AiProviderList({
@@ -35,6 +36,7 @@ export function AiProviderList({
   verifyingProviderId,
   verifyResultFor,
   deploymentFor,
+  operationBusy = false,
 }: AiProviderListProps) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
@@ -140,6 +142,7 @@ export function AiProviderList({
               verifying={verifyingProviderId === provider.id}
               verifyResult={verifyResultFor?.(provider.id) ?? null}
               deployment={deploymentFor?.(provider.id) ?? { kind: "idle" }}
+              operationLocked={operationBusy}
             />
           );
         })}

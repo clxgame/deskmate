@@ -16,6 +16,7 @@ type AiProviderCardProps = {
   readonly verifying: boolean;
   readonly verifyResult: ProviderVerifyResult | null;
   readonly deployment: LocalAiDeploymentStatus;
+  readonly operationLocked: boolean;
   readonly onToggle: () => void;
   readonly onDelete: () => void;
   readonly onFieldChange: (field: ProviderField, value: string) => void;
@@ -33,6 +34,7 @@ export function AiProviderCard({
   verifying,
   verifyResult,
   deployment,
+  operationLocked,
   onToggle,
   onDelete,
   onFieldChange,
@@ -78,6 +80,7 @@ export function AiProviderCard({
           verifying={verifying}
           verifyResult={verifyResult}
           deployment={deployment}
+          operationLocked={operationLocked}
           onFieldChange={onFieldChange}
           onVerify={onVerify}
           onDeploy={onDeploy}
@@ -94,6 +97,7 @@ function ProviderBody({
   verifying,
   verifyResult,
   deployment,
+  operationLocked,
   onFieldChange,
   onVerify,
   onDeploy,
@@ -101,15 +105,11 @@ function ProviderBody({
   AiProviderCardProps,
   "index" | "active" | "collapsed" | "removeDisabled" | "onToggle" | "onDelete"
 > & { readonly label: string }) {
-  const fields: readonly {
-    readonly key: ProviderField;
-    readonly label: string;
-    readonly type: "text" | "password";
-  }[] = [
+  const fields = [
     { key: "label", label: t.aiProviderLabel, type: "text" },
     { key: "baseUrl", label: t.aiProviderBaseUrl, type: "text" },
     { key: "apiKey", label: t.aiProviderApiKey, type: "password" },
-  ];
+  ] as const;
   return (
     <div className="set-ai-provider-body">
       {fields.map((field) => (
@@ -120,6 +120,7 @@ function ProviderBody({
             type={field.type}
             value={provider[field.key]}
             aria-label={`${field.label} · ${label}`}
+            disabled={operationLocked}
             onChange={(event) => onFieldChange(field.key, event.target.value)}
           />
         </label>
@@ -128,7 +129,7 @@ function ProviderBody({
         <button
           className="set-btn"
           type="button"
-          disabled={!onVerify || verifying || !provider.apiKey.trim()}
+          disabled={!onVerify || operationLocked || !provider.apiKey.trim()}
           onClick={() => onVerify?.(provider.id)}
         >
           {verifying ? t.verifying : t.aiProviderVerify}
@@ -137,7 +138,7 @@ function ProviderBody({
           className="set-btn"
           type="button"
           disabled={
-            !onDeploy || deployment.kind === "working" || !provider.apiKey.trim()
+            !onDeploy || operationLocked || !provider.apiKey.trim()
           }
           title={t.aiProviderDeployHint}
           onClick={() => onDeploy?.(provider.id)}

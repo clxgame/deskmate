@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import * as tauriCore from "@tauri-apps/api/core";
 import * as tauriEvent from "@tauri-apps/api/event";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type ReactElement } from "react";
 import type { Dict } from "../lib/i18n";
@@ -589,6 +589,69 @@ describe("CC Switch entry in AI settings", () => {
       "set_settings",
       "deploy_local_ai_stack",
     ]);
+    expect(
+      invoke.mock.calls.filter(([command]) => command === "set_settings"),
+    ).toEqual([
+      ["set_settings", { settings }],
+      [
+        "set_settings",
+        {
+          settings: {
+            ...settings,
+            activeProviderId: "provider-omo-kuro",
+            providerId: "yume-2",
+            modelId: "claude-sonnet-4.5",
+          },
+        },
+      ],
+    ]);
+  });
+
+  test("keeps the current route when another provider fails verification", async () => {
+    const settings = multiProviderSettingsFixture({ language: "zh-CN" });
+    invoke.mockImplementation((command) => {
+      if (command === "get_settings") return Promise.resolve(settings);
+      if (command === "verify_api_key") return Promise.reject(new Error("unauthorized"));
+      return defaultInvoke(command);
+    });
+
+    const user = await openAiSettings();
+    const providerCard = await screen.findByRole("article", { name: "OMO Kuro" });
+    await user.click(within(providerCard).getByRole("button", { name: "部署" }));
+
+    await waitFor(() => {
+      expect(
+        (within(providerCard).getByRole("button", { name: "部署" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false);
+    });
+    expect(invoke).not.toHaveBeenCalledWith("deploy_local_ai_stack", expect.anything());
+    expect(
+      invoke.mock.calls.filter(([command]) => command === "set_settings"),
+    ).toEqual([["set_settings", { settings }]]);
+  });
+
+  test("discards a verification result after provider settings change", async () => {
+    let resolveVerification: ((count: number) => void) | undefined;
+    invoke.mockImplementation((command) => {
+      if (command === "verify_api_key") {
+        return new Promise<number>((resolve) => {
+          resolveVerification = resolve;
+        });
+      }
+      return defaultInvoke(command);
+    });
+
+    const user = await openAiSettings();
+    const providerCard = await screen.findByRole("article", { name: "Kuro" });
+    await user.click(within(providerCard).getByRole("button", { name: "验证" }));
+    await screen.findByRole("button", { name: "验证中…" });
+    await user.click(screen.getByRole("button", { name: "添加供应商" }));
+    await act(async () => resolveVerification?.(1));
+
+    await waitFor(() => {
+      expect(screen.queryByText("验证成功,发现 1 个模型")).toBeNull();
+    });
   });
 
   test("never renders unknown native deployment fields or a rejected API key", async () => {

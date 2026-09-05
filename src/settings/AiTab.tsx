@@ -36,6 +36,7 @@ export function AiTab({ settings, patch, replace, persist, t }: AiTabProps) {
         verifyingProviderId={controller.verifyingProviderId}
         verifyResultFor={controller.verifyResultFor}
         deploymentFor={controller.deploymentFor}
+        operationBusy={controller.operationBusy}
       />
 
       <Row label={t.model}>
@@ -74,22 +75,24 @@ export function AiTab({ settings, patch, replace, persist, t }: AiTabProps) {
       <CcSwitchStatus
         status={controller.ccSwitchStatus}
         deployment={controller.deploymentFor(activeProvider?.id ?? "")}
-        canDeploy={Boolean(activeProvider?.apiKey.trim())}
+        canDeploy={Boolean(activeProvider?.apiKey.trim()) && !controller.operationBusy}
         t={t}
         onDeploy={() => {
           if (activeProvider) void controller.deployProvider(activeProvider.id);
         }}
       />
-      {settings.providers.map((provider, index) => (
-        <AiUsage
-          key={provider.id}
-          enabled={Boolean(provider.apiKey.trim())}
-          providerId={provider.id}
-          label={displayProviderLabel(provider, index, t)}
-          index={index}
-          t={t}
-        />
-      ))}
+      <div className="set-ai-usage-list">
+        {settings.providers.map((provider, index) => (
+          <AiUsage
+            key={provider.id}
+            enabled={Boolean(provider.apiKey.trim())}
+            providerId={provider.id}
+            label={displayProviderLabel(provider, index, t)}
+            index={index}
+            t={t}
+          />
+        ))}
+      </div>
     </>
   );
 }

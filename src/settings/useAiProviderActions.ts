@@ -32,8 +32,8 @@ type ProviderActionsInput = {
   readonly t: Dict;
 };
 
-function safeVerifyMessage(t: Dict, error: unknown): string {
-  const code = error instanceof Error ? error.message : String(error);
+function safeVerifyMessage(t: Dict, error: Error | string): string {
+  const code = error instanceof Error ? error.message : error;
   if (
     [
       "empty_key",
@@ -51,7 +51,7 @@ function safeVerifyMessage(t: Dict, error: unknown): string {
   return t.aiUnreachable;
 }
 
-function deploymentErrorMessage(t: Dict, error: unknown): string {
+function deploymentErrorMessage(t: Dict, error: Error | string): string {
   const code = localAiDeploymentErrorCode(error);
   if (
     [
@@ -86,6 +86,14 @@ export function useAiProviderActions({
     Readonly<Record<string, LocalAiDeploymentStatus>>
   >({});
   const deployingProviderId = useRef<string | null>(null);
+  const operationRequest = useRef(0);
+
+  const beginOperation = () => {
+    operationRequest.current += 1;
+    return operationRequest.current;
+  };
+  const isCurrentOperation = (requestId: number) =>
+    operationRequest.current === requestId;
 
   const setProviderDeployment = (
     providerId: string,
@@ -114,6 +122,7 @@ export function useAiProviderActions({
   }, []);
 
   const verifyProvider = async (providerId: string) => {
+    const requestId = beginOperation();
     setVerifyingProviderId(providerId);
     setVerifyResults((current) => {
       const next = { ...current };
@@ -124,12 +133,15 @@ export function useAiProviderActions({
       const provider = settings.providers.find((entry) => entry.id === providerId);
       if (!provider) throw new Error("provider_missing");
       await persist(settings);
+      if (!isCurrentOperation(requestId)) return;
       const count = await verifyApiKey(
         provider.id,
         provider.baseUrl,
         provider.apiKey,
       );
+      if (!isCurrentOperation(requestId)) return;
       const refreshed = await refreshModels();
+      if (!isCurrentOperation(requestId)) return;
       if (!modelsMatchVerification(refreshed, provider.sidecarId, count)) {
         throw new Error("models_unavailable");
       }
@@ -138,31 +150,39 @@ export function useAiProviderActions({
         [providerId]: { ok: true, message: t.verifyOk(count) },
       }));
     } catch (error) {
-      setVerifyResults((current) => ({
-        ...current,
-        [providerId]: { ok: false, message: safeVerifyMessage(t, error) },
-      }));
+      const normalizedError =
+        error instanceof Error ? error : String(error);
+      if (isCurrentOperation(requestId)) {
+        setVerifyResults((current) => ({
+          ...current,
+          [providerId]: {
+            ok: false,
+            message: safeVerifyMessage(t, normalizedError),
+          },
+        }));
+      }
     } finally {
-      setVerifyingProviderId((current) =>
-        current === providerId ? null : current,
-      );
+      if (isCurrentOperation(requestId)) setVerifyingProviderId(null);
     }
   };
 
   const deployProvider = async (providerId: string) => {
+    const requestId = beginOperation();
     deployingProviderId.current = providerId;
     setProviderDeployment(providerId, { kind: "working", stage: "verifyingApi" });
     try {
       const provider = settings.providers.find((entry) => entry.id === providerId);
       if (!provider) throw new Error("provider_missing");
-      const activeSettings = { ...settings, activeProviderId: provider.id };
-      await persist(activeSettings);
+      await persist(settings);
+      if (!isCurrentOperation(requestId)) return;
       const count = await verifyApiKey(
         provider.id,
         provider.baseUrl,
         provider.apiKey,
       );
+      if (!isCurrentOperation(requestId)) return;
       const refreshed = await refreshModels();
+      if (!isCurrentOperation(requestId)) return;
       if (!modelsMatchVerification(refreshed, provider.sidecarId, count)) {
         throw new Error("models_unavailable");
       }
@@ -177,11 +197,12 @@ export function useAiProviderActions({
         ) ?? available[0];
       if (!chosen) throw new Error("models_unavailable");
       await persist({
-        ...activeSettings,
+        ...settings,
         activeProviderId: provider.id,
         providerId: provider.sidecarId,
         modelId: chosen.modelId,
       });
+      if (!isCurrentOperation(requestId)) return;
       setProviderDeployment(providerId, {
         kind: "working",
         stage: "installingOpenCode",
@@ -189,6 +210,7 @@ export function useAiProviderActions({
       const raw = await invoke<unknown>("deploy_local_ai_stack", {
         request: { modelId: chosen.modelId },
       });
+      if (!isCurrentOperation(requestId)) return;
       const receipt = normalizeLocalAiDeploymentReceipt(raw);
       if (!receipt) throw new Error("local_ai_deploy_invalid_result");
       setProviderDeployment(providerId, {
@@ -201,18 +223,25 @@ export function useAiProviderActions({
       });
       await refreshCcSwitchStatus();
     } catch (error) {
-      setProviderDeployment(providerId, {
-        kind: "error",
-        message: deploymentErrorMessage(t, error),
-      });
+      const normalizedError =
+        error instanceof Error ? error : localAiDeploymentErrorCode(error);
+      if (isCurrentOperation(requestId)) {
+        setProviderDeployment(providerId, {
+          kind: "error",
+          message: deploymentErrorMessage(t, normalizedError),
+        });
+      }
     } finally {
-      if (deployingProviderId.current === providerId) {
+      if (isCurrentOperation(requestId)) {
         deployingProviderId.current = null;
       }
     }
   };
 
   const clearOperationState = () => {
+    operationRequest.current += 1;
+    deployingProviderId.current = null;
+    setVerifyingProviderId(null);
     setVerifyResults({});
     setDeployments({});
   };
@@ -222,6 +251,9 @@ export function useAiProviderActions({
     deploymentFor: (providerId: string): LocalAiDeploymentStatus =>
       deployments[providerId] ?? { kind: "idle" },
     deployProvider,
+    operationBusy:
+      verifyingProviderId !== null ||
+      Object.values(deployments).some((deployment) => deployment.kind === "working"),
     verifyProvider,
     verifyResultFor: (providerId: string): ProviderVerifyResult | null =>
       verifyResults[providerId] ?? null,

@@ -108,7 +108,8 @@ const zh = {
   aiProviderCollapse: "收起",
   aiProviderExpand: "展开",
   aiProviderRemove: "删除",
-  aiProviderRemoveConfirm: "确认删除这个供应商？",
+  aiProviderRemoveConfirm:
+    "确认删除这个供应商？保存的 API Key 和模型目录也会被永久删除。",
   aiProviderRemoveCancel: "取消",
   aiProviderRemoveLast: "至少保留一个供应商",
   aiProviderActive: "当前使用",
@@ -463,7 +464,8 @@ const en: Dict = {
   aiProviderCollapse: "Collapse",
   aiProviderExpand: "Expand",
   aiProviderRemove: "Remove",
-  aiProviderRemoveConfirm: "Remove this provider?",
+  aiProviderRemoveConfirm:
+    "Remove this provider? Its saved API key and model catalog will be permanently deleted.",
   aiProviderRemoveCancel: "Cancel",
   aiProviderRemoveLast: "Keep at least one provider",
   aiProviderActive: "Active",
@@ -829,7 +831,8 @@ const ja: Dict = {
   aiProviderCollapse: "折りたたむ",
   aiProviderExpand: "展開",
   aiProviderRemove: "削除",
-  aiProviderRemoveConfirm: "このプロバイダーを削除しますか？",
+  aiProviderRemoveConfirm:
+    "このプロバイダーを削除しますか？保存済みの API キーとモデルカタログも完全に削除されます。",
   aiProviderRemoveCancel: "キャンセル",
   aiProviderRemoveLast: "プロバイダーを 1 件以上残してください",
   aiProviderActive: "使用中",
@@ -1192,7 +1195,8 @@ const ko: Dict = {
   aiProviderCollapse: "접기",
   aiProviderExpand: "펼치기",
   aiProviderRemove: "삭제",
-  aiProviderRemoveConfirm: "이 공급자를 삭제할까요?",
+  aiProviderRemoveConfirm:
+    "이 공급자를 삭제할까요? 저장된 API 키와 모델 카탈로그도 영구적으로 삭제됩니다.",
   aiProviderRemoveCancel: "취소",
   aiProviderRemoveLast: "공급자를 하나 이상 남겨야 합니다",
   aiProviderActive: "사용 중",

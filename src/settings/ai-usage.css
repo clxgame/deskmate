@@ -26,12 +26,6 @@
 
 .set-ai-usage-provider-label {
   color: var(--text-dim);
-  font-size: var(--t-small);
-  font-weight: 600;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .set-ai-usage-refresh {

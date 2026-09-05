@@ -5,6 +5,11 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { type ReactElement } from "react";
 import type { Dict } from "../lib/i18n";
+import type { AiProvider, Settings } from "../lib/settings";
+import {
+  legacySettingsFixture,
+  multiProviderSettingsFixture,
+} from "../testing/settingsFixtures";
 import type {
   CcSwitchCapabilityStatus,
   LocalAiDeploymentStatus,
@@ -34,16 +39,7 @@ const SettingsApp = (await import("./SettingsApp")).default;
 
 const originalFetch = globalThis.fetch;
 
-const settingsFixture = {
-  autostart: false, language: "zh-CN", theme: "dark", providerId: "yume",
-  modelId: "gpt-5.4-mini", yolo: false,
-  baseUrl: "https://ai-gateway.kurogames.com", apiKey: "configured-key",
-  petScale: 1, outlineWidth: 0.0008, rimWidth: 0.1, rimIntensity: 0.3,
-  specularIntensity: 0.05, petVisible: true, alwaysOnTop: false,
-  scheduledTasks: [], shortcutToggleChat: "", shortcutTogglePet: "",
-  personaId: "xiaozhu", mouseFollow: false, userName: "",
-  memoryAutoExtract: true, memoryAiUse: true, updateRepo: "owner/repo",
-};
+const settingsFixture = legacySettingsFixture();
 
 const deployReceiptFixture = {
   ccSwitchVersion: "3.20.1",
@@ -367,6 +363,33 @@ describe("CC Switch status component", () => {
 });
 
 describe("CC Switch entry in AI settings", () => {
+  test("shares a multi-provider settings fixture that keeps legacy routing fields", () => {
+    const settings: Settings = multiProviderSettingsFixture();
+    const providers: readonly AiProvider[] = settings.providers;
+
+    expect(settings.providerId).toBe("yume");
+    expect(settings.modelId).toBe("gpt-5.4-mini");
+    expect(settings.baseUrl).toBe("https://ai-gateway.kurogames.com");
+    expect(settings.apiKey).toBe("configured-key");
+    expect(settings.activeProviderId).toBe("provider-kuro");
+    expect(providers).toEqual([
+      {
+        id: "provider-kuro",
+        sidecarId: "yume",
+        label: "Kuro",
+        baseUrl: "https://ai-gateway.kurogames.com",
+        apiKey: "configured-key",
+      },
+      {
+        id: "provider-omo-kuro",
+        sidecarId: "yume-2",
+        label: "OMO Kuro",
+        baseUrl: "https://omo-kuro.example.test/v1",
+        apiKey: "omo-configured-key",
+      },
+    ]);
+  });
+
   test("places CC Switch below YOLO warning and above AI usage", async () => {
     await openAiSettings();
 

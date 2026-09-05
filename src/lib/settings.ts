@@ -15,6 +15,14 @@ export interface PetPosition {
   readonly y: number;
 }
 
+export interface AiProvider {
+  readonly id: string;
+  readonly sidecarId: string;
+  readonly label: string;
+  readonly baseUrl: string;
+  readonly apiKey: string;
+}
+
 /** Mirror of Rust `Settings` (serde camelCase). */
 export interface Settings {
   // 通用
@@ -27,6 +35,8 @@ export interface Settings {
   yolo: boolean;
   baseUrl: string;
   apiKey: string;
+  readonly providers: readonly AiProvider[];
+  readonly activeProviderId: string;
   // 小组件
   petScale: number;
   outlineWidth: number;

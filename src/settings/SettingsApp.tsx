@@ -128,22 +128,27 @@ export default function SettingsApp() {
     };
   }, []);
 
+  const replace = useCallback((next: Settings) => {
+    settingsRef.current = next;
+    setLocalSettings(next);
+    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      saveTimer.current = null;
+      void setSettings(next).catch((error: unknown) =>
+        console.error(error instanceof Error ? error : new Error(String(error))),
+      );
+    }, SAVE_DELAY_MS);
+  }, []);
+
   /** Update one field locally, then persist the whole object debounced. */
   const patch = useCallback(
     <K extends keyof Settings>(key: K, value: Settings[K]) => {
       const current = settingsRef.current;
       if (current === null) return;
 
-      const next: Settings = { ...current, [key]: value };
-      settingsRef.current = next;
-      setLocalSettings(next);
-      if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
-      saveTimer.current = window.setTimeout(() => {
-        saveTimer.current = null;
-        void setSettings(next).catch((e: unknown) => console.error(e));
-      }, SAVE_DELAY_MS);
+      replace({ ...current, [key]: value });
     },
-    [],
+    [replace],
   );
 
   return (
@@ -182,7 +187,9 @@ export default function SettingsApp() {
             {tab === "general" && (
               <GeneralTab settings={settings} patch={patch} t={t} />
             )}
-            {tab === "ai" && <AiTab settings={settings} patch={patch} t={t} />}
+            {tab === "ai" && (
+              <AiTab settings={settings} patch={patch} replace={replace} t={t} />
+            )}
             {tab === "widget" && (
               <WidgetTab settings={settings} patch={patch} t={t} />
             )}

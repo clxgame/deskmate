@@ -1,10 +1,19 @@
 import { AiUsage } from "./AiUsage";
 import { CcSwitchStatus } from "./CcSwitchStatus";
-import { Row, Switch, type TabProps } from "./settingsPrimitives";
+import {
+  Row,
+  Switch,
+  type ReplaceSettings,
+  type TabProps,
+} from "./settingsPrimitives";
 import { useAiTabController } from "./useAiTabController";
 
-export function AiTab({ settings, patch, t }: TabProps) {
-  const controller = useAiTabController({ settings, patch, t });
+type AiTabProps = TabProps & {
+  readonly replace: ReplaceSettings;
+};
+
+export function AiTab({ settings, patch, replace, t }: AiTabProps) {
+  const controller = useAiTabController({ settings, patch, replace, t });
 
   return (
     <>
@@ -58,7 +67,7 @@ export function AiTab({ settings, patch, t }: TabProps) {
         >
           <option value="">{t.modelDefault}</option>
           {controller.groups.map((g) => (
-            <optgroup key={g.providerName} label={g.providerName}>
+            <optgroup key={g.providerId} label={g.label}>
               {g.models.map((m) => (
                 <option
                   key={`${m.sidecarId}/${m.modelId}`}

@@ -5,10 +5,15 @@ import {
   listModels,
   modelsMatchVerification,
   verifyApiKey,
-  type AiProvider,
   type ProviderModel,
+  type Settings,
 } from "../lib/settings";
 import { verifyError, type Dict } from "../lib/i18n";
+import {
+  groupModelsByConfiguredProvider,
+  selectedModelValue,
+  settingsWithSelectedModel,
+} from "./aiProviderModel";
 import {
   localAiDeploymentErrorCode,
   normalizeCcSwitchCapabilityStatus,
@@ -17,7 +22,7 @@ import {
   type CcSwitchCapabilityStatus,
   type LocalAiDeploymentStatus,
 } from "./CcSwitchStatus";
-import type { Patch } from "./settingsPrimitives";
+import type { Patch, ReplaceSettings } from "./settingsPrimitives";
 
 const LOCAL_AI_DEPLOY_PROGRESS_EVENT = "deskmate://local-ai-deploy-progress";
 
@@ -26,27 +31,17 @@ type VerifyResult = {
   readonly message: string;
 };
 
-type ModelGroup = {
-  readonly providerName: string;
-  readonly models: ProviderModel[];
-};
-
 type AiTabControllerInput = {
-  readonly settings: {
-    readonly providers: readonly AiProvider[];
-    readonly activeProviderId: string;
-    readonly providerId: string;
-    readonly modelId: string;
-    readonly baseUrl: string;
-    readonly apiKey: string;
-  };
+  readonly settings: Settings;
   readonly patch: Patch;
+  readonly replace: ReplaceSettings;
   readonly t: Dict;
 };
 
 export function useAiTabController({
   settings,
   patch,
+  replace,
   t,
 }: AiTabControllerInput) {
   const [models, setModels] = useState<ProviderModel[]>([]);
@@ -220,29 +215,9 @@ export function useAiTabController({
     }
   };
 
-  const groups: ModelGroup[] = [];
-  for (const model of models) {
-    let group = groups.find((entry) => entry.providerName === model.providerName);
-    if (!group) {
-      group = { providerName: model.providerName, models: [] };
-      groups.push(group);
-    }
-    group.models.push(model);
-  }
-
-  const currentModelValue = settings.providerId
-    ? `${settings.providerId}/${settings.modelId}`
-    : "";
-
   const pickModel = (raw: string) => {
-    if (!raw) {
-      patch("providerId", "");
-      patch("modelId", "");
-      return;
-    }
-    const slash = raw.indexOf("/");
-    patch("providerId", raw.slice(0, slash));
-    patch("modelId", raw.slice(slash + 1));
+    const next = settingsWithSelectedModel(settings, raw);
+    if (next !== settings) replace(next);
   };
 
   const clearVerificationState = () => {
@@ -254,10 +229,10 @@ export function useAiTabController({
     activeProviderId,
     activeProviderLabel,
     ccSwitchStatus,
-    currentModelValue,
+    currentModelValue: selectedModelValue(settings),
     deployment,
     failed,
-    groups,
+    groups: groupModelsByConfiguredProvider(settings.providers, models),
     pickModel,
     clearVerificationState,
     deployLocalAi,

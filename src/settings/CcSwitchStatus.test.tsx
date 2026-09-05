@@ -87,6 +87,26 @@ const modelCatalogFixture = {
   }],
 };
 
+const providerLabelKeys = [
+  "aiProviderSection",
+  "aiProviderAdd",
+  "aiProviderLabel",
+  "aiProviderBaseUrl",
+  "aiProviderApiKey",
+  "aiProviderCollapse",
+  "aiProviderExpand",
+  "aiProviderRemove",
+  "aiProviderRemoveConfirm",
+  "aiProviderRemoveCancel",
+  "aiProviderRemoveLast",
+  "aiProviderActive",
+  "aiProviderVerify",
+  "aiProviderDeploy",
+  "aiProviderDeployHint",
+  "aiProviderNoModels",
+  "aiProviderUnmatchedModels",
+] as const;
+
 function renderStatus(element: ReactElement) {
   render(<div className="set-root">{element}</div>);
 }
@@ -330,6 +350,15 @@ describe("CC Switch status component", () => {
       expect(region.textContent?.includes("3.20.0")).toBe(true);
       expect(within(region).getByRole("button")).toBeDefined();
       cleanup();
+    }
+  });
+
+  test("keeps every provider management label populated in all four languages", () => {
+    for (const lang of LANGS) {
+      const localized = dict(lang.value);
+      for (const key of providerLabelKeys) {
+        expect(localized[key].trim(), `${lang.value}:${key}`).not.toBe("");
+      }
     }
   });
 

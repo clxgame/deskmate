@@ -887,6 +887,52 @@ body,
 
 /* ---------- AI tab: api config ---------- */
 
+.set-ai-provider-list {
+  display: grid;
+  gap: var(--s-3);
+  margin-top: var(--s-3);
+  width: 100%;
+}
+
+.set-ai-provider-card {
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: var(--s-3);
+}
+
+.set-ai-provider-head {
+  align-items: center;
+  display: flex;
+  gap: var(--s-3);
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.set-ai-provider-body {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: var(--s-3);
+  margin-top: var(--s-3);
+  padding-top: var(--s-3);
+}
+
+.set-ai-provider-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  justify-content: flex-end;
+}
+
+.set-ai-provider-remove {
+  color: var(--danger);
+}
+
+.set-ai-provider-remove:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 /* key input + 60px verify button + 12px gap = --control-w, aligned with other controls. */
 .set-input-key {
   width: 168px;

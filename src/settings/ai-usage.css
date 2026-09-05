@@ -18,6 +18,22 @@
   margin: 0;
 }
 
+.set-ai-usage-list {
+  display: grid;
+  gap: var(--s-3);
+  margin-top: var(--s-4);
+}
+
+.set-ai-usage-provider-label {
+  color: var(--text-dim);
+  font-size: var(--t-small);
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .set-ai-usage-refresh {
   padding: var(--s-1) var(--s-2);
   border: 1px solid var(--line-strong);

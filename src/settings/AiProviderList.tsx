@@ -108,12 +108,21 @@ export function AiProviderList({
       </div>
       {pendingDeleteId !== null && (
         <>
-          <div
-            className="set-confirm-backdrop"
-            onClick={() => setPendingDeleteId(null)}
-          />
-          <div className="set-confirm" role="alertdialog" aria-modal="true">
-            <p className="set-confirm-body">{t.aiProviderRemoveConfirm}</p>
+          <div className="set-confirm-backdrop" aria-hidden="true" />
+          <dialog
+            className="set-confirm"
+            open
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="ai-provider-remove-confirm-title"
+            onCancel={() => setPendingDeleteId(null)}
+          >
+            <p
+              id="ai-provider-remove-confirm-title"
+              className="set-confirm-body"
+            >
+              {t.aiProviderRemoveConfirm}
+            </p>
             <div className="set-confirm-actions">
               <button
                 className="set-btn set-btn-danger"
@@ -130,7 +139,7 @@ export function AiProviderList({
                 {t.aiProviderRemoveCancel}
               </button>
             </div>
-          </div>
+          </dialog>
         </>
       )}
     </section>

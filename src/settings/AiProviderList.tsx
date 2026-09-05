@@ -93,7 +93,7 @@ export function AiProviderList({
   };
 
   const confirmDelete = () => {
-    if (pendingDeleteId === null) return;
+    if (pendingDeleteId === null || operationBusy) return;
     onChange?.();
     replace(settingsWithDeletedProvider(settings, pendingDeleteId));
     closeDeleteDialog();
@@ -187,6 +187,7 @@ export function AiProviderList({
               ref={confirmButtonRef}
               className="set-btn set-btn-danger"
               type="button"
+              disabled={operationBusy}
               onClick={confirmDelete}
             >
               {t.aiProviderRemove}

@@ -288,6 +288,38 @@ describe("SettingsKeyboardNavigation", () => {
     });
   });
 
+  test("ignores global settings shortcuts while a modal dialog is open", () => {
+    const clicked: string[] = [];
+    render(
+      <SettingsTabsFixture>
+        <button
+          type="button"
+          className="set-ccswitch-action"
+          onClick={() => clicked.push("ccswitch")}
+        >
+          Configure CC Switch
+        </button>
+        <dialog open aria-label="Confirm deletion">
+          <button type="button">Cancel</button>
+        </dialog>
+      </SettingsTabsFixture>,
+    );
+
+    const event = new KeyboardEvent("keydown", {
+      key: "c",
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => {
+      document.dispatchEvent(event);
+    });
+
+    expect(clicked).toEqual([]);
+    expect(event.defaultPrevented).toBe(false);
+  });
+
   for (const shortcutCase of SETTINGS_SHORTCUT_CASES) {
     test(`selects, clicks, and focuses the ${shortcutCase.expectedLabel} tab from ${shortcutCase.modifier}+${shortcutCase.key}`, async () => {
       const clickedTabs: TabLabel[] = [];

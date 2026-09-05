@@ -101,9 +101,20 @@ describe("AI provider list", () => {
     expect(document.activeElement).toBe(confirmRemove);
     await user.tab({ shift: true });
     expect(document.activeElement).toBe(cancelRemove);
-    await user.click(
-      cancelRemove,
+
+    rerender(
+      <AiProviderList
+        settings={settings}
+        replace={replace}
+        t={t}
+        operationBusy
+      />,
     );
+    expect(confirmRemove).toHaveProperty("disabled", true);
+    await user.click(confirmRemove);
+    expect(replace).not.toHaveBeenCalled();
+    rerender(<AiProviderList settings={settings} replace={replace} t={t} />);
+    await user.click(cancelRemove);
     expect(replace).not.toHaveBeenCalled();
     await waitFor(() => expect(document.activeElement).toBe(removeButtons[1]));
 

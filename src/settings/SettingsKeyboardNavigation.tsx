@@ -63,6 +63,7 @@ export function SettingsKeyboardNavigation() {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (!(event.ctrlKey || event.metaKey)) return;
+      if (document.querySelector("dialog[open]") !== null) return;
       if (event.shiftKey) {
         const key = event.key.toLowerCase();
         const handled =

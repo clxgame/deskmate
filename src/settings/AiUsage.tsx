@@ -15,6 +15,9 @@ type AiUsageView =
 
 interface AiUsageProps {
   readonly enabled: boolean;
+  readonly providerId: string;
+  readonly label: string;
+  readonly index: number;
   readonly t: Dict;
 }
 
@@ -22,7 +25,7 @@ function formatYuan(amount: number, digits: number): string {
   return `¥${(amount / CNY_UNIT_DIVISOR).toFixed(digits)}`;
 }
 
-export function AiUsage({ enabled, t }: AiUsageProps) {
+export function AiUsage({ enabled, providerId, label, index, t }: AiUsageProps) {
   const [view, setView] = useState<AiUsageView>({ kind: "loading" });
   const [refreshVersion, setRefreshVersion] = useState(0);
 
@@ -36,7 +39,7 @@ export function AiUsage({ enabled, t }: AiUsageProps) {
     const load = async (): Promise<void> => {
       setView({ kind: "loading" });
       try {
-        const usage = await getAiUsage();
+        const usage = await getAiUsage(providerId);
         if (active) setView({ kind: "ready", usage });
       } catch (error) {
         const message = (error instanceof Error ? error.message : String(error)).replace(
@@ -53,20 +56,27 @@ export function AiUsage({ enabled, t }: AiUsageProps) {
       }
     };
 
-    void load();
+    const initialDelayMs = refreshVersion === 0 ? index * 3000 : 0;
+    const initialTimer =
+      initialDelayMs === 0
+        ? null
+        : window.setTimeout(() => void load(), initialDelayMs);
+    if (initialTimer === null) void load();
     const refreshTimer = window.setInterval(() => void load(), REFRESH_INTERVAL_MS);
     return () => {
       active = false;
+      if (initialTimer !== null) window.clearTimeout(initialTimer);
       window.clearInterval(refreshTimer);
     };
-  }, [enabled, refreshVersion]);
+  }, [enabled, index, providerId, refreshVersion]);
 
   const isLoading = view.kind === "loading";
+  const titleId = `ai-usage-title-${providerId}`;
   return (
-    <section className="set-ai-usage" aria-labelledby="ai-usage-title">
+    <section className="set-ai-usage" aria-labelledby={titleId}>
       <div className="set-ai-usage-head">
-        <h3 id="ai-usage-title" className="set-section-head">
-          {t.aiUsageTitle}
+        <h3 id={titleId} className="set-section-head">
+          {`${t.aiUsageTitle} · ${label}`}
         </h3>
         <button
           className="set-ai-usage-refresh"

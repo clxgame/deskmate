@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, jest, mock, test } from "bun:test";
 import * as tauriCore from "@tauri-apps/api/core";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const invoke = mock<(command: string, args?: unknown) => Promise<unknown>>(
@@ -18,6 +18,7 @@ afterEach(cleanup);
 
 beforeEach(() => {
   invoke.mockReset();
+  jest.useRealTimers();
 });
 
 describe("AI usage", () => {
@@ -37,21 +38,39 @@ describe("AI usage", () => {
       }),
     );
 
-    render(<AiUsage enabled t={t} />);
+    render(
+      <AiUsage
+        enabled
+        providerId="provider-kuro"
+        label="Kuro"
+        index={0}
+        t={t}
+      />,
+    );
 
-    expect(await screen.findByRole("heading", { name: "AI 用量" })).toBeDefined();
+    expect(await screen.findByRole("heading", { name: "AI 用量 · Kuro" })).toBeDefined();
     expect(await screen.findByText("¥2726 / ¥3000")).toBeDefined();
     expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("91");
     expect(screen.getByText("6 天后重置")).toBeDefined();
     expect(screen.getByText("¥273.59 · 438 次")).toBeDefined();
     expect(screen.getByText("claude-opus-4.8")).toBeDefined();
     await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith("fetch_ai_usage");
+      expect(invoke).toHaveBeenCalledWith("fetch_ai_usage", {
+        providerId: "provider-kuro",
+      });
     });
   });
 
   test("waits for an API key instead of querying the gateway", async () => {
-    render(<AiUsage enabled={false} t={t} />);
+    render(
+      <AiUsage
+        enabled={false}
+        providerId="provider-kuro"
+        label="Kuro"
+        index={0}
+        t={t}
+      />,
+    );
 
     expect(await screen.findByText("填写 API Key 后即可查看用量")).toBeDefined();
     expect(invoke).not.toHaveBeenCalled();
@@ -59,14 +78,34 @@ describe("AI usage", () => {
 
   test("never sends an edited Base URL or API key through usage IPC", async () => {
     invoke.mockImplementation(() => Promise.reject("unverified_settings"));
-    render(<AiUsage enabled t={t} />);
+    render(
+      <AiUsage
+        enabled
+        providerId="provider-kuro"
+        label="Kuro"
+        index={0}
+        t={t}
+      />,
+    );
 
-    await waitFor(() => expect(invoke).toHaveBeenCalledWith("fetch_ai_usage"));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("fetch_ai_usage", {
+        providerId: "provider-kuro",
+      }),
+    );
   });
 
   test("explains a usage-permission rejection in the active language", async () => {
     invoke.mockImplementation(() => Promise.reject("Error: status:401"));
-    render(<AiUsage enabled t={dict("en-US")} />);
+    render(
+      <AiUsage
+        enabled
+        providerId="provider-kuro"
+        label="Kuro"
+        index={0}
+        t={dict("en-US")}
+      />,
+    );
 
     expect(
       await screen.findByText("This API key cannot access usage details"),
@@ -75,9 +114,17 @@ describe("AI usage", () => {
 
   test("localizes the ai-usage title", async () => {
     invoke.mockImplementation(() => Promise.reject(new Error("status:401")));
-    render(<AiUsage enabled t={dict("ko-KR")} />);
+    render(
+      <AiUsage
+        enabled
+        providerId="provider-kuro"
+        label="Kuro"
+        index={0}
+        t={dict("ko-KR")}
+      />,
+    );
 
-    expect(await screen.findByRole("heading", { name: "AI 사용량" })).toBeDefined();
+    expect(await screen.findByRole("heading", { name: "AI 사용량 · Kuro" })).toBeDefined();
   });
 
   test("reloads the summary from its refresh action", async () => {
@@ -93,10 +140,60 @@ describe("AI usage", () => {
       }),
     );
     const user = userEvent.setup();
-    render(<AiUsage enabled t={t} />);
+    render(
+      <AiUsage
+        enabled
+        providerId="provider-kuro"
+        label="Kuro"
+        index={0}
+        t={t}
+      />,
+    );
 
     await screen.findByText("¥500 / ¥1000");
     await user.click(screen.getByRole("button", { name: "刷新" }));
     await waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+  });
+
+  test("stagger waits for the nonzero card index before the initial usage query", async () => {
+    jest.useFakeTimers();
+    try {
+      invoke.mockImplementation(() =>
+        Promise.resolve({
+          remainingCny: 5000000,
+          limitCny: 10000000,
+          remainingPct: 50,
+          daysUntilReset: 1,
+          todayCostCny: 100000,
+          todayRequests: 2,
+          topModels: [],
+        }),
+      );
+
+      render(
+        <AiUsage
+          enabled
+          providerId="provider-omo-kuro"
+          label="OMO Kuro"
+          index={1}
+          t={t}
+        />,
+      );
+
+      expect(invoke).not.toHaveBeenCalled();
+      await act(async () => {
+        jest.advanceTimersByTime(2999);
+      });
+      expect(invoke).not.toHaveBeenCalled();
+      await act(async () => {
+        jest.advanceTimersByTime(1);
+      });
+
+      expect(invoke).toHaveBeenCalledWith("fetch_ai_usage", {
+        providerId: "provider-omo-kuro",
+      });
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

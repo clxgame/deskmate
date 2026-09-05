@@ -471,13 +471,14 @@ describe("CC Switch entry in AI settings", () => {
     expect(emit).not.toHaveBeenCalled();
   });
 
-  test("verifies the API then deploys the selected model without opening chat", async () => {
+  test("verifies the active provider API then deploys the selected model without opening chat", async () => {
     const user = await openAiSettings();
 
     await user.click(await screen.findByRole("button", { name: "一键部署" }));
 
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("verify_api_key", {
+        providerId: settingsFixture.activeProviderId,
         baseUrl: settingsFixture.baseUrl,
         apiKey: settingsFixture.apiKey,
       });

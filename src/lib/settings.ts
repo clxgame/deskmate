@@ -79,10 +79,11 @@ export function hideSettingsWindow(): Promise<void> {
 
 /** Verify the gateway API key; resolves to the model count (or null). */
 export function verifyApiKey(
+  providerId: string,
   baseUrl: string,
   apiKey: string,
 ): Promise<number | null> {
-  return invoke<number | null>("verify_api_key", { baseUrl, apiKey });
+  return invoke<number | null>("verify_api_key", { providerId, baseUrl, apiKey });
 }
 
 export interface AiUsageModel {
@@ -101,8 +102,8 @@ export interface AiUsage {
   readonly topModels: readonly AiUsageModel[];
 }
 
-export function getAiUsage(): Promise<AiUsage> {
-  return invoke<AiUsage>("fetch_ai_usage");
+export function getAiUsage(providerId: string): Promise<AiUsage> {
+  return invoke<AiUsage>("fetch_ai_usage", { providerId });
 }
 
 /** Fires in every window whenever settings are saved. */
@@ -149,7 +150,7 @@ export function onResourceError(
 // ---- AI provider/model listing straight from the opencode sidecar ----
 
 export interface ProviderModel {
-  providerId: string;
+  sidecarId: string;
   providerName: string;
   modelId: string;
   modelName: string;
@@ -157,9 +158,10 @@ export interface ProviderModel {
 
 export function modelsMatchVerification(
   models: ProviderModel[],
+  sidecarId: string,
   _count: number | null,
 ): boolean {
-  return models.some((model) => model.providerId === "yume");
+  return models.some((model) => model.sidecarId === sidecarId);
 }
 
 export async function listModels(): Promise<ProviderModel[]> {
@@ -180,7 +182,7 @@ export async function listModels(): Promise<ProviderModel[]> {
       for (const p of data.providers ?? []) {
         for (const [id, m] of Object.entries(p.models ?? {})) {
           out.push({
-            providerId: p.id,
+            sidecarId: p.id,
             providerName: p.name,
             modelId: id,
             modelName: m.name ?? id,

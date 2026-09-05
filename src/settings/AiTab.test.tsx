@@ -2,8 +2,12 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import * as tauriCore from "@tauri-apps/api/core";
 import * as tauriEvent from "@tauri-apps/api/event";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { dict } from "../lib/i18n";
-import { legacySettingsFixture } from "../testing/settingsFixtures";
+import {
+  legacySettingsFixture,
+  multiProviderSettingsFixture,
+} from "../testing/settingsFixtures";
 import type { Patch } from "./settingsPrimitives";
 
 const invoke = mock<(command: string, args?: unknown) => Promise<unknown>>(
@@ -107,5 +111,40 @@ describe("AI settings tab extraction", () => {
       "value",
       "yume/gpt-5.4-mini",
     );
+  });
+
+  test("passes the active provider UUID to usage and verification calls", async () => {
+    const user = userEvent.setup();
+    const settings = multiProviderSettingsFixture({
+      activeProviderId: "provider-omo-kuro",
+      baseUrl: "https://omo-kuro.example.test/v1",
+      apiKey: "omo-configured-key",
+    });
+    const patch = mock<Patch>((_key, _value) => undefined);
+
+    render(
+      <main className="set-panel">
+        <AiTab settings={settings} patch={patch} t={t} />
+      </main>,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "AI usage · OMO Kuro" }),
+    ).toBeDefined();
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("fetch_ai_usage", {
+        providerId: "provider-omo-kuro",
+      });
+    });
+
+    await user.click(screen.getByRole("button", { name: t.verify }));
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("verify_api_key", {
+        providerId: "provider-omo-kuro",
+        baseUrl: "https://omo-kuro.example.test/v1",
+        apiKey: "omo-configured-key",
+      });
+    });
   });
 });

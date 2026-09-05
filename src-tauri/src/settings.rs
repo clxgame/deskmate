@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -27,6 +28,59 @@ const DEFAULT_RIM_INTENSITY: f64 = 0.3;
 const SPECULAR_INTENSITY_MIN: f64 = 0.0;
 const SPECULAR_INTENSITY_MAX: f64 = 2.0;
 const DEFAULT_SPECULAR_INTENSITY: f64 = 0.05;
+const PROVIDER_IDENTIFIER_MAX_LEN: usize = 128;
+
+fn provider_identifier_is_safe(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= PROVIDER_IDENTIFIER_MAX_LEN
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+fn validate_provider_identifiers(settings: &Settings) -> Result<(), String> {
+    let mut provider_ids = HashSet::new();
+    let mut sidecar_ids = HashSet::new();
+    for provider in &settings.providers {
+        if !provider_identifier_is_safe(&provider.id) {
+            return Err("invalid_provider_id".into());
+        }
+        if !provider_ids.insert(provider.id.as_str()) {
+            return Err("duplicate_provider_id".into());
+        }
+        if !provider_identifier_is_safe(&provider.sidecar_id) {
+            return Err("invalid_sidecar_id".into());
+        }
+        if !sidecar_ids.insert(provider.sidecar_id.as_str()) {
+            return Err("duplicate_sidecar_id".into());
+        }
+    }
+    Ok(())
+}
+
+fn discard_unsafe_loaded_providers(settings: &mut Settings) -> bool {
+    let previous_len = settings.providers.len();
+    let mut provider_ids = HashSet::new();
+    let mut sidecar_ids = HashSet::new();
+    settings.providers.retain(|provider| {
+        provider_identifier_is_safe(&provider.id)
+            && provider_identifier_is_safe(&provider.sidecar_id)
+            && provider_ids.insert(provider.id.clone())
+            && sidecar_ids.insert(provider.sidecar_id.clone())
+    });
+    if !settings
+        .providers
+        .iter()
+        .any(|provider| provider.id == settings.active_provider_id)
+    {
+        settings.active_provider_id = settings
+            .providers
+            .first()
+            .map(|provider| provider.id.clone())
+            .unwrap_or_default();
+    }
+    settings.providers.len() != previous_len
+}
 
 fn normalize_pet_scale(scale: f64) -> f64 {
     if scale.is_finite() {
@@ -499,13 +553,23 @@ pub fn load(app: &tauri::AppHandle) -> Settings {
     settings.base_url =
         migrated_ai_base_url(&settings.provider_id, &settings.base_url).into_owned();
     settings.update_repo = migrated_update_repo(&settings.update_repo).into_owned();
+    let discarded_unsafe_providers = discard_unsafe_loaded_providers(&mut settings);
 
     // Migrate a legacy plaintext key out of settings.json into the OS keystore
     // (under the provider's own slot), then rewrite the file so the secret
     // stops living on disk. If no provider list exists yet, seed `providers[0]`
     // from the legacy single-value fields.
-    if let Err(e) = migrate_legacy_key_and_catalog(app, &mut settings) {
-        eprintln!("api key migration failed: {e}");
+    let migration_succeeded = match migrate_legacy_key_and_catalog(app, &mut settings) {
+        Ok(()) => true,
+        Err(error) => {
+            eprintln!("api key migration failed: {error}");
+            false
+        }
+    };
+    if discarded_unsafe_providers && migration_succeeded {
+        if let Err(error) = save(app, &settings) {
+            eprintln!("discarding unsafe provider settings failed: {error}");
+        }
     }
     settings
 }
@@ -693,12 +757,12 @@ impl SettingsTransactionOps for AppSettingsTransactionOps<'_> {
     }
 
     fn read_provider_catalog(&self, provider_id: &str) -> Result<Option<Vec<u8>>, String> {
-        read_optional_file(&model_catalog_path_for_provider(self.app, provider_id))
+        read_optional_file(&model_catalog_path_for_provider(self.app, provider_id)?)
     }
 
     fn store_provider_catalog(&self, provider_id: &str, catalog: &[u8]) -> Result<(), String> {
         write_file(
-            &model_catalog_path_for_provider(self.app, provider_id),
+            &model_catalog_path_for_provider(self.app, provider_id)?,
             catalog,
         )
     }
@@ -950,6 +1014,7 @@ pub fn set_settings(
     state: tauri::State<SettingsState>,
     mut settings: Settings,
 ) -> Result<(), String> {
+    validate_provider_identifiers(&settings)?;
     settings.pet_scale = normalize_pet_scale(settings.pet_scale);
     settings.outline_width = normalize_render_value(
         settings.outline_width,
@@ -1017,28 +1082,38 @@ fn model_catalog_path(app: &tauri::AppHandle) -> PathBuf {
         .join(legacy_model_catalog_relative_path())
 }
 
-fn model_catalog_path_for_provider(app: &tauri::AppHandle, provider_id: &str) -> PathBuf {
-    app.path()
+fn model_catalog_path_for_provider(
+    app: &tauri::AppHandle,
+    provider_id: &str,
+) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
         .app_data_dir()
         // SAFE-EXPECT: Tauri provides an app data directory after app setup.
         .expect("app data dir unavailable")
-        .join(provider_model_catalog_relative_path(provider_id))
+        .join(provider_model_catalog_relative_path(provider_id)?))
 }
 
 fn legacy_model_catalog_relative_path() -> PathBuf {
     PathBuf::from(LEGACY_MODEL_CATALOG_FILE)
 }
 
-fn provider_model_catalog_relative_path(provider_id: &str) -> PathBuf {
-    PathBuf::from(MODEL_CATALOG_DIR).join(format!("{provider_id}.json"))
+fn provider_model_catalog_relative_path(provider_id: &str) -> Result<PathBuf, String> {
+    if !provider_identifier_is_safe(provider_id) {
+        return Err("invalid_provider_id".into());
+    }
+    Ok(PathBuf::from(MODEL_CATALOG_DIR).join(format!("{provider_id}.json")))
 }
 
 fn legacy_model_catalog_path_in_dir(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join(legacy_model_catalog_relative_path())
 }
 
-fn provider_model_catalog_path_in_dir(app_data_dir: &Path, provider_id: &str) -> PathBuf {
-    app_data_dir.join(provider_model_catalog_relative_path(provider_id))
+fn provider_model_catalog_path_in_dir(
+    app_data_dir: &Path,
+    provider_id: &str,
+) -> Result<PathBuf, String> {
+    Ok(app_data_dir.join(provider_model_catalog_relative_path(provider_id)?))
 }
 
 fn load_model_catalog_at(path: &Path) -> Result<Option<ModelCatalog>, String> {
@@ -1063,7 +1138,7 @@ fn clear_model_catalog_for_provider(
     app: &tauri::AppHandle,
     provider_id: &str,
 ) -> Result<(), String> {
-    match std::fs::remove_file(model_catalog_path_for_provider(app, provider_id)) {
+    match std::fs::remove_file(model_catalog_path_for_provider(app, provider_id)?) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
         Err(e) => Err(format!("无法清除已验证的模型目录: {e}")),
@@ -1087,7 +1162,7 @@ fn migrate_legacy_model_catalog_in_dir(
     let Some(catalog) = load_model_catalog_at(&legacy_path)? else {
         return Ok(false);
     };
-    let provider_path = provider_model_catalog_path_in_dir(app_data_dir, provider_id);
+    let provider_path = provider_model_catalog_path_in_dir(app_data_dir, provider_id)?;
     match load_model_catalog_at(&provider_path)? {
         Some(existing) if existing == catalog => {}
         Some(_) => {
@@ -1125,7 +1200,7 @@ pub(crate) fn load_model_catalog_for_provider(
     let path = if provider_id.is_empty() {
         model_catalog_path(app)
     } else {
-        model_catalog_path_for_provider(app, provider_id)
+        model_catalog_path_for_provider(app, provider_id).ok()?
     };
     std::fs::read_to_string(path)
         .ok()
@@ -1557,13 +1632,14 @@ pub fn register_shortcuts(app: &tauri::AppHandle, settings: &Settings) {
 #[cfg(test)]
 mod tests {
     use super::{
-        api_key_fingerprint, delete_api_key, finalize_sidecar_environment,
-        hydrate_provider_api_keys, insert_verified_sidecar_provider,
+        api_key_fingerprint, delete_api_key, discard_unsafe_loaded_providers,
+        finalize_sidecar_environment, hydrate_provider_api_keys, insert_verified_sidecar_provider,
         migrate_legacy_api_key_to_provider_after_persisted, migrate_legacy_model_catalog_in_dir,
         model_catalog_matches_verified_binding, normalize_pet_scale, normalize_render_value,
         normalize_theme, parse_api_models, persist_settings_update, persist_verified_settings,
-        providers_requiring_catalog_clear, reconcile_verified_settings_binding, redacted_for_disk,
-        resolve_verify_provider_id, saved_api_key, store_api_key, AiProvider, ApiModel,
+        provider_model_catalog_relative_path, providers_requiring_catalog_clear,
+        reconcile_verified_settings_binding, redacted_for_disk, resolve_verify_provider_id,
+        saved_api_key, store_api_key, validate_provider_identifiers, AiProvider, ApiModel,
         LegacyApiKeyMigrationOps, ModelCatalog, PetPosition, Settings, SettingsState,
         SettingsTransactionOps, VerifiedSettingsWrite,
     };
@@ -2514,6 +2590,84 @@ mod tests {
             resolve_verify_provider_id(&settings, Some("missing")),
             Err("unknown_provider".into())
         );
+    }
+
+    #[test]
+    fn provider_identifiers_reject_path_components_and_duplicates() {
+        let provider = |id: &str, sidecar_id: &str| AiProvider {
+            id: id.into(),
+            sidecar_id: sidecar_id.into(),
+            ..AiProvider::default()
+        };
+
+        for invalid_id in ["../victim", r"..\victim", "C:drive", "with.dot", ""] {
+            let settings = Settings {
+                providers: vec![provider(invalid_id, "yume")],
+                ..Settings::default()
+            };
+            assert_eq!(
+                validate_provider_identifiers(&settings),
+                Err("invalid_provider_id".into())
+            );
+            assert_eq!(
+                provider_model_catalog_relative_path(invalid_id),
+                Err("invalid_provider_id".into())
+            );
+        }
+
+        let duplicate_provider = Settings {
+            providers: vec![
+                provider("provider-a", "yume"),
+                provider("provider-a", "yume-2"),
+            ],
+            ..Settings::default()
+        };
+        assert_eq!(
+            validate_provider_identifiers(&duplicate_provider),
+            Err("duplicate_provider_id".into())
+        );
+
+        let duplicate_sidecar = Settings {
+            providers: vec![
+                provider("provider-a", "yume"),
+                provider("provider-b", "yume"),
+            ],
+            ..Settings::default()
+        };
+        assert_eq!(
+            validate_provider_identifiers(&duplicate_sidecar),
+            Err("duplicate_sidecar_id".into())
+        );
+    }
+
+    #[test]
+    fn unsafe_loaded_providers_are_discarded_before_storage_access() {
+        let mut settings = Settings {
+            providers: vec![
+                AiProvider {
+                    id: "provider-safe".into(),
+                    sidecar_id: "yume".into(),
+                    ..AiProvider::default()
+                },
+                AiProvider {
+                    id: "../victim".into(),
+                    sidecar_id: "yume-2".into(),
+                    ..AiProvider::default()
+                },
+                AiProvider {
+                    id: "provider-safe".into(),
+                    sidecar_id: "yume-3".into(),
+                    ..AiProvider::default()
+                },
+            ],
+            active_provider_id: "../victim".into(),
+            ..Settings::default()
+        };
+
+        assert!(discard_unsafe_loaded_providers(&mut settings));
+        assert_eq!(settings.providers.len(), 1);
+        assert_eq!(settings.providers[0].id, "provider-safe");
+        assert_eq!(settings.active_provider_id, "provider-safe");
     }
 
     #[test]

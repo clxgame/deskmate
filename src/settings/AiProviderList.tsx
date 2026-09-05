@@ -1,13 +1,15 @@
 import { useState } from "react";
 import type { Dict } from "../lib/i18n";
-import type { AiProvider, Settings } from "../lib/settings";
+import type { Settings } from "../lib/settings";
+import type { LocalAiDeploymentStatus } from "./CcSwitchStatus";
 import {
-  displayProviderLabel,
   settingsWithAddedProvider,
   settingsWithDeletedProvider,
   settingsWithUpdatedProvider,
 } from "./aiProviderModel";
+import { AiProviderCard, type ProviderField } from "./AiProviderCard";
 import type { ReplaceSettings } from "./settingsPrimitives";
+import type { ProviderVerifyResult } from "./useAiProviderActions";
 
 type AiProviderListProps = {
   readonly settings: Settings;
@@ -17,9 +19,10 @@ type AiProviderListProps = {
   readonly onChange?: () => void;
   readonly onVerify?: (providerId: string) => void;
   readonly onDeploy?: (providerId: string) => void;
+  readonly verifyingProviderId?: string | null;
+  readonly verifyResultFor?: (providerId: string) => ProviderVerifyResult | null;
+  readonly deploymentFor?: (providerId: string) => LocalAiDeploymentStatus;
 };
-
-type ProviderField = "label" | "baseUrl" | "apiKey";
 
 export function AiProviderList({
   settings,
@@ -29,6 +32,9 @@ export function AiProviderList({
   onChange,
   onVerify,
   onDeploy,
+  verifyingProviderId,
+  verifyResultFor,
+  deploymentFor,
 }: AiProviderListProps) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
@@ -75,56 +81,28 @@ export function AiProviderList({
       </div>
       <div className="set-ai-provider-list">
         {settings.providers.map((provider, index) => {
-          const label = displayProviderLabel(provider, index, t);
           const isCollapsed = collapsed.has(provider.id);
           const removeDisabled = settings.providers.length === 1;
           return (
-            <article
+            <AiProviderCard
               key={provider.id}
-              className="set-ai-provider-card"
-              aria-label={label}
-            >
-              <div className="set-ai-provider-head">
-                <span className="set-ai-provider-name">{label}</span>
-                {settings.activeProviderId === provider.id && (
-                  <span className="set-ai-provider-active">{t.aiProviderActive}</span>
-                )}
-                <div className="set-ai-provider-head-actions">
-                  <button
-                    className="set-btn"
-                    type="button"
-                    aria-label={`${isCollapsed ? t.aiProviderExpand : t.aiProviderCollapse} · ${label}`}
-                    onClick={() => toggleProvider(provider.id)}
-                  >
-                    {isCollapsed ? t.aiProviderExpand : t.aiProviderCollapse}
-                  </button>
-                  <button
-                    className="set-btn set-btn-danger set-ai-provider-remove"
-                    type="button"
-                    disabled={removeDisabled}
-                    title={removeDisabled ? t.aiProviderRemoveLast : t.aiProviderRemove}
-                    aria-label={
-                      removeDisabled ? t.aiProviderRemoveLast : t.aiProviderRemove
-                    }
-                    onClick={() => setPendingDeleteId(provider.id)}
-                  >
-                    {t.aiProviderRemove}
-                  </button>
-                </div>
-              </div>
-              {!isCollapsed && (
-                <ProviderBody
-                  provider={provider}
-                  label={label}
-                  t={t}
-                  onFieldChange={(field, value) =>
-                    updateProvider(provider.id, field, value)
-                  }
-                  onVerify={onVerify}
-                  onDeploy={onDeploy}
-                />
-              )}
-            </article>
+              provider={provider}
+              index={index}
+              active={settings.activeProviderId === provider.id}
+              collapsed={isCollapsed}
+              removeDisabled={removeDisabled}
+              t={t}
+              onToggle={() => toggleProvider(provider.id)}
+              onDelete={() => setPendingDeleteId(provider.id)}
+              onFieldChange={(field, value) =>
+                updateProvider(provider.id, field, value)
+              }
+              onVerify={onVerify}
+              onDeploy={onDeploy}
+              verifying={verifyingProviderId === provider.id}
+              verifyResult={verifyResultFor?.(provider.id) ?? null}
+              deployment={deploymentFor?.(provider.id) ?? { kind: "idle" }}
+            />
           );
         })}
       </div>
@@ -156,66 +134,5 @@ export function AiProviderList({
         </>
       )}
     </section>
-  );
-}
-
-function ProviderBody({
-  provider,
-  label,
-  t,
-  onFieldChange,
-  onVerify,
-  onDeploy,
-}: {
-  readonly provider: AiProvider;
-  readonly label: string;
-  readonly t: Dict;
-  readonly onFieldChange: (field: ProviderField, value: string) => void;
-  readonly onVerify?: (providerId: string) => void;
-  readonly onDeploy?: (providerId: string) => void;
-}) {
-  const fields: readonly {
-    readonly key: ProviderField;
-    readonly label: string;
-    readonly type: "text" | "password";
-  }[] = [
-    { key: "label", label: t.aiProviderLabel, type: "text" },
-    { key: "baseUrl", label: t.aiProviderBaseUrl, type: "text" },
-    { key: "apiKey", label: t.aiProviderApiKey, type: "password" },
-  ];
-  return (
-    <div className="set-ai-provider-body">
-      {fields.map((field) => (
-        <label className="set-ai-provider-field" key={field.key}>
-          <span>{field.label}</span>
-          <input
-            className="set-input"
-            type={field.type}
-            value={provider[field.key]}
-            aria-label={`${field.label} · ${label}`}
-            onChange={(event) => onFieldChange(field.key, event.target.value)}
-          />
-        </label>
-      ))}
-      <div className="set-ai-provider-actions">
-        <button
-          className="set-btn"
-          type="button"
-          disabled={!onVerify || !provider.apiKey.trim()}
-          onClick={() => onVerify?.(provider.id)}
-        >
-          {t.aiProviderVerify}
-        </button>
-        <button
-          className="set-btn"
-          type="button"
-          disabled={!onDeploy || !provider.apiKey.trim()}
-          title={t.aiProviderDeployHint}
-          onClick={() => onDeploy?.(provider.id)}
-        >
-          {t.aiProviderDeploy}
-        </button>
-      </div>
-    </div>
   );
 }

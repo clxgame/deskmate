@@ -10,7 +10,11 @@ import {
   legacySettingsFixture,
   multiProviderSettingsFixture,
 } from "../testing/settingsFixtures";
-import type { Patch, ReplaceSettings } from "./settingsPrimitives";
+import type {
+  Patch,
+  PersistSettings,
+  ReplaceSettings,
+} from "./settingsPrimitives";
 
 const invoke = mock<(command: string, args?: unknown) => Promise<unknown>>(
   (command) => {
@@ -37,6 +41,7 @@ const invoke = mock<(command: string, args?: unknown) => Promise<unknown>>(
 const listen = mock<(_event: string, _handler: (event: unknown) => void) => Promise<() => void>>(
   () => Promise.resolve(() => undefined),
 );
+const persist = mock<PersistSettings>(() => Promise.resolve());
 const fetchCall = mock((_input: string | URL | Request, _init?: RequestInit) =>
   Promise.resolve(
     new Response(
@@ -70,17 +75,15 @@ function textIndex(container: HTMLElement, text: string): number {
 
 function PickModelProbe({
   settings,
-  patch,
   replace,
   value,
 }: {
   readonly settings: Settings;
-  readonly patch: Patch;
   readonly replace: ReplaceSettings;
   readonly value: string;
 }) {
   const picked = useRef(false);
-  const controller = useAiTabController({ settings, patch, replace, t });
+  const controller = useAiTabController({ settings, replace, persist, t });
 
   useEffect(() => {
     if (picked.current) return;
@@ -96,6 +99,7 @@ afterEach(cleanup);
 beforeEach(() => {
   invoke.mockClear();
   listen.mockClear();
+  persist.mockClear();
   fetchCall.mockClear();
   globalThis.fetch = fetchMock;
 });
@@ -108,7 +112,13 @@ describe("AI settings tab extraction", () => {
 
     render(
       <main className="set-panel">
-        <AiTab settings={settings} patch={patch} replace={replace} t={t} />
+        <AiTab
+          settings={settings}
+          patch={patch}
+          replace={replace}
+          persist={persist}
+          t={t}
+        />
       </main>,
     );
 
@@ -152,7 +162,13 @@ describe("AI settings tab extraction", () => {
 
     render(
       <main className="set-panel">
-        <AiTab settings={settings} patch={patch} replace={replace} t={t} />
+        <AiTab
+          settings={settings}
+          patch={patch}
+          replace={replace}
+          persist={persist}
+          t={t}
+        />
       </main>,
     );
 
@@ -221,7 +237,13 @@ describe("AI settings tab extraction", () => {
 
     render(
       <main className="set-panel">
-        <AiTab settings={settings} patch={patch} replace={replace} t={t} />
+        <AiTab
+          settings={settings}
+          patch={patch}
+          replace={replace}
+          persist={persist}
+          t={t}
+        />
       </main>,
     );
 
@@ -254,13 +276,11 @@ describe("AI settings tab extraction", () => {
 
   test("does not replace settings when the controller receives an unknown sidecar selection", async () => {
     const settings = multiProviderSettingsFixture({ language: "en-US" });
-    const patch = mock<Patch>((_key, _value) => undefined);
     const replace = mock<ReplaceSettings>((_settings) => undefined);
 
     render(
       <PickModelProbe
         settings={settings}
-        patch={patch}
         replace={replace}
         value="unknown-sidecar/orphan"
       />,

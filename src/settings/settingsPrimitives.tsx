@@ -4,6 +4,7 @@ import type { Dict } from "../lib/i18n";
 
 export type Patch = <K extends keyof Settings>(key: K, value: Settings[K]) => void;
 export type ReplaceSettings = (settings: Settings) => void;
+export type PersistSettings = (settings: Settings) => Promise<void>;
 
 export interface TabProps {
   readonly settings: Settings;

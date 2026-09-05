@@ -140,6 +140,16 @@ export default function SettingsApp() {
     }, SAVE_DELAY_MS);
   }, []);
 
+  const persist = useCallback(async (next: Settings) => {
+    if (saveTimer.current !== null) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    settingsRef.current = next;
+    setLocalSettings(next);
+    await setSettings(next);
+  }, []);
+
   /** Update one field locally, then persist the whole object debounced. */
   const patch = useCallback(
     <K extends keyof Settings>(key: K, value: Settings[K]) => {
@@ -188,7 +198,13 @@ export default function SettingsApp() {
               <GeneralTab settings={settings} patch={patch} t={t} />
             )}
             {tab === "ai" && (
-              <AiTab settings={settings} patch={patch} replace={replace} t={t} />
+              <AiTab
+                settings={settings}
+                patch={patch}
+                replace={replace}
+                persist={persist}
+                t={t}
+              />
             )}
             {tab === "widget" && (
               <WidgetTab settings={settings} patch={patch} t={t} />

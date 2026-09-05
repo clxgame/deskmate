@@ -1,58 +1,40 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import {
   listModels,
-  modelsMatchVerification,
-  verifyApiKey,
   type ProviderModel,
   type Settings,
 } from "../lib/settings";
-import { verifyError, type Dict } from "../lib/i18n";
+import type { Dict } from "../lib/i18n";
 import {
   groupModelsByConfiguredProvider,
   selectedModelValue,
   settingsWithSelectedModel,
 } from "./aiProviderModel";
 import {
-  localAiDeploymentErrorCode,
   normalizeCcSwitchCapabilityStatus,
-  normalizeLocalAiDeploymentReceipt,
-  normalizeLocalAiDeploymentStage,
   type CcSwitchCapabilityStatus,
-  type LocalAiDeploymentStatus,
 } from "./CcSwitchStatus";
-import type { Patch, ReplaceSettings } from "./settingsPrimitives";
-
-const LOCAL_AI_DEPLOY_PROGRESS_EVENT = "deskmate://local-ai-deploy-progress";
-
-type VerifyResult = {
-  readonly ok: boolean;
-  readonly message: string;
-};
+import type { PersistSettings, ReplaceSettings } from "./settingsPrimitives";
+import { useAiProviderActions } from "./useAiProviderActions";
 
 type AiTabControllerInput = {
   readonly settings: Settings;
-  readonly patch: Patch;
   readonly replace: ReplaceSettings;
+  readonly persist: PersistSettings;
   readonly t: Dict;
 };
 
 export function useAiTabController({
   settings,
-  patch,
   replace,
+  persist,
   t,
 }: AiTabControllerInput) {
   const [models, setModels] = useState<ProviderModel[]>([]);
   const [failed, setFailed] = useState(false);
-  const [verifying, setVerifying] = useState(false);
   const [ccSwitchStatus, setCcSwitchStatus] =
     useState<CcSwitchCapabilityStatus>({ kind: "checking" });
-  const [deployment, setDeployment] = useState<LocalAiDeploymentStatus>({
-    kind: "idle",
-  });
-  const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
   const ccSwitchRequest = useRef(0);
 
   const activeProvider =
@@ -113,109 +95,13 @@ export function useAiTabController({
     };
   }, [refreshCcSwitchStatus]);
 
-  useEffect(() => {
-    let closed = false;
-    let dispose: (() => void) | undefined;
-    void listen<unknown>(LOCAL_AI_DEPLOY_PROGRESS_EVENT, (event) => {
-      const stage = normalizeLocalAiDeploymentStage(event.payload);
-      if (!closed && stage) setDeployment({ kind: "working", stage });
-    }).then((unlisten) => {
-      if (closed) unlisten();
-      else dispose = unlisten;
-    });
-    return () => {
-      closed = true;
-      dispose?.();
-    };
-  }, []);
-
-  const verify = async (providerId: string) => {
-    setVerifying(true);
-    setVerifyResult(null);
-    try {
-      const provider = settings.providers.find((entry) => entry.id === providerId);
-      if (!provider) throw new Error("provider_missing");
-      const count = await verifyApiKey(
-        provider.id,
-        provider.baseUrl,
-        provider.apiKey,
-      );
-      const refreshed = await refreshModels();
-      if (!modelsMatchVerification(refreshed, provider.sidecarId, count)) {
-        throw new Error("models_unavailable");
-      }
-      setVerifyResult({ ok: true, message: t.verifyOk(count) });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setVerifyResult({ ok: false, message: verifyError(t, message) });
-    } finally {
-      setVerifying(false);
-    }
-  };
-
-  const deployLocalAi = async (providerId: string) => {
-    setDeployment({ kind: "working", stage: "verifyingApi" });
-    setVerifyResult(null);
-    try {
-      const provider = settings.providers.find((entry) => entry.id === providerId);
-      if (!provider) throw new Error("provider_missing");
-      const count = await verifyApiKey(
-        provider.id,
-        provider.baseUrl,
-        provider.apiKey,
-      );
-      const refreshed = await refreshModels();
-      if (!modelsMatchVerification(refreshed, provider.sidecarId, count)) {
-        throw new Error("models_unavailable");
-      }
-      const available = refreshed.filter(
-        (model) => model.sidecarId === provider.sidecarId,
-      );
-      const chosen =
-        available.find(
-          (model) =>
-            settings.providerId === provider.sidecarId &&
-            model.modelId === settings.modelId,
-        ) ?? available[0];
-      if (!chosen) throw new Error("models_unavailable");
-      if (
-        settings.providerId !== provider.sidecarId ||
-        settings.modelId !== chosen.modelId
-      ) {
-        patch("providerId", provider.sidecarId);
-        patch("modelId", chosen.modelId);
-      }
-      setDeployment({ kind: "working", stage: "installingOpenCode" });
-      const raw = await invoke<unknown>("deploy_local_ai_stack", {
-        request: { modelId: chosen.modelId },
-      });
-      const receipt = normalizeLocalAiDeploymentReceipt(raw);
-      if (!receipt) throw new Error("local_ai_deploy_invalid_result");
-      setDeployment({
-        kind: "success",
-        ccSwitchVersion: receipt.ccSwitchVersion,
-        openCodeVersion: receipt.openCodeVersion,
-        modelCount: receipt.modelCount,
-        ccSwitchSyncRequired: receipt.ccSwitchSyncRequired,
-        ccSwitchRunning: receipt.ccSwitchRunning,
-      });
-      await refreshCcSwitchStatus();
-    } catch (error) {
-      const code = localAiDeploymentErrorCode(error);
-      const message = [
-        "empty_key",
-        "bad_url",
-        "unauthorized",
-        "not_found",
-        "no_models",
-        "invalid_response",
-        "models_unavailable",
-      ].includes(code)
-        ? verifyError(t, code)
-        : t.localAiDeployError(code);
-      setDeployment({ kind: "error", message });
-    }
-  };
+  const actions = useAiProviderActions({
+    settings,
+    persist,
+    refreshModels,
+    refreshCcSwitchStatus,
+    t,
+  });
 
   const pickModel = (raw: string) => {
     const next = settingsWithSelectedModel(settings, raw);
@@ -223,22 +109,17 @@ export function useAiTabController({
   };
 
   const clearVerificationState = () => {
-    setVerifyResult(null);
-    setDeployment({ kind: "idle" });
+    actions.clearOperationState();
   };
 
   return {
     activeProviderId,
     ccSwitchStatus,
     currentModelValue: selectedModelValue(settings),
-    deployment,
     failed,
     groups: groupModelsByConfiguredProvider(settings.providers, models, t),
     pickModel,
     clearVerificationState,
-    deployLocalAi,
-    verify,
-    verifying,
-    verifyResult,
+    ...actions,
   };
 }

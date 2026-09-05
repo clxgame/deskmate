@@ -493,6 +493,104 @@ describe("CC Switch entry in AI settings", () => {
     ).toContain("部署完成");
   });
 
+  test("persists an edited provider before verifying its credentials", async () => {
+    const user = await openAiSettings();
+    await user.click(screen.getByRole("button", { name: "添加供应商" }));
+
+    const providerCard = screen.getByRole("article", { name: "供应商 2" });
+    const baseUrlInput = within(providerCard).getByLabelText("Base URL · 供应商 2");
+    const apiKeyInput = within(providerCard).getByLabelText("API Key · 供应商 2");
+    await user.type(baseUrlInput, "https://frontier.example.test/v1");
+    await user.type(apiKeyInput, "frontier-secret");
+    await user.click(within(providerCard).getByRole("button", { name: "验证" }));
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith(
+        "set_settings",
+        expect.objectContaining({
+          settings: expect.objectContaining({
+            providers: expect.arrayContaining([
+              expect.objectContaining({
+                sidecarId: "yume-2",
+                baseUrl: "https://frontier.example.test/v1",
+                apiKey: "frontier-secret",
+              }),
+            ]),
+          }),
+        }),
+      );
+      expect(invoke).toHaveBeenCalledWith(
+        "verify_api_key",
+        expect.objectContaining({
+          baseUrl: "https://frontier.example.test/v1",
+          apiKey: "frontier-secret",
+        }),
+      );
+    });
+
+    const relevant = invoke.mock.calls
+      .map(([command]) => command)
+      .filter((command) => command === "set_settings" || command === "verify_api_key");
+    expect(relevant.slice(-2)).toEqual(["set_settings", "verify_api_key"]);
+    expect(document.body.textContent).not.toContain("frontier-secret");
+  });
+
+  test("persists provider selection atomically before native deployment", async () => {
+    const settings = multiProviderSettingsFixture({ language: "zh-CN" });
+    const catalog = {
+      providers: [
+        ...modelCatalogFixture.providers,
+        {
+          id: "yume-2",
+          name: "OMO",
+          models: {
+            "claude-sonnet-4.5": {
+              id: "claude-sonnet-4.5",
+              name: "Claude Sonnet 4.5",
+            },
+          },
+        },
+      ],
+    };
+    globalThis.fetch = Object.assign(
+      mock(() => Promise.resolve(new Response(JSON.stringify(catalog), { status: 200 }))),
+      { preconnect: mock(() => undefined) },
+    );
+    invoke.mockImplementation((command) => {
+      if (command === "get_settings") return Promise.resolve(settings);
+      return defaultInvoke(command);
+    });
+
+    const user = await openAiSettings();
+    const providerCard = await screen.findByRole("article", { name: "OMO Kuro" });
+    await user.click(within(providerCard).getByRole("button", { name: "部署" }));
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("deploy_local_ai_stack", {
+        request: { modelId: "claude-sonnet-4.5" },
+      });
+    });
+    expect(invoke).toHaveBeenCalledWith("set_settings", {
+      settings: {
+        ...settings,
+        activeProviderId: "provider-omo-kuro",
+        providerId: "yume-2",
+        modelId: "claude-sonnet-4.5",
+      },
+    });
+    const relevant = invoke.mock.calls
+      .map(([command]) => command)
+      .filter((command) =>
+        ["set_settings", "verify_api_key", "deploy_local_ai_stack"].includes(command),
+      );
+    expect(relevant).toEqual([
+      "set_settings",
+      "verify_api_key",
+      "set_settings",
+      "deploy_local_ai_stack",
+    ]);
+  });
+
   test("never renders unknown native deployment fields or a rejected API key", async () => {
     const secret = "sk-native-error-must-not-render";
     invoke.mockImplementation((command) => {

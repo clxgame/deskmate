@@ -5,6 +5,7 @@ import { displayProviderLabel } from "./aiProviderModel";
 import {
   Row,
   Switch,
+  type PersistSettings,
   type ReplaceSettings,
   type TabProps,
 } from "./settingsPrimitives";
@@ -12,10 +13,11 @@ import { useAiTabController } from "./useAiTabController";
 
 type AiTabProps = TabProps & {
   readonly replace: ReplaceSettings;
+  readonly persist: PersistSettings;
 };
 
-export function AiTab({ settings, patch, replace, t }: AiTabProps) {
-  const controller = useAiTabController({ settings, patch, replace, t });
+export function AiTab({ settings, patch, replace, persist, t }: AiTabProps) {
+  const controller = useAiTabController({ settings, replace, persist, t });
   const activeProvider =
     settings.providers.find(
       (provider) => provider.id === controller.activeProviderId,
@@ -29,16 +31,12 @@ export function AiTab({ settings, patch, replace, t }: AiTabProps) {
         replace={replace}
         t={t}
         onChange={controller.clearVerificationState}
-        onVerify={(providerId) => void controller.verify(providerId)}
-        onDeploy={(providerId) => void controller.deployLocalAi(providerId)}
+        onVerify={(providerId) => void controller.verifyProvider(providerId)}
+        onDeploy={(providerId) => void controller.deployProvider(providerId)}
+        verifyingProviderId={controller.verifyingProviderId}
+        verifyResultFor={controller.verifyResultFor}
+        deploymentFor={controller.deploymentFor}
       />
-      {controller.verifyResult && (
-        <p
-          className={`set-note ${controller.verifyResult.ok ? "set-note-ok" : "set-note-error"}`}
-        >
-          {controller.verifyResult.message}
-        </p>
-      )}
 
       <Row label={t.model}>
         <select
@@ -75,11 +73,11 @@ export function AiTab({ settings, patch, replace, t }: AiTabProps) {
       <p className="set-note set-note-warn">{t.yoloWarn}</p>
       <CcSwitchStatus
         status={controller.ccSwitchStatus}
-        deployment={controller.deployment}
+        deployment={controller.deploymentFor(activeProvider?.id ?? "")}
         canDeploy={Boolean(activeProvider?.apiKey.trim())}
         t={t}
         onDeploy={() => {
-          if (activeProvider) void controller.deployLocalAi(activeProvider.id);
+          if (activeProvider) void controller.deployProvider(activeProvider.id);
         }}
       />
       {settings.providers.map((provider, index) => (

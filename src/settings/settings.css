@@ -887,6 +887,7 @@ body,
   font-size: var(--t-small);
   line-height: 1.5;
   margin: 0 0 var(--s-3);
+  text-wrap: balance;
 }
 
 .set-confirm-actions {

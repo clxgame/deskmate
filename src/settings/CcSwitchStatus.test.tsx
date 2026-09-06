@@ -562,6 +562,7 @@ describe("CC Switch entry in AI settings", () => {
     });
 
     const user = await openAiSettings();
+    await user.click(screen.getByRole("tab", { name: "OMO Kuro" }));
     const providerCard = await screen.findByRole("article", { name: "OMO Kuro" });
     await user.click(within(providerCard).getByRole("button", { name: "部署" }));
 
@@ -656,6 +657,7 @@ describe("CC Switch entry in AI settings", () => {
     });
 
     const user = await openAiSettings();
+    await user.click(screen.getByRole("tab", { name: "OMO Kuro" }));
     const providerCard = await screen.findByRole("article", { name: "OMO Kuro" });
     await user.click(within(providerCard).getByRole("button", { name: "部署" }));
 

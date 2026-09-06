@@ -10,14 +10,12 @@ type AiProviderCardProps = {
   readonly provider: AiProvider;
   readonly index: number;
   readonly active: boolean;
-  readonly collapsed: boolean;
   readonly removeDisabled: boolean;
   readonly t: Dict;
   readonly verifying: boolean;
   readonly verifyResult: ProviderVerifyResult | null;
   readonly deployment: LocalAiDeploymentStatus;
   readonly operationLocked: boolean;
-  readonly onToggle: () => void;
   readonly onDelete: () => void;
   readonly onFieldChange: (field: ProviderField, value: string) => void;
   readonly onVerify?: (providerId: string) => void;
@@ -28,14 +26,12 @@ export function AiProviderCard({
   provider,
   index,
   active,
-  collapsed,
   removeDisabled,
   t,
   verifying,
   verifyResult,
   deployment,
   operationLocked,
-  onToggle,
   onDelete,
   onFieldChange,
   onVerify,
@@ -51,14 +47,6 @@ export function AiProviderCard({
         )}
         <div className="set-ai-provider-head-actions">
           <button
-            className="set-btn"
-            type="button"
-            aria-label={`${collapsed ? t.aiProviderExpand : t.aiProviderCollapse} · ${label}`}
-            onClick={onToggle}
-          >
-            {collapsed ? t.aiProviderExpand : t.aiProviderCollapse}
-          </button>
-          <button
             className="set-btn set-btn-danger set-ai-provider-remove"
             type="button"
             disabled={removeDisabled || operationLocked}
@@ -72,20 +60,18 @@ export function AiProviderCard({
           </button>
         </div>
       </div>
-      {!collapsed && (
-        <ProviderBody
-          provider={provider}
-          label={label}
-          t={t}
-          verifying={verifying}
-          verifyResult={verifyResult}
-          deployment={deployment}
-          operationLocked={operationLocked}
-          onFieldChange={onFieldChange}
-          onVerify={onVerify}
-          onDeploy={onDeploy}
-        />
-      )}
+      <ProviderBody
+        provider={provider}
+        label={label}
+        t={t}
+        verifying={verifying}
+        verifyResult={verifyResult}
+        deployment={deployment}
+        operationLocked={operationLocked}
+        onFieldChange={onFieldChange}
+        onVerify={onVerify}
+        onDeploy={onDeploy}
+      />
     </article>
   );
 }
@@ -103,7 +89,7 @@ function ProviderBody({
   onDeploy,
 }: Omit<
   AiProviderCardProps,
-  "index" | "active" | "collapsed" | "removeDisabled" | "onToggle" | "onDelete"
+  "index" | "active" | "removeDisabled" | "onDelete"
 > & { readonly label: string }) {
   const fields = [
     { key: "label", label: t.aiProviderLabel, type: "text" },

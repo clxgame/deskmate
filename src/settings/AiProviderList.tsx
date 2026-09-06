@@ -8,6 +8,7 @@ import {
   settingsWithUpdatedProvider,
 } from "./aiProviderModel";
 import { AiProviderCard, type ProviderField } from "./AiProviderCard";
+import { AiProviderTabs } from "./AiProviderTabs";
 import type { ReplaceSettings } from "./settingsPrimitives";
 import type { ProviderVerifyResult } from "./useAiProviderActions";
 
@@ -38,13 +39,17 @@ export function AiProviderList({
   deploymentFor,
   operationBusy = false,
 }: AiProviderListProps) {
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const [selectedId, setSelectedId] = useState(settings.activeProviderId);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
   const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const selectedProvider =
+    settings.providers.find((provider) => provider.id === selectedId)
+    ?? settings.providers.find((provider) => provider.id === settings.activeProviderId)
+    ?? settings.providers[0];
 
   useEffect(() => {
     if (pendingDeleteId === null) return;
@@ -78,18 +83,14 @@ export function AiProviderList({
     replace(settingsWithUpdatedProvider(settings, providerId, { [field]: value }));
   };
 
-  const toggleProvider = (providerId: string) => {
-    setCollapsed((current) => {
-      const next = new Set(current);
-      if (next.has(providerId)) next.delete(providerId);
-      else next.add(providerId);
-      return next;
-    });
-  };
-
   const addProvider = () => {
+    const providerId = createProviderId();
     onChange?.();
-    replace(settingsWithAddedProvider(settings, createProviderId()));
+    replace(settingsWithAddedProvider(settings, providerId));
+    setSelectedId(providerId);
+    window.requestAnimationFrame(() => {
+      document.getElementById(`ai-provider-tab-${providerId}`)?.focus();
+    });
   };
 
   const confirmDelete = () => {
@@ -130,36 +131,49 @@ export function AiProviderList({
         </button>
       </div>
       <div className="set-ai-provider-list">
+        <AiProviderTabs
+          providers={settings.providers}
+          selectedId={selectedProvider?.id}
+          onSelect={setSelectedId}
+          t={t}
+        />
         {settings.providers.map((provider, index) => {
-          const isCollapsed = collapsed.has(provider.id);
-          const removeDisabled = settings.providers.length === 1;
+          const selected = provider.id === selectedProvider?.id;
           return (
-            <AiProviderCard
+            <div
               key={provider.id}
-              provider={provider}
-              index={index}
-              active={settings.activeProviderId === provider.id}
-              collapsed={isCollapsed}
-              removeDisabled={removeDisabled}
-              t={t}
-              onToggle={() => toggleProvider(provider.id)}
-              onDelete={() => {
-                deleteTriggerRef.current =
-                  document.activeElement instanceof HTMLButtonElement
-                    ? document.activeElement
-                    : null;
-                setPendingDeleteId(provider.id);
-              }}
-              onFieldChange={(field, value) =>
-                updateProvider(provider.id, field, value)
-              }
-              onVerify={onVerify}
-              onDeploy={onDeploy}
-              verifying={verifyingProviderId === provider.id}
-              verifyResult={verifyResultFor?.(provider.id) ?? null}
-              deployment={deploymentFor?.(provider.id) ?? { kind: "idle" }}
-              operationLocked={operationBusy}
-            />
+              id={`ai-provider-panel-${provider.id}`}
+              role="tabpanel"
+              aria-labelledby={`ai-provider-tab-${provider.id}`}
+              hidden={!selected}
+            >
+              {selected && (
+                <AiProviderCard
+                  key={provider.id}
+                  provider={provider}
+                  index={index}
+                  active={settings.activeProviderId === provider.id}
+                  removeDisabled={settings.providers.length === 1}
+                  t={t}
+                  onDelete={() => {
+                    deleteTriggerRef.current =
+                      document.activeElement instanceof HTMLButtonElement
+                        ? document.activeElement
+                        : null;
+                    setPendingDeleteId(provider.id);
+                  }}
+                  onFieldChange={(field, value) =>
+                    updateProvider(provider.id, field, value)
+                  }
+                  onVerify={onVerify}
+                  onDeploy={onDeploy}
+                  verifying={verifyingProviderId === provider.id}
+                  verifyResult={verifyResultFor?.(provider.id) ?? null}
+                  deployment={deploymentFor?.(provider.id) ?? { kind: "idle" }}
+                  operationLocked={operationBusy}
+                />
+              )}
+            </div>
           );
         })}
       </div>

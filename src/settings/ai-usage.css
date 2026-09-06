@@ -4,8 +4,7 @@
 
 .set-ai-usage {
   min-width: 0;
-  width: min(100%, var(--control-w));
-  margin-top: var(--s-5);
+  width: 100%;
 }
 
 .set-ai-usage-head {
@@ -25,8 +24,21 @@
 
 .set-ai-usage-list {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
   gap: var(--s-3);
   margin-top: var(--s-4);
+}
+
+.set-ai-usage:only-child {
+  grid-column: 1 / -1;
+  max-width: var(--control-w);
+}
+
+@media (max-width: 600px) {
+  .set-ai-usage-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .set-ai-usage-provider-label {

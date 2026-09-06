@@ -910,6 +910,29 @@ body,
   justify-content: space-between;
 }
 
+.set-ai-provider-tabs {
+  display: flex;
+  gap: var(--s-2);
+  min-width: 0;
+  overflow-x: auto;
+  padding: var(--s-1);
+}
+
+.set-ai-provider-tab {
+  flex: 0 0 auto;
+  max-width: var(--control-w);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.set-ai-provider-tab[aria-selected="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
+}
+
 .set-ai-provider-title-row .set-section-head {
   margin-bottom: 0;
 }

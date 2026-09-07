@@ -127,12 +127,10 @@ export function UpdateFooter({ repo, t }: { readonly repo: string; readonly t: D
   return (
     <footer className="set-footer">
       <span className="set-footer-version">{version ? `v${version}` : ""}</span>
-      {status && <span className={statusClass}>{status}</span>}
-      {!isBusy && (
-        <button className="set-footer-btn" onClick={() => void onUpdate()}>
-          {t.updateCheck}
-        </button>
-      )}
+      <button className="set-footer-btn" disabled={isBusy} onClick={() => void onUpdate()}>
+        {t.updateCheck}
+      </button>
+      {status && <span className={statusClass} title={status}>{status}</span>}
     </footer>
   );
 }

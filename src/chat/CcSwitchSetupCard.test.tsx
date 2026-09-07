@@ -234,6 +234,9 @@ describe("CC Switch secure setup card", () => {
   test("moves focus deterministically through provider, model, and launch steps", async () => {
     renderCard();
     const user = userEvent.setup();
+    await new Promise<void>((resolve) => {
+      globalThis.setTimeout(resolve, 0);
+    });
 
     await waitFor(() => {
       expect(document.activeElement).toBe(screen.getByLabelText("Provider name"));

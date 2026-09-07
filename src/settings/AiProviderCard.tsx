@@ -102,7 +102,7 @@ function ProviderBody({
         <label className="set-ai-provider-field" key={field.key}>
           <span>{field.label}</span>
           <input
-            className="set-input"
+            className={`set-input${field.key === "baseUrl" ? " set-ai-base-url" : ""}`}
             type={field.type}
             value={provider[field.key]}
             aria-label={`${field.label} · ${label}`}
@@ -113,7 +113,7 @@ function ProviderBody({
       ))}
       <div className="set-ai-provider-actions">
         <button
-          className="set-btn"
+          className="set-btn set-verify"
           type="button"
           disabled={!onVerify || operationLocked || !provider.apiKey.trim()}
           onClick={() => onVerify?.(provider.id)}

@@ -25,7 +25,6 @@ export function AiTab({ settings, patch, replace, persist, t }: AiTabProps) {
 
   return (
     <>
-      <h2 className="set-panel-head">{t.tabAi}</h2>
       <AiProviderList
         settings={settings}
         replace={replace}

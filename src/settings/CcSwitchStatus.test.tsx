@@ -500,8 +500,10 @@ describe("CC Switch entry in AI settings", () => {
     const providerCard = screen.getByRole("article", { name: "供应商 2" });
     const baseUrlInput = within(providerCard).getByLabelText("Base URL · 供应商 2");
     const apiKeyInput = within(providerCard).getByLabelText("API Key · 供应商 2");
-    await user.type(baseUrlInput, "https://frontier.example.test/v1");
-    await user.type(apiKeyInput, "frontier-secret");
+    await user.click(baseUrlInput);
+    await user.paste("https://frontier.example.test/v1");
+    await user.click(apiKeyInput);
+    await user.paste("frontier-secret");
     await user.click(within(providerCard).getByRole("button", { name: "验证" }));
 
     await waitFor(() => {
@@ -562,7 +564,7 @@ describe("CC Switch entry in AI settings", () => {
     });
 
     const user = await openAiSettings();
-    await user.click(screen.getByRole("tab", { name: "OMO Kuro" }));
+    await user.click(screen.getByRole("button", { name: "OMO Kuro" }));
     const providerCard = await screen.findByRole("article", { name: "OMO Kuro" });
     await user.click(within(providerCard).getByRole("button", { name: "部署" }));
 
@@ -622,6 +624,7 @@ describe("CC Switch entry in AI settings", () => {
     });
 
     const user = await openAiSettings();
+    await user.click(screen.getByRole("button", { name: "Kuro" }));
     const providerCard = await screen.findByRole("article", { name: "Kuro" });
     await user.click(within(providerCard).getByRole("button", { name: "部署" }));
     await waitFor(() => {
@@ -657,7 +660,7 @@ describe("CC Switch entry in AI settings", () => {
     });
 
     const user = await openAiSettings();
-    await user.click(screen.getByRole("tab", { name: "OMO Kuro" }));
+    await user.click(screen.getByRole("button", { name: "OMO Kuro" }));
     const providerCard = await screen.findByRole("article", { name: "OMO Kuro" });
     await user.click(within(providerCard).getByRole("button", { name: "部署" }));
 
@@ -685,6 +688,7 @@ describe("CC Switch entry in AI settings", () => {
     });
 
     const user = await openAiSettings();
+    await user.click(screen.getByRole("button", { name: "Kuro" }));
     const providerCard = await screen.findByRole("article", { name: "Kuro" });
     await user.click(within(providerCard).getByRole("button", { name: "验证" }));
     await screen.findByRole("button", { name: "验证中…" });

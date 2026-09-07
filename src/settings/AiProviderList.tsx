@@ -40,6 +40,7 @@ export function AiProviderList({
   operationBusy = false,
 }: AiProviderListProps) {
   const [selectedId, setSelectedId] = useState(settings.activeProviderId);
+  const [expanded, setExpanded] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
@@ -65,11 +66,12 @@ export function AiProviderList({
     };
   }, [pendingDeleteId]);
 
-  const closeDeleteDialog = () => {
+  const closeDeleteDialog = (fallbackId = selectedProvider?.id) => {
     const trigger = deleteTriggerRef.current;
     setPendingDeleteId(null);
     window.requestAnimationFrame(() => {
       if (trigger?.isConnected) trigger.focus();
+      else if (fallbackId) document.getElementById(`ai-provider-disclosure-${fallbackId}`)?.focus();
       else addButtonRef.current?.focus();
     });
   };
@@ -88,16 +90,22 @@ export function AiProviderList({
     onChange?.();
     replace(settingsWithAddedProvider(settings, providerId));
     setSelectedId(providerId);
+    setExpanded(true);
     window.requestAnimationFrame(() => {
-      document.getElementById(`ai-provider-tab-${providerId}`)?.focus();
+      document.getElementById(`ai-provider-disclosure-${providerId}`)?.focus();
     });
   };
 
   const confirmDelete = () => {
     if (pendingDeleteId === null || operationBusy) return;
     onChange?.();
-    replace(settingsWithDeletedProvider(settings, pendingDeleteId));
-    closeDeleteDialog();
+    const next = settingsWithDeletedProvider(settings, pendingDeleteId);
+    const survivor = next.providers.find((provider) => provider.id === selectedProvider?.id)
+      ?? next.providers.find((provider) => provider.id === next.activeProviderId)
+      ?? next.providers[0];
+    replace(next);
+    setSelectedId(survivor?.id ?? next.activeProviderId);
+    closeDeleteDialog(survivor?.id);
   };
 
   const trapDeleteDialogFocus = (event: KeyboardEvent<HTMLDialogElement>) => {
@@ -130,21 +138,28 @@ export function AiProviderList({
           {t.aiProviderAdd}
         </button>
       </div>
-      <div className="set-ai-provider-list">
+      <div className="set-ai-provider-list" data-expanded={expanded}>
         <AiProviderTabs
           providers={settings.providers}
           selectedId={selectedProvider?.id}
-          onSelect={setSelectedId}
+          expanded={expanded}
+          onSelect={(providerId) => {
+            setExpanded(providerId !== selectedProvider?.id || !expanded);
+            setSelectedId(providerId);
+          }}
+          busyFor={(providerId) => verifyingProviderId === providerId
+            || deploymentFor?.(providerId).kind === "working"}
           t={t}
         />
         {settings.providers.map((provider, index) => {
-          const selected = provider.id === selectedProvider?.id;
+          const selected = expanded && provider.id === selectedProvider?.id;
           return (
             <div
               key={provider.id}
               id={`ai-provider-panel-${provider.id}`}
-              role="tabpanel"
-              aria-labelledby={`ai-provider-tab-${provider.id}`}
+              className="set-ai-provider-panel"
+              role="region"
+              aria-labelledby={`ai-provider-disclosure-${provider.id}`}
               hidden={!selected}
             >
               {selected && (
@@ -210,7 +225,7 @@ export function AiProviderList({
               ref={cancelButtonRef}
               className="set-btn"
               type="button"
-              onClick={closeDeleteDialog}
+              onClick={() => closeDeleteDialog()}
             >
               {t.aiProviderRemoveCancel}
             </button>

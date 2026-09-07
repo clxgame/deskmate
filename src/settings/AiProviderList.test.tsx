@@ -43,8 +43,8 @@ describe("AI provider list", () => {
     }
 
     render(<ProviderSettings />);
-    expect(screen.getAllByRole("tab")).toHaveLength(2);
-    expect(screen.getAllByRole("article")).toHaveLength(1);
+    expect(screen.getAllByRole("button", { expanded: false })).toHaveLength(2);
+    expect(screen.queryByRole("article")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: t.aiProviderAdd }));
     expect(replace).toHaveBeenLastCalledWith({
@@ -60,20 +60,20 @@ describe("AI provider list", () => {
         },
       ],
     });
-    expect(screen.getAllByRole("tab")).toHaveLength(3);
-    expect(screen.getByRole("tab", { name: "Provider 3" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getAllByRole("button", { expanded: false })).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Provider 3" }).getAttribute("aria-expanded")).toBe("true");
     expect(screen.getAllByRole("article")).toHaveLength(1);
     fireEvent.change(screen.getByLabelText(`${t.aiProviderApiKey} · Provider 3`), {
       target: { value: "new-provider-draft" },
     });
 
-    await user.click(screen.getByRole("tab", { name: "Kuro" }));
+    await user.click(screen.getByRole("button", { name: "Kuro" }));
     fireEvent.change(
       screen.getByLabelText(`${t.aiProviderLabel} · Kuro`),
       { target: { value: "Kuro dev" } },
     );
-    expect(screen.getByRole("tab", { name: "Kuro dev" })).toBeDefined();
-    await user.click(screen.getByRole("tab", { name: "Provider 3" }));
+    expect(screen.getByRole("button", { name: "Kuro dev" })).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Provider 3" }));
     expect(screen.getByLabelText(`${t.aiProviderApiKey} · Provider 3`)).toHaveProperty("value", "new-provider-draft");
     expect(screen.getAllByRole("article")).toHaveLength(1);
     expect(replace.mock.calls.at(-1)?.[0].activeProviderId).toBe(settings.activeProviderId);
@@ -83,12 +83,16 @@ describe("AI provider list", () => {
     const user = userEvent.setup();
     const replace = mock<ReplaceSettings>(() => undefined);
     render(<AiProviderList settings={multiProviderSettingsFixture()} replace={replace} t={t} />);
-    const first = screen.getByRole("tab", { name: "Kuro" });
-    const second = screen.getByRole("tab", { name: "OMO Kuro" });
+    const first = screen.getByRole("button", { name: "Kuro" });
+    const second = screen.getByRole("button", { name: "OMO Kuro" });
     first.focus();
     await user.keyboard("{ArrowRight}");
     expect(document.activeElement).toBe(second);
-    expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe(second.id);
+    expect(screen.queryByRole("article")).toBeNull();
+    expect(second.tabIndex).toBe(0);
+    expect(first.tabIndex).toBe(-1);
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("region", { name: "OMO Kuro" }).getAttribute("aria-labelledby")).toBe(second.id);
     expect(screen.getByLabelText(`${t.aiProviderBaseUrl} · OMO Kuro`)).toBeDefined();
     await user.keyboard("{ArrowRight}");
     expect(document.activeElement).toBe(first);
@@ -98,6 +102,9 @@ describe("AI provider list", () => {
     expect(document.activeElement).toBe(first);
     await user.keyboard("{ArrowLeft}");
     expect(document.activeElement).toBe(second);
+    expect(second.getAttribute("aria-expanded")).toBe("true");
+    await user.keyboard(" ");
+    expect(screen.queryByRole("article")).toBeNull();
     expect(replace).not.toHaveBeenCalled();
   });
 
@@ -114,6 +121,7 @@ describe("AI provider list", () => {
       <AiProviderList settings={settings} replace={replace} t={t} />,
     );
 
+    await user.click(screen.getByRole("button", { name: "OMO Kuro" }));
     const removeButton = screen.getByRole("button", {
       name: t.aiProviderRemove,
     });
@@ -165,8 +173,9 @@ describe("AI provider list", () => {
     const remaining = replace.mock.calls.at(-1)?.[0];
     if (!remaining) throw new Error("Expected settings after provider removal");
     rerender(<AiProviderList settings={remaining} replace={replace} t={t} />);
-    expect(screen.getByRole("tab", { name: "Kuro" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("button", { name: "Kuro" }).getAttribute("aria-expanded")).toBe("true");
     expect(screen.getAllByRole("article")).toHaveLength(1);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Kuro" })));
 
     const single = legacySettingsFixture({ language: "en-US" });
     rerender(<AiProviderList settings={single} replace={replace} t={t} />);

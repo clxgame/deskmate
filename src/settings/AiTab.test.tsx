@@ -105,7 +105,8 @@ beforeEach(() => {
 });
 
 describe("AI settings tab extraction", () => {
-  test("renders the current controls in the locked order", async () => {
+  test("renders the current controls in the locked order after expanding a provider", async () => {
+    const user = userEvent.setup();
     const settings = legacySettingsFixture({ language: "en-US" });
     const patch = mock<Patch>((_key, _value) => undefined);
     const replace = mock<ReplaceSettings>((_settings) => undefined);
@@ -129,6 +130,10 @@ describe("AI settings tab extraction", () => {
     const panel = document.querySelector(".set-panel");
     expect(panel).toBeInstanceOf(HTMLElement);
     if (!(panel instanceof HTMLElement)) return;
+
+    expect(screen.queryByRole("heading", { name: t.tabAi, level: 2 })).toBeNull();
+    expect(screen.queryByDisplayValue(settings.apiKey)).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Kuro" }));
 
     const orderedLabels = [
       t.baseUrl,
@@ -181,6 +186,7 @@ describe("AI settings tab extraction", () => {
       });
     });
 
+    await user.click(screen.getByRole("button", { name: "OMO Kuro" }));
     await user.click(
       within(screen.getByRole("article", { name: "OMO Kuro" })).getByRole(
         "button",

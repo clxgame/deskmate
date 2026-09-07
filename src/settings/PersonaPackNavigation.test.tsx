@@ -48,6 +48,19 @@ function Harness() {
 beforeEach(() => { installed = []; incoming = []; selections.mockClear(); });
 afterEach(cleanup);
 
+test("switches both Xiaozhu generations inside the same built-in pack", async () => {
+  render(<Harness />);
+  const role = await screen.findByRole("combobox", { name: "角色" });
+  const user = userEvent.setup();
+  await user.selectOptions(role, "xiaozhu-nidaime");
+  expect(selections).toHaveBeenLastCalledWith("xiaozhu-nidaime");
+  expect(screen.getByRole("option", { name: "小著（二代目）", selected: true })).toBeDefined();
+  expect(screen.getByRole("button", { name: "小著", pressed: true })).toBeDefined();
+  await user.selectOptions(role, "xiaozhu");
+  expect(selections).toHaveBeenLastCalledWith("xiaozhu");
+  expect(screen.getAllByRole("article", { name: "小著" })).toHaveLength(1);
+});
+
 test("keeps one import tile last after importing two distinct packages", async () => {
   incoming = [aki, second];
   render(<Harness />);
@@ -87,7 +100,7 @@ test("selects a pack by its icon and filters the sole role dropdown", async () =
   await user.click(screen.getByRole("button", { name: "aki 团子" }));
   expect(selections.mock.calls.map(([id]) => id)).toEqual(["changli", "jinxi"]);
   await user.click(screen.getByRole("button", { name: "小著" }));
-  expect(within(role).getAllByRole("option").map((option) => option.textContent)).toEqual(["小著"]);
+  expect(within(role).getAllByRole("option").map((option) => option.textContent)).toEqual(["小著", "小著（二代目）"]);
   expect(screen.getByRole("button", { name: "小著", pressed: true })).toBeDefined();
 });
 

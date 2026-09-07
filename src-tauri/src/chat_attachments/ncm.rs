@@ -9,10 +9,12 @@ use super::types::{AttachmentError, AttachmentKind, ReadChatAttachment, ReadyAtt
 use super::validation::has_windows_reserved_stem;
 
 pub(super) const NCM_SKILL_FILE: &str = "ncmdump.md";
-pub(super) const XIAOZHU_PERSONA_ID: &str = "xiaozhu";
+pub(super) fn is_xiaozhu(persona_id: &str) -> bool {
+    matches!(persona_id, "xiaozhu" | "xiaozhu-nidaime")
+}
 
 pub(super) fn is_authorized(persona_id: &str, has_declared_skill: bool) -> bool {
-    persona_id == XIAOZHU_PERSONA_ID && has_declared_skill
+    is_xiaozhu(persona_id) && has_declared_skill
 }
 
 pub(crate) trait NcmRunner {

@@ -180,7 +180,7 @@ export class PetRenderer {
       VRMUtils.removeUnnecessaryVertices(gltf.scene);
       VRMUtils.combineSkeletons(gltf.scene);
       VRMUtils.rotateVRM0(vrm);
-    } else {
+    } else if (!persona.embeddedMaterials) {
       try {
         await this.applyPersonaTextures(model, assets);
       } catch (error: unknown) {
@@ -190,7 +190,7 @@ export class PetRenderer {
       }
     }
 
-    const toon = vrm === null ? new ToonShading() : null;
+    const toon = vrm === null && !persona.embeddedMaterials ? new ToonShading() : null;
     if (toon !== null) {
       try {
         toon.attach(model);

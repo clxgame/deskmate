@@ -36,6 +36,7 @@ export interface PersonaEntry {
   readonly name: PersonaName;
   readonly clips: PersonaClips;
   readonly scale: number;
+  readonly embeddedMaterials?: boolean;
   /** Pack this persona belongs to; drives install state and asset paths. */
   readonly packId: string;
   readonly skills?: readonly PersonaSkillRef[];
@@ -75,14 +76,13 @@ const PIXEL_CLIPS: PersonaClips = {
 };
 
 /**
- * 「小著」— built into every build. 小著 is only ~375 KB and embeds its
- * textures in the GLB, so shipping it keeps a fresh install usable without
- * forcing a download before the pet can appear.
+ * Both 小著 generations are bundled, so a fresh install can switch between
+ * them without downloading a character pack.
  */
 export const AI_SUBSTITUTE_PACK: PackManifest = {
   packId: "ai-substitute",
   name: { zh: "小著", en: "Xiaozhu", ja: "小著", ko: "샤오주" },
-  version: "1.0.0",
+  version: "1.1.0",
   builtin: true,
   thumbnail: "/persona-packs/xiaozhu.png",
   personas: [
@@ -92,6 +92,14 @@ export const AI_SUBSTITUTE_PACK: PackManifest = {
       clips: PIXEL_CLIPS,
       scale: 1,
       skills: [{ id: "xiaozhu", file: "ncmdump.md" }],
+    },
+    {
+      id: "xiaozhu-nidaime",
+      name: { zh: "小著（二代目）", en: "Xiaozhu (2nd Gen)", ja: "小著（二代目）", ko: "샤오주 (2세대)" },
+      clips: PIXEL_CLIPS,
+      scale: 1,
+      embeddedMaterials: true,
+      skills: [{ id: "xiaozhu-nidaime", file: "ncmdump.md" }],
     },
   ],
 };

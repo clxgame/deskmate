@@ -14,7 +14,7 @@ impl AttachmentStore {
         request: ConvertStagedNcmRequest,
         runner: &R,
     ) -> Result<ReadChatAttachment, AttachmentError> {
-        if request.persona_id != ncm::XIAOZHU_PERSONA_ID {
+        if !ncm::is_xiaozhu(&request.persona_id) {
             return Err(AttachmentError::UnauthorizedNcm);
         }
         let session_id = SessionId::parse(request.session_id)?;

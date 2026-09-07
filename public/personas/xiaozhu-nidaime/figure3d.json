@@ -1,0 +1,12 @@
+{
+  "modelUrl": "figure.glb",
+  "scale": 1,
+  "embeddedMaterials": true,
+  "clips": {
+    "idle": "Idle",
+    "thinking": "Think",
+    "talking": "Wave",
+    "working": "Dance",
+    "error": "Sad"
+  }
+}

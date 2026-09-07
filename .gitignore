@@ -18,6 +18,7 @@ src-tauri/resources/ncmdump/ncmdump.exe
 
 # 3D persona assets fetched from the private assets release at build time
 public/personas/*/figure.glb
+!public/personas/xiaozhu-nidaime/figure.glb
 public/personas/*/textures/
 public/personas/.personas-version
 

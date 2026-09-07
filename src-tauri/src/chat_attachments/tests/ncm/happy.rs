@@ -7,6 +7,40 @@ fn authorizes_only_xiaozhu_with_declared_skill() {
         "xiaozhu", false
     ));
     assert!(!crate::chat_attachments::ncm::is_authorized("other", true));
+    assert!(crate::chat_attachments::ncm::is_authorized(
+        "xiaozhu-nidaime",
+        true
+    ));
+    assert!(!crate::chat_attachments::ncm::is_authorized(
+        "xiaozhu-nidaime",
+        false
+    ));
+    assert!(!crate::chat_attachments::ncm::is_authorized(
+        "xiaozhu-fake",
+        true
+    ));
+}
+
+#[test]
+fn second_generation_converts_staged_music() {
+    let root = TempAttachmentRoot::new("ncm-nidaime");
+    let store = AttachmentStore::default();
+    let staged = stage_named_ncm(&store, root.path(), "music.ncm");
+    let artifact = store
+        .convert_staged_ncm(
+            root.path(),
+            convert_request("xiaozhu-nidaime", &staged.id),
+            &FakeRunner {
+                run: FakeRun::OneMp3,
+            },
+        )
+        .expect("convert music with second generation");
+    assert_eq!(artifact.file_name, "music.mp3");
+    assert_eq!(artifact.mime, "audio/mpeg");
+    assert_eq!(
+        decoded_sha256(&artifact.data_url),
+        format!("{:x}", Sha256::digest(MP3_BYTES))
+    );
 }
 
 #[test]

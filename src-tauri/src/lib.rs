@@ -21,6 +21,7 @@ mod memory;
 /// User-installable persona packs imported from local `.dmpack` archives.
 mod packs;
 mod settings;
+mod pomodoro;
 mod updater;
 mod window_layout;
 use ai_usage::fetch_ai_usage;
@@ -1125,6 +1126,7 @@ pub fn run() {
             child: Mutex::new(None),
             port,
         })
+        .manage(pomodoro::PomodoroState::default())
         .manage(AttachmentStore::default())
         .manage(ccswitch::contract::CcSwitchSetupState::default())
         .manage(ChatShown(Mutex::new(false)))
@@ -1145,6 +1147,11 @@ pub fn run() {
             get_settings,
             set_settings,
             verify_api_key,
+            pomodoro::pomodoro_get,
+            pomodoro::pomodoro_start,
+            pomodoro::pomodoro_pause,
+            pomodoro::pomodoro_reset,
+            pomodoro::pomodoro_select_phase,
             fetch_ai_usage,
             open_settings,
             open_widget_settings,
@@ -1194,6 +1201,8 @@ pub fn run() {
             let loaded = settings::load(&handle);
             // SAFE-UNWRAP: a poisoned settings mutex means an earlier setup command panicked.
             *app.state::<SettingsState>().0.lock().unwrap() = loaded.clone();
+            pomodoro::apply_preferences(&handle, loaded.pomodoro)?;
+            pomodoro::start_checker(handle.clone())?;
             settings::register_shortcuts(&handle, &loaded);
             if let Some(pet) = app.get_webview_window("pet") {
                 let window_event_handle = handle.clone();
@@ -1246,6 +1255,7 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             if let RunEvent::Exit = event {
+                pomodoro::stop_checker(app);
                 // SAFE-UNWRAP: a poisoned sidecar mutex means an earlier setup command panicked.
                 if let Some(mut child) = app.state::<Sidecar>().child.lock().unwrap().take() {
                     let _ = child.kill();

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ThemeId } from "../settings/theme";
+import type { PomodoroPreferences } from "./pomodoro";
 
 /** A scheduled task: at `time` (HH:MM, daily), auto-send `prompt` to the AI. */
 export interface ScheduledTask {
@@ -47,6 +48,7 @@ export interface Settings {
   alwaysOnTop: boolean;
   petPosition?: PetPosition | null;
   scheduledTasks: ScheduledTask[];
+  readonly pomodoro?: PomodoroPreferences;
   // 快捷键
   shortcutToggleChat: string;
   shortcutTogglePet: string;

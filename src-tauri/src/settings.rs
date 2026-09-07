@@ -213,6 +213,8 @@ pub struct Settings {
     pub always_on_top: bool,
     pub pet_position: Option<PetPosition>,
     pub scheduled_tasks: Vec<ScheduledTask>,
+    #[serde(deserialize_with = "crate::pomodoro::deserialize_stored_preferences")]
+    pub pomodoro: crate::pomodoro::Preferences,
     // 快捷键
     pub shortcut_toggle_chat: String,
     pub shortcut_toggle_pet: String,
@@ -253,6 +255,7 @@ impl Default for Settings {
             always_on_top: true,
             pet_position: None,
             scheduled_tasks: Vec::new(),
+            pomodoro: crate::pomodoro::Preferences::default(),
             // NOTE: Alt+Space is the Windows system menu and Ctrl+Shift+Space
             // is commonly taken by IMEs; Ctrl+Alt+D is usually free.
             shortcut_toggle_chat: "Ctrl+Alt+D".into(),
@@ -1069,6 +1072,7 @@ pub fn set_settings(
     apply(&app, &old, &settings);
     // SAFE-UNWRAP: a poisoned settings mutex means an earlier command panicked.
     *state.0.lock().unwrap() = settings.clone();
+    crate::pomodoro::apply_preferences(&app, settings.pomodoro)?;
     // Notify every window (pet scale, persona, model...) of the change.
     let _ = app.emit("deskmate://settings-changed", &settings);
     Ok(())

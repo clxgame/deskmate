@@ -212,7 +212,6 @@ export function MemoryTab({
 
   return (
     <>
-      <h2 className="set-panel-head">{t.tabMemory}</h2>
       <p className="set-note">{t.memoryPrivacyHint}</p>
 
       <div className="set-row">

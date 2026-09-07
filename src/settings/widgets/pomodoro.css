@@ -1,0 +1,103 @@
+.set-pomodoro {
+  --t-countdown: 40px;
+  display: grid;
+  gap: var(--s-3);
+  padding: var(--s-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-raised);
+  min-width: 0;
+}
+
+.set-pomodoro h3 {
+  margin: 0;
+  font-size: var(--t-head);
+  font-weight: 600;
+}
+
+.set-pomodoro-phases,
+.set-pomodoro-actions {
+  display: flex;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+
+.set-pomodoro-phases .set-btn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
+}
+
+.set-pomodoro-countdown {
+  font-size: var(--t-countdown);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  color: var(--text);
+  padding-top: var(--s-1);
+}
+
+.set-pomodoro-status,
+.set-pomodoro-hint,
+.set-pomodoro-error {
+  margin: 0;
+  font-size: var(--t-body);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.set-pomodoro-status,
+.set-pomodoro-hint { color: var(--text-dim); }
+.set-pomodoro-hint { font-size: var(--t-small); }
+
+.set-pomodoro-actions .set-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+}
+
+.set-pomodoro-actions .set-pomodoro-primary:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.set-pomodoro-actions .set-pomodoro-primary:hover:not(:disabled),
+.set-pomodoro-actions .set-pomodoro-primary:active:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: var(--text-on-accent);
+}
+
+.set-pomodoro-preferences {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-3);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--line);
+}
+
+.set-pomodoro-preferences label {
+  display: grid;
+  align-content: start;
+  gap: var(--s-2);
+  min-width: 0;
+  font-size: var(--t-label);
+  color: var(--text-dim);
+}
+
+.set-pomodoro-preferences .set-input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.set-pomodoro-error {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+  color: var(--danger);
+}

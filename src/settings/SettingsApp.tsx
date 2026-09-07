@@ -19,6 +19,7 @@ import { dict, LANGS, type Dict } from "../lib/i18n";
 import { UpdateFooter } from "./UpdateFooter";
 import { AiTab } from "./AiTab";
 import { MemoryTab } from "./MemoryTab";
+import { WidgetTab } from "./widgets/WidgetTab";
 import { PersonaPacks } from "./PersonaPacks";
 import { Row, Switch, type TabProps } from "./settingsPrimitives";
 import type { InstalledPack } from "../lib/packs";
@@ -84,7 +85,7 @@ function themeLabel(t: Dict, id: ThemeId): string {
 
 const SAVE_DELAY_MS = 400;
 
-// allow: SIZE_OK — this existing module is the settings composition root; extracting tabs is outside the UI-only patch.
+// allow: SIZE_OK — existing settings composition root; widget controls are extracted and remaining tabs are outside this change.
 export default function SettingsApp() {
   const [tab, setTab] = useState<TabId>("general");
   const [settings, setLocalSettings] = useState<Settings | null>(null);
@@ -180,6 +181,7 @@ export default function SettingsApp() {
           {TAB_ICONS.map((item) => (
             <button
               key={item.id}
+              id={`set-category-${item.id}`}
               className={`set-tab${tab === item.id ? " set-tab-active" : ""}`}
               onClick={() => setTab(item.id)}
             >
@@ -194,7 +196,7 @@ export default function SettingsApp() {
             <div className="set-loading">{t.loading}</div>
           </div>
         ) : (
-          <main className="set-panel">
+          <main className="set-panel" aria-labelledby={`set-category-${tab}`}>
             {tab === "general" && (
               <GeneralTab settings={settings} patch={patch} t={t} />
             )}
@@ -318,7 +320,6 @@ function ThemePicker({
 function GeneralTab({ settings, patch, t }: TabProps) {
   return (
     <>
-      <h2 className="set-panel-head">{t.tabGeneral}</h2>
       <Row label={t.autostart}>
         <Switch
           label={t.autostart}
@@ -351,112 +352,11 @@ function GeneralTab({ settings, patch, t }: TabProps) {
   );
 }
 
-// --------------------------------------------------------------- 小组件
-
-function WidgetTab({ settings, patch, t }: TabProps) {
-  const [newTime, setNewTime] = useState("09:00");
-  const [newPrompt, setNewPrompt] = useState("");
-
-  const tasks = settings.scheduledTasks;
-
-  const addTask = () => {
-    const prompt = newPrompt.trim();
-    if (!prompt || !/^\d{2}:\d{2}$/.test(newTime)) return;
-    patch("scheduledTasks", [
-      ...tasks,
-      {
-        id: `task-${Date.now()}`,
-        time: newTime,
-        prompt,
-        enabled: true,
-      },
-    ]);
-    setNewPrompt("");
-  };
-
-  return (
-    <>
-      <h2 className="set-panel-head">{t.tabWidget}</h2>
-      <Row label={t.alwaysOnTop}>
-        <Switch
-          label={t.alwaysOnTop}
-          checked={settings.alwaysOnTop}
-          onChange={(v) => patch("alwaysOnTop", v)}
-        />
-      </Row>
-
-      <h3 className="set-section-head">{t.scheduledTasks}</h3>
-      <p className="set-muted">{t.scheduledTasksHint}</p>
-
-      {tasks.map((task) => (
-        <div className="set-task" key={task.id}>
-          <span className="set-task-time">{task.time}</span>
-          <span className="set-task-prompt" title={task.prompt}>
-            {task.prompt}
-          </span>
-          <Switch
-            label={t.taskEnable(task.time)}
-            checked={task.enabled}
-            onChange={(v) =>
-              patch(
-                "scheduledTasks",
-                tasks.map((x) => (x.id === task.id ? { ...x, enabled: v } : x)),
-              )
-            }
-          />
-          <button
-            className="set-task-delete"
-            aria-label={t.taskDelete}
-            title={t.taskDelete}
-            onClick={() =>
-              patch(
-                "scheduledTasks",
-                tasks.filter((x) => x.id !== task.id),
-              )
-            }
-          >
-            <AppIcon name="delete" size={16} />
-          </button>
-        </div>
-      ))}
-
-      <div className="set-task set-task-new">
-        <input
-          className="set-input set-task-time-input"
-          type="time"
-          value={newTime}
-          aria-label={t.taskTime}
-          onChange={(e) => setNewTime(e.target.value)}
-        />
-        <input
-          className="set-input set-task-prompt-input"
-          type="text"
-          value={newPrompt}
-          placeholder={t.taskPromptPlaceholder}
-          aria-label={t.taskPrompt}
-          onChange={(e) => setNewPrompt(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") addTask();
-          }}
-        />
-        <button
-          className="set-task-add"
-          onClick={addTask}
-          disabled={!newPrompt.trim()}
-        >
-          {t.taskAdd}
-        </button>
-      </div>
-    </>
-  );
-}
-
 // --------------------------------------------------------------- 快捷键
 
 function ShortcutsTab({ settings, patch, t }: TabProps) {
   return (
     <>
-      <h2 className="set-panel-head">{t.tabShortcuts}</h2>
       <Row label={t.shortcutToggleChat}>
         <ShortcutInput
           label={t.shortcutToggleChat}
@@ -546,7 +446,6 @@ function AccountTab({ settings, patch, t }: TabProps) {
   const [installedPacks, setInstalledPacks] = useState<InstalledPack[]>([]);
   return (
     <>
-      <h2 className="set-panel-head">{t.tabAccount}</h2>
       <div className="set-pet-controls">
         <Row label={t.petScale}>
           <input
@@ -676,7 +575,6 @@ function AboutTab({ t }: TabProps) {
 
   return (
     <>
-      <h2 className="set-panel-head">{t.tabAbout}</h2>
       <p className="set-about-name">YUME</p>
       <p className="set-about-version">{version ? `v${version}` : "…"}</p>
       <p className="set-about-desc">{t.aboutDesc}</p>

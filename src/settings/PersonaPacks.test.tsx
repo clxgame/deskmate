@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import * as tauriCore from "@tauri-apps/api/core";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { InstalledPack } from "../lib/packs";
 
 /**
  * Persona pack management tests: listing install state, importing from the
@@ -32,7 +33,7 @@ interface Harness {
 
 function renderPacks(
   overrides: {
-    installed?: { packId: string; version: string; personaIds: string[] }[];
+    installed?: InstalledPack[];
     activePersonaId?: string;
   } = {},
 ): Harness {
@@ -65,7 +66,7 @@ afterEach(() => {
 });
 
 describe("persona pack management", () => {
-  test("lists every known pack with its install state", async () => {
+  test("shows an empty import slot without a package name, image or count", async () => {
     renderPacks();
 
     expect(await screen.findByRole("heading", { name: "角色包" })).toBeDefined();
@@ -77,11 +78,14 @@ describe("persona pack management", () => {
     expect(within(builtin).getAllByText("随应用提供，始终可用")).toHaveLength(1);
     expect(within(builtin).getByLabelText("1 个角色可用")).toBeDefined();
 
-    const optional = screen.getByRole("article", { name: "aki 团子" });
+    const optional = screen.getByRole("article", { name: "导入" });
     const optionalTooltip = within(optional).getByRole("tooltip");
     expect(optionalTooltip.textContent).toContain("离线扩展包，通过 .dmpack 文件导入");
     expect(within(optional).getAllByText("离线扩展包，通过 .dmpack 文件导入")).toHaveLength(1);
-    expect(within(optional).getByLabelText("包含 25 个角色")).toBeDefined();
+    expect(optional.querySelector("img")).toBeNull();
+    expect(within(optional).queryByRole("heading")).toBeNull();
+    expect(optional.querySelector(".set-pack-count")).toBeNull();
+    expect(screen.queryByText("aki 团子")).toBeNull();
     const importButton = within(optional).getByRole("button", { name: "导入" });
     expect(importButton.textContent).toBe("");
     expect(importButton.querySelector("svg")).toBeDefined();
@@ -92,11 +96,15 @@ describe("persona pack management", () => {
 
   test("offers removal only for an installed removable pack", async () => {
     renderPacks({
-      installed: [{ packId: "aki", version: "1.0.0", personaIds: ["changli"] }],
+      installed: [{
+        packId: "aki", version: "1.0.1", personaIds: ["changli"],
+        name: { zh: "来自包的名字", en: "Package title", ja: "パック名", ko: "팩 이름" },
+      }],
     });
 
-    const installed = await screen.findByRole("article", { name: "aki 团子" });
-    expect(within(installed).getByText("已安装 · v1.0.0")).toBeDefined();
+    const installed = await screen.findByRole("article", { name: "来自包的名字" });
+    expect(within(installed).getByText("已安装 · v1.0.1")).toBeDefined();
+    expect(screen.getByRole("button", { name: "来自包的名字" })).toBeDefined();
     expect(within(installed).getByLabelText("1 个角色可用")).toBeDefined();
     const uninstallButton = await screen.findByRole("button", { name: "卸载" });
     expect(uninstallButton.textContent).toBe("");
@@ -109,14 +117,14 @@ describe("persona pack management", () => {
       activePersonaId: "changli",
     });
 
-    const packSelector = await screen.findByRole("combobox", { name: "角色包" });
+    expect(screen.queryByRole("combobox", { name: "角色包" })).toBeNull();
     const selector = await screen.findByRole("combobox", { name: "角色" });
     expect(within(selector).queryByRole("option", { name: "小著" })).toBeNull();
     expect(within(selector).getByRole("option", { name: "长离" })).toBeDefined();
 
     const user = userEvent.setup();
     await user.selectOptions(selector, "changli");
-    await user.selectOptions(packSelector, "aki");
+    await user.click(screen.getByRole("button", { name: "aki" }));
 
     expect(harness.onActivePersonaChange).toHaveBeenCalledWith("changli");
   });

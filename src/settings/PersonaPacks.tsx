@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { positionPackTooltip } from "./alignPackTooltip";
 import type { Dict } from "../lib/i18n";
 import {
   importPack,
@@ -8,17 +9,14 @@ import {
   type InstalledPack,
 } from "../lib/packs";
 import {
-  KNOWN_PACKS,
   personaById,
-  personaCatalog,
-  packLabel,
-  personaLabel,
   type PackManifest,
 } from "../pet/personaCatalog";
 import { PersonaPackCard } from "./PersonaPackCard";
+import { PersonaPackImport } from "./PersonaPackImport";
+import { PersonaPackSelector } from "./PersonaPackSelector";
 import {
-  availablePersonaCount,
-  stateFor,
+  packLibrary,
   type PackActivity,
 } from "./personaPackModel";
 import "./persona-packs.css";
@@ -58,6 +56,19 @@ export function PersonaPacks({
     null,
   );
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [selectedPackId, setSelectedPackId] = useState<string | null>(null);
+  const libraryRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const alignVisibleTooltips = () => {
+      libraryRef.current?.querySelectorAll<HTMLElement>(".set-pack:hover, .set-pack:focus-within")
+        .forEach(positionPackTooltip);
+    };
+    window.addEventListener("resize", alignVisibleTooltips);
+    return () => window.removeEventListener("resize", alignVisibleTooltips);
+  }, []);
+
+  useEffect(() => { setSelectedPackId(null); }, [activePersonaId]);
 
   const refresh = useCallback(async () => {
     onInstalledChange(await listInstalledPacks());
@@ -116,6 +127,7 @@ export function PersonaPacks({
     try {
       await uninstallPack(pack.packId);
       await refresh();
+      setSelectedPackId((current) => current === pack.packId ? null : current);
       if (ownsActive) {
         onActivePersonaRemoved();
         setNotice({ tone: "ok", message: t.packActivePersonaReset });
@@ -130,56 +142,48 @@ export function PersonaPacks({
     }
   };
 
-  const packs = KNOWN_PACKS.map((pack) => ({
-    pack,
-    state: stateFor(pack, installed),
-  }));
-  const availablePacks = packs.filter(({ state }) => state.kind !== "available").length;
-  const availablePersonas = packs.reduce(
-    (total, { pack, state }) => total + availablePersonaCount(pack, state),
-    0,
-  );
-  const personas = personaCatalog(installed);
-  const selectablePacks = KNOWN_PACKS.map((pack) => ({
-    pack,
-    personas: personas.filter((persona) => persona.packId === pack.packId),
-  })).filter((group) => group.personas.length > 0);
-  const activePackId = personaById(activePersonaId).packId;
-  const selectedGroup =
-    selectablePacks.find((group) => group.pack.packId === activePackId) ??
-    selectablePacks[0];
-  const selectedPersonaId =
-    selectedGroup?.personas.some((persona) => persona.id === activePersonaId)
-      ? activePersonaId
-      : (selectedGroup?.personas[0]?.id ?? "");
+  const packs = packLibrary(installed);
+  const selectedPack = packs.find((pack) => pack.packId === selectedPackId)
+    ?? packs.find((pack) => pack.packId === personaById(activePersonaId).packId)
+    ?? packs[0];
+  const availablePersonas = packs.reduce((total, pack) => total + pack.personas.length, 0);
+  const selectPack = (pack: PackManifest) => {
+    setSelectedPackId(pack.packId);
+    if (pack.packId === selectedPack.packId) return;
+    const first = pack.personas[0];
+    if (first !== undefined) onActivePersonaChange(first.id);
+  };
 
   return (
-    <section className="set-packs" aria-labelledby="persona-packs-heading">
+    <section ref={libraryRef} className="set-packs" aria-labelledby="persona-packs-heading">
       <div className="set-packs-head">
         <div>
           <h3 className="set-packs-title" id="persona-packs-heading">
             {t.personaPacks}
           </h3>
           <p className="set-packs-summary" aria-live="polite">
-            {t.packLibrarySummary(availablePacks, availablePersonas)}
+            {t.packLibrarySummary(packs.length, availablePersonas)}
           </p>
         </div>
       </div>
 
       <ul className="set-pack-list">
-        {packs.map(({ pack, state }) => (
-          <li key={pack.packId}>
+        {packs.map((pack) => (
+          <li key={"pack:" + pack.packId}>
             <PersonaPackCard
               pack={pack}
-              state={state}
+              selected={pack.packId === selectedPack.packId}
               activity={activity}
               language={language}
               t={t}
-              onImport={() => void onImport()}
+              onSelect={selectPack}
               onUninstall={() => requestUninstall(pack)}
             />
           </li>
         ))}
+        <li key="import">
+          <PersonaPackImport activity={activity} t={t} onImport={() => void onImport()} />
+        </li>
       </ul>
 
       {pendingUninstall !== null && (
@@ -212,52 +216,13 @@ export function PersonaPacks({
         </>
       )}
 
-      <div className="set-pack-active-persona">
-        <div className="set-pack-active-persona-field">
-          <label className="set-pack-active-persona-label" htmlFor="active-pack">
-            {t.personaPack}
-          </label>
-          <select
-            className="set-select"
-            id="active-pack"
-            aria-label={t.personaPack}
-            value={selectedGroup?.pack.packId ?? ""}
-            onChange={(event) => {
-              const nextGroup = selectablePacks.find(
-                (group) => group.pack.packId === event.target.value,
-              );
-              const nextPersona = nextGroup?.personas[0];
-              if (nextPersona !== undefined) onActivePersonaChange(nextPersona.id);
-            }}
-            disabled={selectablePacks.length === 0}
-          >
-            {selectablePacks.map(({ pack }) => (
-              <option key={pack.packId} value={pack.packId}>
-                {packLabel(pack, language)}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="set-pack-active-persona-field">
-          <label className="set-pack-active-persona-label" htmlFor="active-persona">
-            {t.persona}
-          </label>
-          <select
-            className="set-select"
-            id="active-persona"
-            aria-label={t.persona}
-            value={selectedPersonaId}
-            onChange={(event) => onActivePersonaChange(event.target.value)}
-            disabled={selectedGroup === undefined}
-          >
-            {(selectedGroup?.personas ?? []).map((persona) => (
-              <option key={persona.id} value={persona.id}>
-                {personaLabel(persona, language)}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
+      <PersonaPackSelector
+        pack={selectedPack}
+        activePersonaId={activePersonaId}
+        onActivePersonaChange={onActivePersonaChange}
+        t={t}
+        language={language}
+      />
 
       {notice !== null && (
         <p

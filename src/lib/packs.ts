@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import type { PackName } from "../pet/personaCatalog";
 
 /**
  * Persona pack install state. Packs are imported from a local `.dmpack` file
@@ -13,6 +14,8 @@ export interface InstalledPack {
   readonly packId: string;
   readonly version: string;
   readonly personaIds: readonly string[];
+  readonly name?: PackName;
+  readonly thumbnailPath?: string;
 }
 
 export interface ImportedPack extends InstalledPack {

@@ -50,7 +50,7 @@ export interface PackName {
 
 export interface PackManifest {
   readonly packId: string;
-  readonly name: PackName;
+  readonly name?: PackName;
   readonly version: string;
   /** Built-in packs ship with the app and cannot be uninstalled. */
   readonly builtin: boolean;
@@ -103,10 +103,8 @@ export const AI_SUBSTITUTE_PACK: PackManifest = {
  */
 export const AKI_PACK: PackManifest = {
   packId: "aki",
-  name: { zh: "aki 团子", en: "aki Dango", ja: "aki 団子", ko: "aki 당고" },
   version: "1.0.0",
   builtin: false,
-  thumbnail: "/persona-packs/aki.png",
   personas: [
     { id: "aimisi", name: { zh: "爱弥斯", en: "Aemeath", ja: "エイメス", ko: "에이메스" }, clips: STANDARD_CLIPS, scale: 0.839 },
     { id: "aogusita", name: { zh: "奥古斯塔", en: "Augusta", ja: "オーガスタ", ko: "아우구스타" }, clips: STANDARD_CLIPS, scale: 1.05 },
@@ -227,6 +225,7 @@ export function personaLabel(persona: PersonaEntry, language: string): string {
 }
 
 export function packLabel(pack: PackManifest, language: string): string {
+  if (pack.name === undefined) return pack.packId;
   switch (language) {
     case "zh-CN":
     case "zh-TW":

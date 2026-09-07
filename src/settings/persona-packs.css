@@ -157,16 +157,6 @@
   color: var(--success);
 }
 
-.set-pack-thumb svg {
-  fill: none;
-  height: var(--s-6);
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.5;
-  width: var(--s-6);
-}
-
 .set-pack-thumb-image {
   border-radius: inherit;
   display: block;
@@ -336,15 +326,6 @@
   transform: translateY(1px);
 }
 
-.set-pack-action-icon {
-  fill: none;
-  height: var(--s-6);
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-width: 1.75;
-  width: var(--s-6);
-}
-
 .set-pack-action:disabled {
   cursor: default;
   opacity: var(--opacity-muted);
@@ -356,6 +337,7 @@
 }
 
 .set-pack-tooltip {
+  display: none;
   background: var(--surface-raised);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
@@ -365,26 +347,24 @@
   left: var(--s-0);
   line-height: 1.5;
   max-width: min(var(--pack-tooltip-max-width), calc(100vw - var(--s-6)));
-  opacity: 0;
   padding: var(--s-2) var(--s-3);
   pointer-events: none;
   position: absolute;
   bottom: calc(100% + var(--s-2));
   top: auto;
-  transform: translateY(calc(var(--s-1) * -1));
-  transition:
-    opacity var(--ease),
-    transform var(--ease);
-  transition-delay: 0ms;
+  animation: pack-tooltip-reveal var(--ease) var(--tooltip-delay) both;
   width: max-content;
   z-index: 4;
 }
 
 .set-pack:hover .set-pack-tooltip,
 .set-pack:focus-within .set-pack-tooltip {
-  opacity: 1;
-  transform: translateY(0);
-  transition-delay: var(--tooltip-delay);
+  display: block;
+}
+
+@keyframes pack-tooltip-reveal {
+  from { opacity: 0; transform: translateY(calc(var(--s-1) * -1)); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .set-pack-count[aria-label] {
@@ -415,4 +395,51 @@
   .set-row-nickname .set-input {
     width: 100%;
   }
+}
+
+.set-pack-empty .set-pack-action-primary {
+  border-radius: inherit;
+  color: var(--accent-ink);
+  filter: none;
+  height: 100%;
+  inset: 0;
+  width: 100%;
+}
+
+.set-pack-empty .set-pack-action-primary:hover {
+  color: var(--accent-ink);
+}
+
+.set-pack-empty .set-pack-action:focus-visible {
+  outline-color: var(--accent-ink);
+}
+
+.set-pack-selected {
+  box-shadow: 0 0 0 var(--s-0-5) var(--accent-ink);
+}
+
+.set-pack-selected .set-pack-thumb {
+  border-color: var(--accent-ink);
+}
+
+.set-pack-select {
+  background: transparent;
+  border: none;
+  border-radius: inherit;
+  cursor: pointer;
+  height: 100%;
+  inset: 0;
+  padding: 0;
+  position: absolute;
+  width: 100%;
+  z-index: 1;
+}
+
+.set-pack-select:focus-visible {
+  outline: var(--s-0-5) solid var(--accent-ink);
+  outline-offset: var(--s-0-5);
+}
+
+.set-pack-select:disabled {
+  cursor: default;
 }

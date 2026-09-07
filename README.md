@@ -39,9 +39,40 @@ archive the user imports from 设置 → 角色 → 导入角色包, and can rem
 Build a pack from the assets in `public/personas`:
 
 ```powershell
-bun scripts/pack-personas.ts aki 1.0.0 aki-1.0.0.dmpack changli jinxi
+bun scripts/pack-personas.ts aki 1.0.1 aki-1.0.1.dmpack changli jinxi
 # omit the persona ids to pack every directory under public/personas
 ```
+
+A pack is a ZIP archive with a root-level `pack.json`:
+
+```json
+{
+  "packId": "aki",
+  "version": "1.0.1",
+  "name": {
+    "zh": "aki 团子",
+    "en": "aki Dango",
+    "ja": "aki 団子",
+    "ko": "aki 당고"
+  },
+  "thumbnail": "personas/aimisi/pack-thumbnail.png",
+  "personas": [{ "id": "aimisi" }]
+}
+```
+
+`name` and `thumbnail` describe the pack card. The thumbnail is a
+relative path to a PNG shipped inside that same archive, under one of its
+included personas. These fields do not change individual persona names, models,
+animation clips, or scale. Legacy packs without display metadata still import;
+their cards use the pack id and a placeholder cover.
+
+The authoring definitions live in `scripts/pack-metadata.ts`, with cover files
+in `scripts/persona-packs/`. Add a definition there before authoring another
+pack id. These build inputs stay outside the app's public assets. When building
+an aki subset without aimisi, the script puts the cover under the first included
+persona and writes that path to the manifest. It rejects duplicate or unsafe
+persona ids and existing output files, and uses a unique staging directory for
+each run.
 
 Imported packs are unpacked to `<appData>/packs/<packId>/` and read through the
 asset protocol, whose scope is restricted to that directory. Only personas a

@@ -1,154 +1,62 @@
 import type { Dict } from "../lib/i18n";
 import { packLabel, type PackManifest } from "../pet/personaCatalog";
-import {
-  presentationFor,
-  visiblePersonas,
-  type PackActivity,
-  type PackState,
-} from "./personaPackModel";
-
-type PackActionProps = {
-  readonly state: PackState;
-  readonly activity: PackActivity;
-  readonly t: Dict;
-  readonly onImport: () => void;
-  readonly onUninstall: () => void;
-};
+import { AppIcon } from "../ui/AppIcon";
+import type { PackActivity } from "./personaPackModel";
+import { alignPackTooltip } from "./alignPackTooltip";
 
 export type PersonaPackCardProps = {
   readonly pack: PackManifest;
-  readonly state: PackState;
+  readonly selected: boolean;
   readonly activity: PackActivity;
   readonly language: string;
   readonly t: Dict;
-  readonly onImport: () => void;
+  readonly onSelect: (pack: PackManifest) => void;
   readonly onUninstall: (pack: PackManifest) => void;
 };
 
-function assertNever(value: never): never {
-  throw new TypeError(`Unhandled persona pack action: ${String(value)}`);
-}
-
-function PackGlyph() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24">
-      <path d="M4.5 7.5 12 3l7.5 4.5v9L12 21l-7.5-4.5z" />
-      <path d="m4.8 7.7 7.2 4.2 7.2-4.2M12 12v8.5" />
-    </svg>
-  );
-}
-
-function PackAddGlyph() {
-  return (
-    <svg aria-hidden="true" className="set-pack-action-icon" viewBox="0 0 24 24">
-      <path d="M12 5v14M5 12h14" />
-    </svg>
-  );
-}
-
-function PackMinusGlyph() {
-  return (
-    <svg aria-hidden="true" className="set-pack-action-icon" viewBox="0 0 24 24">
-      <path d="M5 12h14" />
-    </svg>
-  );
-}
-
-function PackAction({
-  state,
-  activity,
-  t,
-  onImport,
-  onUninstall,
-}: PackActionProps) {
-  const busy = activity !== "idle";
-  switch (state.kind) {
-    case "builtin":
-      return null;
-    case "available":
-      return (
-        <button
-          aria-label={activity === "import" ? t.packImporting : t.packImportLocal}
-          className="set-btn set-pack-action set-pack-action-primary"
-          type="button"
-          onClick={onImport}
-          disabled={busy}
-          title={activity === "import" ? t.packImporting : t.packImportLocal}
-        >
-          <PackAddGlyph />
-        </button>
-      );
-    case "installed":
-      return (
-        <button
-          aria-label={activity === "uninstall" ? t.packUninstalling : t.packUninstall}
-          className="set-btn set-pack-action set-pack-action-danger"
-          type="button"
-          onClick={onUninstall}
-          disabled={busy}
-          title={activity === "uninstall" ? t.packUninstalling : t.packUninstall}
-        >
-          <PackMinusGlyph />
-        </button>
-      );
-    default:
-      return assertNever(state);
-  }
-}
-
 export function PersonaPackCard({
-  pack,
-  state,
-  activity,
-  language,
-  t,
-  onImport,
-  onUninstall,
+  pack, selected, activity, language, t, onSelect, onUninstall,
 }: PersonaPackCardProps) {
-  const personas = visiblePersonas(pack, state);
-  const presentation = presentationFor(state, personas.length, t);
-  const headingId = `persona-pack-${pack.packId}`;
+  const kind = pack.builtin ? "builtin" : "installed";
+  const headingId = "persona-pack-heading-" + pack.packId;
+  const tooltipId = "persona-pack-tooltip-" + pack.packId;
+  const name = packLabel(pack, language);
+  const description = pack.builtin ? t.packBuiltinDescription : t.packOfflineDescription;
+  const uninstallLabel = activity === "uninstall" ? t.packUninstalling : t.packUninstall;
 
   return (
-    <article
-      className={`set-pack set-pack-${state.kind}`}
-      aria-labelledby={headingId}
-      aria-describedby={`${headingId}-tooltip`}
-    >
-      <span
-        className="set-pack-thumb"
-        role="img"
-        aria-label={packLabel(pack, language)}
-        title={t.packThumbnailPlaceholder}
-      >
-        {pack.thumbnail === undefined ? (
-          <PackGlyph />
-        ) : (
+    <article className={"set-pack set-pack-" + kind + (selected ? " set-pack-selected" : "")}
+      aria-labelledby={headingId} aria-describedby={tooltipId}
+      onPointerEnter={alignPackTooltip} onFocus={alignPackTooltip}>
+      <button className="set-pack-select" type="button" aria-label={name}
+        aria-pressed={selected} aria-controls="active-persona"
+        aria-describedby={tooltipId} disabled={activity !== "idle"}
+        onClick={() => onSelect(pack)} />
+      <span className="set-pack-thumb" role="img" aria-label={name}>
+        {pack.thumbnail === undefined ? <AppIcon name="pack" size={24} /> : (
           <img className="set-pack-thumb-image" src={pack.thumbnail} alt="" aria-hidden="true" />
         )}
       </span>
       <div className="set-pack-main">
         <div className="set-pack-title-row">
-          <h4 className="set-pack-name" id={headingId}>
-            {packLabel(pack, language)}
-          </h4>
-          <span className={`set-pack-status set-pack-status-${state.kind}`}>
-            {presentation.status}
+          <h4 className="set-pack-name" id={headingId} title={name}>{name}</h4>
+          <span className={"set-pack-status set-pack-status-" + kind}>
+            {pack.builtin ? t.packBuiltin : t.packInstalledVersion(pack.version)}
           </span>
         </div>
-        <span className="set-pack-count" aria-label={presentation.count}>
-          {personas.length}
+        <span className="set-pack-count" aria-label={t.packAvailablePersonas(pack.personas.length)}>
+          {pack.personas.length}
         </span>
       </div>
-      <PackAction
-        state={state}
-        activity={activity}
-        t={t}
-        onImport={onImport}
-        onUninstall={() => onUninstall(pack)}
-      />
-      <span className="set-pack-tooltip" id={`${headingId}-tooltip`} role="tooltip">
-        {presentation.description}
+      {!pack.builtin && (
+        <button aria-label={uninstallLabel} title={uninstallLabel} type="button"
+          className="set-btn set-pack-action set-pack-action-danger"
+          onClick={() => onUninstall(pack)} disabled={activity !== "idle"}>
+          <AppIcon name="delete" size={20} className="set-pack-action-icon" />
+        </button>
+      )}
+      <span className="set-pack-tooltip" id={tooltipId} role="tooltip">
+        {description}
       </span>
     </article>
   );

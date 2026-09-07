@@ -1,136 +1,139 @@
-// Builds a real .dmpack from the persona assets in public/personas, so the
-// import path can be exercised against an actual archive rather than a fixture.
-//
-// Usage: bun scripts/pack-personas.ts <packId> <version> <out.dmpack> [personaId...]
-
-import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { constants } from "node:fs";
+import { copyFile, lstat, mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, extname, resolve } from "node:path";
+import { PackAuthoringError, packMetadata, parsePersonaIds } from "./pack-metadata";
 
 const projectRoot = resolve(import.meta.dir, "..");
 const personasRoot = resolve(projectRoot, "public/personas");
 const skillsRoot = resolve(projectRoot, "src-tauri/resources/skills");
 
-interface SkillRef {
-  id: string;
-  file: string;
-}
+type SkillRef = { readonly id: string; readonly file: string };
+type PersonaEntry = { readonly id: string; readonly skills?: readonly SkillRef[] };
 
-interface PersonaEntry {
-  id: string;
-  skills?: SkillRef[];
-}
-
-const [packId, version, outPath, ...requested] = process.argv.slice(2);
-if (!packId || !version || !outPath) {
-  console.error(
-    "usage: bun scripts/pack-personas.ts <packId> <version> <out.dmpack> [personaId...]",
-  );
-  process.exit(2);
-}
-
-async function personaIds(): Promise<string[]> {
-  if (requested.length > 0) return requested;
-  const entries = await readdir(personasRoot, { withFileTypes: true });
-  return entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
-}
-
-/** Files a persona contributes, as archive-relative paths. */
-async function personaFiles(id: string): Promise<string[]> {
+async function personaFiles(id: string): Promise<readonly string[]> {
   const root = resolve(personasRoot, id);
   const collected: string[] = [];
-
-  async function walk(dir: string, prefix: string) {
+  if (!(await lstat(root)).isDirectory()) {
+    throw new PackAuthoringError("Persona must be a real directory: " + id);
+  }
+  async function walk(dir: string, prefix: string): Promise<void> {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       const child = resolve(dir, entry.name);
-      const rel = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+      const relative = prefix === "" ? entry.name : prefix + "/" + entry.name;
       if (entry.isDirectory()) {
-        await walk(child, rel);
+        await walk(child, relative);
+      } else if (entry.isFile()) {
+        if (!/\.(glb|json|md|png)$/i.test(entry.name)) {
+          throw new PackAuthoringError("Unsupported persona asset: " + id + "/" + relative);
+        }
+        collected.push(relative);
       } else {
-        collected.push(rel);
+        throw new PackAuthoringError("Symbolic links are not allowed in persona assets: " + id + "/" + relative);
       }
     }
   }
-
   await walk(root, "");
   return collected.sort();
 }
 
-/** Skills shipped for a persona, if any. */
-async function personaSkills(id: string): Promise<SkillRef[]> {
+async function personaSkills(id: string): Promise<readonly SkillRef[]> {
   const dir = resolve(skillsRoot, id);
-  const info = await stat(dir).catch(() => null);
-  if (!info?.isDirectory()) return [];
-  const files = (await readdir(dir)).filter((name) => name.endsWith(".md"));
-  return files.sort().map((file) => ({ id, file }));
+  try {
+    if (!(await lstat(dir)).isDirectory()) {
+      throw new PackAuthoringError("Skills must be a real directory: " + id);
+    }
+    const entries = await readdir(dir, { withFileTypes: true });
+    return entries.filter((entry) => entry.name.endsWith(".md")).map((entry) => {
+      if (!entry.isFile()) throw new PackAuthoringError("Skill must be a regular file: " + id + "/" + entry.name);
+      return { id, file: entry.name };
+    }).sort((left, right) => left.file.localeCompare(right.file));
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
+    throw error;
+  }
 }
 
-const ids = await personaIds();
-const staging = resolve(projectRoot, ".dmpack-staging");
-await rm(staging, { recursive: true, force: true });
-await mkdir(staging, { recursive: true });
-
-const personas: PersonaEntry[] = [];
-let fileCount = 0;
-
-for (const id of ids) {
-  const files = await personaFiles(id);
-  if (files.length === 0) {
-    throw new Error(`persona ${id} has no files under public/personas`);
+async function main(): Promise<void> {
+  const [packId, version, output, ...requested] = process.argv.slice(2);
+  if (!packId || !version || !output) {
+    throw new PackAuthoringError("usage: bun scripts/pack-personas.ts <packId> <version> <out.dmpack> [personaId...]");
   }
-  for (const rel of files) {
-    const target = resolve(staging, "personas", id, rel);
-    await mkdir(resolve(target, ".."), { recursive: true });
-    await writeFile(target, await readFile(resolve(personasRoot, id, rel)));
-    fileCount += 1;
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(packId)) {
+    throw new PackAuthoringError("Pack id must be a safe path segment");
   }
-
-  const skills = await personaSkills(id);
-  for (const skill of skills) {
-    const target = resolve(staging, "skills", skill.id, skill.file);
-    await mkdir(resolve(target, ".."), { recursive: true });
-    await writeFile(
-      target,
-      await readFile(resolve(skillsRoot, skill.id, skill.file)),
+  if (!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(version)) {
+    throw new PackAuthoringError("Version must be a semantic version such as 1.0.1");
+  }
+  if (extname(output).toLowerCase() !== ".dmpack") {
+    throw new PackAuthoringError("Output must have the .dmpack extension");
+  }
+  const outputPath = resolve(output);
+  if (await Bun.file(outputPath).exists()) {
+    throw new PackAuthoringError("Destination already exists: " + outputPath);
+  }
+  const ids = parsePersonaIds(requested.length > 0 ? requested :
+    (await readdir(personasRoot, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort());
+  const metadata = packMetadata(packId, ids);
+  const staging = await mkdtemp(resolve(projectRoot, ".dmpack-"));
+  const contents = resolve(staging, "contents");
+  const archivePath = resolve(staging, "pack.zip");
+  try {
+    await mkdir(contents);
+    const personas: PersonaEntry[] = [];
+    let fileCount = 0;
+    for (const id of ids) {
+      const files = await personaFiles(id);
+      if (files.length === 0) throw new PackAuthoringError("Persona has no assets: " + id);
+      for (const relative of files) {
+        const target = resolve(contents, "personas", id, relative);
+        await mkdir(dirname(target), { recursive: true });
+        await copyFile(resolve(personasRoot, id, relative), target);
+        fileCount += 1;
+      }
+      const skills = await personaSkills(id);
+      for (const skill of skills) {
+        const target = resolve(contents, "skills", skill.id, skill.file);
+        await mkdir(dirname(target), { recursive: true });
+        await copyFile(resolve(skillsRoot, skill.id, skill.file), target);
+        fileCount += 1;
+      }
+      personas.push(skills.length > 0 ? { id, skills } : { id });
+    }
+    await copyFile(
+      resolve(import.meta.dir, "persona-packs", metadata.cover),
+      resolve(contents, metadata.thumbnail),
+      constants.COPYFILE_EXCL,
     );
-    fileCount += 1;
+    await writeFile(resolve(contents, "pack.json"), JSON.stringify({
+      packId, version, name: metadata.name, thumbnail: metadata.thumbnail, personas,
+    }, null, 2) + "\n");
+    const command = process.platform === "win32"
+      ? ["powershell.exe", "-NoProfile", "-NonInteractive", "-File", resolve(import.meta.dir, "pack-archive.ps1"), "-SourceDirectory", contents, "-ArchivePath", archivePath]
+      : ["zip", "-r", "-q", archivePath, "."];
+    const child = Bun.spawn(command, { cwd: contents, stdout: "pipe", stderr: "pipe" });
+    const [exitCode, , stderr] = await Promise.all([
+      child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+    ]);
+    if (exitCode !== 0) throw new PackAuthoringError("Could not archive pack: " + stderr);
+    await mkdir(dirname(outputPath), { recursive: true });
+    await copyFile(archivePath, outputPath, constants.COPYFILE_EXCL);
+    const size = (await stat(outputPath)).size;
+    console.log("Packed " + personas.length + " personas, " + (fileCount + 1) + " assets -> " + outputPath + " (" + (size / 1024 / 1024).toFixed(1) + " MiB)");
+  } finally {
+    if (dirname(resolve(staging)) !== projectRoot) {
+      throw new PackAuthoringError("Staging cleanup must stay inside the project");
+    }
+    await rm(staging, { recursive: true, force: true });
   }
-
-  personas.push(skills.length > 0 ? { id, skills } : { id });
 }
 
-// pack.json must sit at the archive root; the importer refuses anything else.
-await writeFile(
-  resolve(staging, "pack.json"),
-  `${JSON.stringify({ packId, version, personas }, null, 2)}\n`,
-);
-
-// PowerShell ships everywhere on Windows; `zip` is not guaranteed.
-const zipCommand =
-  process.platform === "win32"
-    ? [
-        "powershell.exe",
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        `Compress-Archive -Path '${staging}\\*' -DestinationPath '${outPath}' -CompressionLevel Optimal -Force`,
-      ]
-    : ["zip", "-r", "-q", outPath, "."];
-
-await rm(outPath, { force: true });
-const proc = Bun.spawn(zipCommand, {
-  cwd: process.platform === "win32" ? projectRoot : staging,
-  stdout: "pipe",
-  stderr: "pipe",
-});
-if ((await proc.exited) !== 0) {
-  throw new Error(`could not archive pack: ${await new Response(proc.stderr).text()}`);
+if (import.meta.main) {
+  try {
+    await main();
+  } catch (error) {
+    if (error instanceof Error) console.error(error.message);
+    else throw error;
+    process.exitCode = 1;
+  }
 }
-await rm(staging, { recursive: true, force: true });
-
-const size = (await stat(outPath)).size;
-console.log(
-  `Packed ${personas.length} personas, ${fileCount} files -> ${outPath} (${(size / 1024 / 1024).toFixed(1)} MiB)`,
-);

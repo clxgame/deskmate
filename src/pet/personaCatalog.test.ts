@@ -119,8 +119,9 @@ describe("persona packs", () => {
     expect(personaLabel(personaById("xiaozhu"), "zh-CN")).toBe("小著");
     expect(personaLabel(personaById("xiaozhu"), "en-US")).toBe("Xiaozhu");
     expect(packLabel(AI_SUBSTITUTE_PACK, "zh-CN")).toBe("小著");
-    expect(packLabel(AKI_PACK, "zh-CN")).toBe("aki 团子");
-    expect(packLabel(AKI_PACK, "en-US")).toBe("aki Dango");
+    expect(AKI_PACK.name).toBeUndefined();
+    expect(AKI_PACK.thumbnail).toBeUndefined();
+    expect(packLabel(AKI_PACK, "zh-CN")).toBe("aki");
   });
 
   test("looks packs up by id", () => {

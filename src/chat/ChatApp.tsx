@@ -50,6 +50,7 @@ import {
 } from "../lib/settings";
 import type { ThemeId } from "../settings/theme";
 import { dict } from "../lib/i18n";
+import { AppIcon } from "../ui/AppIcon";
 import {
   historyDelete,
   historyList,
@@ -1170,7 +1171,7 @@ export default function ChatApp() {
           aria-label={t.tabHistory}
           title={t.tabHistory}
         >
-          ◷
+          <AppIcon name="history" size={18} />
         </button>
         <button
           className="chat-settings"
@@ -1178,14 +1179,14 @@ export default function ChatApp() {
           aria-label={t.chatSettings}
           title={t.chatSettings}
         >
-          ⚙
+          <AppIcon name="general" size={18} />
         </button>
         <button
           className="chat-close"
           onClick={() => void closeChat()}
           aria-label={t.close}
         >
-          ×
+          <AppIcon name="close" size={18} />
         </button>
       </header>
 
@@ -1234,7 +1235,10 @@ export default function ChatApp() {
               return (
                 <div key={m.id} className={`chat-msg chat-msg-${m.role}`}>
                   {m.activity && (
-                    <div className="chat-activity">⚙ {m.activity}</div>
+                    <div className="chat-activity">
+                      <AppIcon name="general" size={16} className="chat-activity-icon" />{" "}
+                      {m.activity}
+                    </div>
                   )}
                   {m.attachments && m.attachments.length > 0 && (
                     <div className="chat-message-attachments">
@@ -1380,9 +1384,7 @@ export default function ChatApp() {
                   aria-label={t.chatAttach}
                   title={t.chatAttachHint}
                 >
-                  <svg viewBox="0 0 16 16" aria-hidden="true">
-                    <path d="M8 2.5v11M2.5 8h11" />
-                  </svg>
+                  <AppIcon name="attachment" size={16} />
                 </button>
               </div>
             </div>
@@ -1541,7 +1543,8 @@ function HistoryPanel({
       <div className="history-head">
         <span className="history-title">{t.tabHistory}</span>
         <button className="history-new" onClick={() => void onNewChat()}>
-          + {t.historyNewSession}
+          <AppIcon name="add" size={16} />
+          {t.historyNewSession}
         </button>
       </div>
       {failed && (
@@ -1582,7 +1585,7 @@ function HistoryPanel({
                 title={t.historyDelete}
                 onClick={() => void remove(s.id)}
               >
-                ×
+                <AppIcon name="delete" size={16} />
               </button>
             </div>
           ))}

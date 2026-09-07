@@ -27,6 +27,7 @@ import {
   personaById,
 } from "../pet/personaCatalog";
 import { THEME_IDS, type ThemeId } from "./theme";
+import { AppIcon, type AppIconName } from "../ui/AppIcon";
 import "./settings.css";
 
 type TabId =
@@ -38,15 +39,15 @@ type TabId =
   | "memory"
   | "about";
 
-const TAB_GLYPHS: { id: TabId; glyph: string }[] = [
-  { id: "general", glyph: "◎" },
-  { id: "ai", glyph: "✦" },
-  { id: "widget", glyph: "▣" },
-  { id: "shortcuts", glyph: "⌘" },
-  { id: "account", glyph: "◍" },
-  { id: "memory", glyph: "❉" },
-  { id: "about", glyph: "ⓘ" },
-];
+const TAB_ICONS = [
+  { id: "general", icon: "general" },
+  { id: "ai", icon: "ai" },
+  { id: "widget", icon: "widget" },
+  { id: "shortcuts", icon: "shortcuts" },
+  { id: "account", icon: "pet" },
+  { id: "memory", icon: "memory" },
+  { id: "about", icon: "about" },
+] as const satisfies readonly { readonly id: TabId; readonly icon: AppIconName }[];
 
 function tabLabel(t: Dict, id: TabId): string {
   switch (id) {
@@ -170,20 +171,20 @@ export default function SettingsApp() {
           onClick={() => void hideSettingsWindow()}
           aria-label={t.close}
         >
-          ×
+          <AppIcon name="close" size={18} />
         </button>
       </header>
 
       <div className="set-body">
         <nav className="set-sidebar">
-          {TAB_GLYPHS.map((g) => (
+          {TAB_ICONS.map((item) => (
             <button
-              key={g.id}
-              className={`set-tab${tab === g.id ? " set-tab-active" : ""}`}
-              onClick={() => setTab(g.id)}
+              key={item.id}
+              className={`set-tab${tab === item.id ? " set-tab-active" : ""}`}
+              onClick={() => setTab(item.id)}
             >
-              <span className="set-tab-glyph">{g.glyph}</span>
-              {tabLabel(t, g.id)}
+              <AppIcon className="set-tab-icon" name={item.icon} size={20} />
+              {tabLabel(t, item.id)}
             </button>
           ))}
         </nav>
@@ -414,7 +415,7 @@ function WidgetTab({ settings, patch, t }: TabProps) {
               )
             }
           >
-            ×
+            <AppIcon name="delete" size={16} />
           </button>
         </div>
       ))}

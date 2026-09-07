@@ -78,6 +78,15 @@
   opacity: 1;
 }
 
+.chat-settings,
+.chat-close,
+.chat-iconbtn,
+.ccswitch-close,
+.history-del {
+  display: grid;
+  place-items: center;
+}
+
 .chat-settings {
   background: none;
   border: none;
@@ -168,6 +177,11 @@
   opacity: 0.55;
   margin-bottom: 3px;
   font-family: Consolas, monospace;
+}
+
+.chat-activity .chat-activity-icon {
+  display: inline-block;
+  vertical-align: middle;
 }
 
 .chat-typing {
@@ -533,15 +547,6 @@
 .chat-attach:disabled {
   color: var(--text-disabled);
   cursor: default;
-}
-
-.chat-attach svg {
-  width: 16px;
-  height: 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-width: 1.6;
 }
 
 .chat-input {
@@ -1012,6 +1017,9 @@
 }
 
 .history-new {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
   background: none;
   border: 1px solid var(--line-strong);
   border-radius: 8px;

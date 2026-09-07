@@ -26,7 +26,7 @@ describe("ChatApp attachment cache lifecycle", () => {
     await waitFor(() => expect(stageSessionIds()).toEqual(["ses-a"]));
 
     fireEvent.click(screen.getByRole("button", { name: "历史" }));
-    fireEvent.click(await screen.findByRole("button", { name: "+ 新会话" }));
+    fireEvent.click(await screen.findByRole("button", { name: "新会话" }));
 
     await waitFor(() => expect(orderedEvents()).toContain("abort:ses-a"));
     await waitFor(() => expect(cleanupSessions()).toEqual(["ses-a"]));

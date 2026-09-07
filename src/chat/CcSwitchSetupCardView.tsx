@@ -1,4 +1,5 @@
 import type { Dict } from "../lib/i18n";
+import { AppIcon } from "../ui/AppIcon";
 import { CcSwitchSetupCardBody } from "./CcSwitchSetupCardPanels";
 import type { CcSwitchSetupController } from "./CcSwitchSetupCardTypes";
 
@@ -25,7 +26,7 @@ export function CcSwitchSetupCardView({ t, controller }: CcSwitchSetupCardViewPr
           onClick={() => void controller.actions.close()}
           aria-label={t.close}
         >
-          ×
+          <AppIcon name="close" size={18} />
         </button>
       </div>
       <CcSwitchSetupCardBody t={t} controller={controller} />

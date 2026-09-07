@@ -6,6 +6,7 @@ dist/
 
 # Rust/Tauri build output
 src-tauri/target/
+src-tauri/target-*/
 
 # Platform-specific OpenCode sidecar prepared from the locked npm package
 src-tauri/resources/opencode/opencode
@@ -35,6 +36,10 @@ client_secret*.json
 
 # Local tooling and logs
 .omo/
+/.agents/
+/.claude/
+/namespaces/
+/skills/
 .idea/
 .vscode/
 *.log

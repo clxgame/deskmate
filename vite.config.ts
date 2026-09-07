@@ -1,9 +1,11 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "node:path";
+import { realpathSync } from "node:fs";
 
 // Two entry pages: pet (transparent always-on-top mascot) and chat (chat panel).
 export default defineConfig({
+  root: realpathSync(__dirname),
   plugins: [react()],
   clearScreen: false,
   server: {

@@ -116,6 +116,7 @@ describe("SettingsKeyboardNavigation", () => {
     render(<SettingsTabsFixture />);
 
     emitFocusChange(true);
+    await flushScheduledFocus();
 
     const generalTab = screen.getByRole("button", { name: "General" });
     await waitFor(() => {

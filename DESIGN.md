@@ -58,6 +58,16 @@ All spacing uses a 4px base: `--s-0-5` 2px, `--s-1` 4px, `--s-2` 8px, `--s-3` 12
 
 ## 5. Components
 
+### Functional icons
+- Structure: `AppIcon` uses individually imported official `@phosphor-icons/react` 2.1.10 CSR components. Its semantic names map to Regular icons: `general` GearSix, `ai` Sparkle, `widget` SquaresFour, `shortcuts` Keyboard, `pet` PawPrint, `memory` Brain, `about` Info, `close` X, `history` ClockCounterClockwise, `attachment` Paperclip, `pack` Package, `add` Plus, and `delete` Trash.
+- Size tokens: `.app-icon-16` is 16px for attachments, activity markers, the history new-action prefix, and history/widget delete controls; `.app-icon-18` is 18px for header and close controls; `.app-icon-20` is 20px for navigation and package uninstall; `.app-icon-24` is 24px for package fallbacks and import actions. The default is 20px. Every icon has explicit width and height, block display, and no flex shrinking, including beneath a font-size:0 compact navigation parent. The inline activity marker may use inline-block display to preserve status-text wrapping. Existing controls retain their hit areas.
+- States: icons inherit `currentColor` from the existing control in default, hover, selected, focus, disabled, and busy states. Regular weight and official fill/path geometry stay fixed; do not add stroke or fill overrides, extra animation, or page-wide SVG selectors.
+- Accessibility: SVGs are decorative (`aria-hidden="true"`, `focusable="false"`) with no title or event handlers. Accessible names, keyboard behavior, focus rings, and actions remain on the enclosing native controls. Content images, character artwork, branding, and text-only actions follow their existing rules.
+- Delivery: Vite bundles the selected modules for offline rendering. The MIT notice ships at `public/licenses/Phosphor-Icons-LICENSE.txt`; do not use an icon font, runtime icon host, or dynamically imported catalog.
+
+### Update footer
+- Structure: version, a persistent check-for-updates button, then inline status text on its right, using the existing footer spacing and typography tokens.
+- States: checking, downloading and installing keep the button visible but disabled; completion and error restore it. Version and button do not shrink. Status uses the remaining single-line space, ellipsizes when necessary, and exposes its full text through the native title and accessible text so it cannot move the button or resize the footer.
 ### Settings row
 - Structure: label plus right-aligned control inside `.set-row`.
 - States: default, hover, active, selected, keyboard focus, disabled where applicable, and loading for async data. Inputs and selects use the sunken layer; disabled controls use their own surface and text tokens rather than a low-opacity accent.
@@ -65,18 +75,18 @@ All spacing uses a 4px base: `--s-0-5` 2px, `--s-1` 4px, `--s-2` 8px, `--s-3` 12
 
 ### Desktop pet controls
 - Structure: the Desktop pet tab starts with a compact raised group for pet scale and visibility, followed by nickname, pack management, mouse-follow, and render tuning.
-- The duplicate top-of-panel persona selector is intentionally omitted; the pack section keeps paired `角色包` and `角色` selectors below the grid so the active character is always chosen within one pack.
+- The duplicate top-of-panel persona selector is omitted. Package icons select the current pack; below the grid there is one native `角色` selector containing only that pack's compatible roles.
 - Accessibility: native range and switch controls retain visible labels and immediate settings-changed feedback.
 
 ### Persona library
 - Structure: a heading and live availability summary followed by a compact grid of 60px square persona-pack tiles. Each tile keeps the name, semantic status, numeric count, and contextual action over the thumbnail; the name and count are unbacked text, while the grid remains dense on narrow settings windows.
-- Availability is derived from the backend: built-in packs are always ready, installed packs show their installed version and actual on-disk persona subset, and absent packs show their manifest capacity as an offline option.
-- Pack tiles prioritize the supplied transparent thumbnail, pack name, status, and one numeric character count. Loaded thumbnails render at normal brightness; not-installed thumbnails are dimmed. Descriptions and import-format guidance are not persistent copy; they appear in a delayed tooltip on hover or focus.
+- The grid consists of built-in packs, every installed pack, and one independent import tile that always remains last. Importing another pack inserts its card before the plus; importing the same pack id updates its existing card. Removing a pack removes only that card. The plus has no name, image, status badge, or count. Imported names and covers come from installed pack.json metadata; metadata-less legacy packs use their id and a neutral glyph.
+- Pack tiles prioritize the supplied transparent thumbnail, pack name, status, and one numeric character count. Loaded thumbnails render at normal brightness. The empty slot uses a full-tile plus button on the existing sunken surface with a dashed border and an accent-ink focus ring. There is no thumbnail in the empty state. Descriptions and import-format guidance are not persistent copy; they appear in a delayed tooltip on hover or focus.
 
 ### Persona pack card
 - Structure: a 60px square tile with a full-bleed transparent PNG thumbnail, pack name, semantic status badge, one numeric character count, and one contextual action layered inside the tile. Name and count use `--text-on-media` plus their dedicated text shadows with no border, padding, or background; import/remove icons are likewise unbacked so the thumbnail stays visually clear. Labels remain available through each button's accessible name and title.
-- Variants: `builtin`, `installed`, and `available`; only installed removable packs expose the destructive action.
-- Counts for installed packs use the backend's actual `personaIds`, never the static manifest total. Each tile shows only the total character count; detailed descriptions and import guidance remain available through the delayed tooltip.
+- Variants: `builtin`, `installed`, and the separate empty import tile. Clicking a package selects it with a persistent accent-ink ring. A full-tile native button exposes aria-pressed and keyboard activation; the remove button is a sibling above it, so removal never selects a different pack. Clicking the current pack preserves its role; switching packs selects its first compatible role. No compatible role means a disabled role selector with a localized zero-available option, never an invented fallback role. All states retain the same 60px geometry.
+- Counts for installed packs use the intersection of installed `personaIds` and authored compatible roles, never the static manifest total. Unknown packs remain manageable with zero compatible roles. Delayed tooltips align within the package section when a card receives pointer hover or keyboard focus.
 - States: default, import busy, uninstall busy, keyboard focus, delayed hover tooltip, success, and error. Motion is limited to action affordances, status changes, and the tooltip reveal.
 
 ### Character render tuning
@@ -105,7 +115,7 @@ All spacing uses a 4px base: `--s-0-5` 2px, `--s-1` 4px, `--s-2` 8px, `--s-3` 12
 - Cursor polling is throttled to 25Hz and the model rotation uses exponential smoothing so the interaction feels responsive without jitter or excessive IPC traffic.
 
 ### Tab button
-- Structure: icon glyph plus label in `.set-tab`.
+- Structure: a 20px `AppIcon` plus label in `.set-tab`.
 - States: default, hover, active/selected, and keyboard focus. Selected label and icon use `--accent-ink` on `--accent-soft` so light-theme text stays readable.
 
 ### Memory receipt (chat)

@@ -17,6 +17,7 @@
     "doctor": "react-doctor"
   },
   "dependencies": {
+    "@phosphor-icons/react": "2.1.10",
     "@pixiv/three-vrm": "^3.4.4",
     "@tauri-apps/api": "^2.9.0",
     "@tauri-apps/plugin-dialog": "^2.7.2",

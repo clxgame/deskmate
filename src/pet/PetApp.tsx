@@ -73,6 +73,79 @@ export default function PetApp() {
           console.error("3D pet load failed", message);
         });
     };
+    // The pet window is not resizable and only moves on drag, so its geometry is
+    // read once and refreshed from window events instead of on every poll. That
+    // leaves one real IPC call per tick instead of three.
+    let geometry: { readonly centerX: number; readonly centerY: number; readonly halfWidth: number; readonly halfHeight: number } | null =
+      null;
+    let geometryPending = false;
+    const refreshGeometry = (): void => {
+      if (disposed || geometryPending) return;
+      geometryPending = true;
+      void Promise.all([petWindow.outerPosition(), petWindow.outerSize()])
+        .then(([position, size]) => {
+          if (disposed) return;
+          geometry = {
+            centerX: position.x + size.width / 2,
+            centerY: position.y + size.height / 2,
+            halfWidth: Math.max(size.width / 2, 1),
+            halfHeight: Math.max(size.height / 2, 1),
+          };
+        })
+        .catch((error: unknown) => {
+          if (!disposed) {
+            console.error(
+              "pet window geometry probe failed",
+              error instanceof Error ? error : new Error(String(error)),
+            );
+          }
+        })
+        .finally(() => {
+          geometryPending = false;
+        });
+    };
+    const pollCursor = (): void => {
+      if (!mouseFollow || cursorPollBusy) return;
+      if (geometry === null) {
+        refreshGeometry();
+        return;
+      }
+      const bounds = geometry;
+      cursorPollBusy = true;
+      void cursorPosition()
+        .then((cursor) => {
+          if (disposed || !mouseFollow) return;
+          renderer.setMouseTarget({
+            x: (cursor.x - bounds.centerX) / bounds.halfWidth,
+            y: (cursor.y - bounds.centerY) / bounds.halfHeight,
+          });
+        })
+        .catch((error: unknown) => {
+          if (!disposed) {
+            console.error(
+              "mouse follow probe failed",
+              error instanceof Error ? error : new Error(String(error)),
+            );
+          }
+        })
+        .finally(() => {
+          cursorPollBusy = false;
+        });
+    };
+    // Mouse follow is the only consumer of the cursor poll, so the timer exists
+    // only while the feature is on rather than idling at 25Hz.
+    let cursorPoll: number | null = null;
+    const syncCursorPoll = (): void => {
+      if (mouseFollow && cursorPoll === null) {
+        refreshGeometry();
+        cursorPoll = window.setInterval(pollCursor, 40);
+        return;
+      }
+      if (!mouseFollow && cursorPoll !== null) {
+        window.clearInterval(cursorPoll);
+        cursorPoll = null;
+      }
+    };
     void getSettingsWithRetry()
       .then((settings) => {
         setTheme(settings.theme);
@@ -80,6 +153,7 @@ export default function PetApp() {
         renderer.setScale(settings.petScale);
         renderer.setRenderTuning(settings);
         renderer.setMouseFollowEnabled(mouseFollow);
+        syncCursorPoll();
         loadPersona(settings.personaId);
       })
       .catch((error: unknown) => {
@@ -97,44 +171,20 @@ export default function PetApp() {
       renderer.setScale(settings.petScale);
       renderer.setRenderTuning(settings);
       renderer.setMouseFollowEnabled(mouseFollow);
+      syncCursorPoll();
       loadPersona(settings.personaId);
     });
-    const pollCursor = (): void => {
-      if (!mouseFollow || cursorPollBusy) return;
-      cursorPollBusy = true;
-      void Promise.all([
-        cursorPosition(),
-        petWindow.outerPosition(),
-        petWindow.outerSize(),
-      ])
-        .then(([cursor, position, size]) => {
-          if (disposed || !mouseFollow) return;
-          const centerX = position.x + size.width / 2;
-          const centerY = position.y + size.height / 2;
-          renderer.setMouseTarget({
-            x: (cursor.x - centerX) / Math.max(size.width / 2, 1),
-            y: (cursor.y - centerY) / Math.max(size.height / 2, 1),
-          });
-        })
-        .catch((error: unknown) => {
-          if (!disposed) {
-            console.error(
-              "mouse follow probe failed",
-              error instanceof Error ? error : new Error(String(error)),
-            );
-          }
-        })
-        .finally(() => {
-          cursorPollBusy = false;
-        });
-    };
-    const cursorPoll = window.setInterval(pollCursor, 40);
+    // Dragging the pet or a scale change is what actually invalidates the cache.
+    const unlistenMoved = petWindow.onMoved(() => refreshGeometry());
+    const unlistenResized = petWindow.onResized(() => refreshGeometry());
     return () => {
       disposed = true;
-      window.clearInterval(cursorPoll);
+      if (cursorPoll !== null) window.clearInterval(cursorPoll);
       void unlistenMood.then((stopListening) => stopListening());
       void unlistenScalePreview.then((stopListening) => stopListening());
       void unlistenSettings.then((stopListening) => stopListening());
+      void unlistenMoved.then((stopListening) => stopListening());
+      void unlistenResized.then((stopListening) => stopListening());
       rendererRef.current = null;
       void contextMenuRef.current?.close();
       contextMenuRef.current = null;

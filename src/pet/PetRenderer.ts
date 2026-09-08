@@ -38,6 +38,44 @@ const MOUSE_YAW_GAIN = 0.45;
 const MOUSE_PITCH_GAIN = 0.28;
 const MOUSE_SMOOTHING = 10;
 
+/// Idle rendering never exceeds this rate. The animation loop is driven by
+/// requestAnimationFrame, which cannot outrun the display, so the effective
+/// idle rate is min(refresh rate, IDLE_FPS_CAP).
+export const IDLE_FPS_CAP = 60;
+const IDLE_FRAME_INTERVAL = 1 / IDLE_FPS_CAP;
+/// A display running at exactly the cap must not be gated: frame times jitter
+/// slightly below the nominal interval, and comparing against the exact
+/// interval would drop every other frame and halve the rate.
+const FRAME_INTERVAL_TOLERANCE = 0.9;
+const IDLE_FRAME_THRESHOLD = IDLE_FRAME_INTERVAL * FRAME_INTERVAL_TOLERANCE;
+
+/// Decides whether enough time has accumulated to render. Returns the delta to
+/// advance animation by, or `null` to skip this frame.
+///
+/// Skipped time is carried, never dropped, so the deltas handed to the
+/// animation mixer always sum to real elapsed time regardless of the cap.
+export function gateFrame(
+  accumulated: number,
+  uncapped: boolean,
+): number | null {
+  if (uncapped) return accumulated;
+  return accumulated >= IDLE_FRAME_THRESHOLD ? accumulated : null;
+}
+
+/// Frame-rate independent exponential smoothing. The blend factor is derived
+/// from elapsed time, so the same wall-clock duration converges to the same
+/// angle whether it arrived as few long frames or many short ones. This keeps
+/// the eased motion within a bounded rate at any frame rate.
+export function smoothTowards(
+  current: number,
+  target: number,
+  delta: number,
+  smoothing: number = MOUSE_SMOOTHING,
+): number {
+  const blend = 1 - Math.exp(-Math.max(delta, 0) * smoothing);
+  return current + (target - current) * blend;
+}
+
 export function mouseFollowPitchTarget(normalizedY: number): number {
   const y = Number.isFinite(normalizedY) ? normalizedY : 0;
   return THREE.MathUtils.clamp(
@@ -69,8 +107,19 @@ export function pickRandomClip(
   return clipNames[index];
 }
 
-function isVrm(value: unknown): value is VRM {
-  return (
+/// Finds the node whose baked root motion must be pinned to the origin, so the
+/// pet animates in place. The result is stable for the lifetime of a model.
+export function findRootMotionNode(
+  model: THREE.Object3D,
+): THREE.Object3D | null {
+  let found: THREE.Object3D | null = null;
+  model.traverse((object) => {
+    if (found === null && object.name === "Root") found = object;
+  });
+  return found;
+}
+
+function isVrm(value: unknown): value is VRM {  return (
     value !== null &&
     typeof value === "object" &&
     "scene" in value &&
@@ -123,6 +172,12 @@ export class PetRenderer {
   private mouseYaw = 0;
   private mousePitch = 0;
   private readonly baseModelRotation = new THREE.Euler();
+  /// The root node whose motion is stripped each frame. Resolved once per model
+  /// because the node identity never changes, replacing a full scene-graph
+  /// traversal on every rendered frame.
+  private rootMotionNode: THREE.Object3D | null = null;
+  /// Real elapsed time not yet handed to the animation mixer.
+  private pendingDelta = 0;
   private personaId = "xiaozhu";
   private loadToken = 0;
   private nudgeToken = 0;
@@ -214,6 +269,7 @@ export class PetRenderer {
     this.personaId = persona.id;
     this.baseModelRotation.copy(model.rotation);
     this.model = model;
+    this.rootMotionNode = findRootMotionNode(model);
     this.vrm = vrm;
     this.toon = toon;
     this.clips = gltf.animations;
@@ -319,7 +375,14 @@ export class PetRenderer {
 
   private readonly tick = (): void => {
     if (this.disposed) return;
-    const delta = this.clock.getDelta();
+    // Accumulate real elapsed time so gated frames carry their time forward
+    // instead of discarding it.
+    this.pendingDelta += this.clock.getDelta();
+    // A nudge is a one-shot interaction animation: render it at full rate so
+    // poking the pet stays responsive.
+    const delta = gateFrame(this.pendingDelta, this.nudgeCleanup !== null);
+    if (delta === null) return;
+    this.pendingDelta = 0;
     if (this.vrm !== null) {
       this.updateVrm(delta);
     } else {
@@ -331,11 +394,10 @@ export class PetRenderer {
   };
 
   private updateMouseFollow(delta: number): void {
-    const blend = 1 - Math.exp(-Math.max(delta, 0) * MOUSE_SMOOTHING);
     const yaw = this.mouseFollowEnabled ? this.mouseTargetYaw : 0;
     const pitch = this.mouseFollowEnabled ? this.mouseTargetPitch : 0;
-    this.mouseYaw = THREE.MathUtils.lerp(this.mouseYaw, yaw, blend);
-    this.mousePitch = THREE.MathUtils.lerp(this.mousePitch, pitch, blend);
+    this.mouseYaw = smoothTowards(this.mouseYaw, yaw, delta);
+    this.mousePitch = smoothTowards(this.mousePitch, pitch, delta);
     if (this.model !== null) {
       this.model.rotation.set(
         this.baseModelRotation.x + this.mousePitch,
@@ -406,9 +468,7 @@ export class PetRenderer {
   }
 
   private stripRootMotion(): void {
-    this.model?.traverse((object) => {
-      if (object.name === "Root") object.position.set(0, 0, 0);
-    });
+    this.rootMotionNode?.position.set(0, 0, 0);
   }
 
   private poseArms(): void {
@@ -492,6 +552,7 @@ export class PetRenderer {
       this.disposeObject(this.model);
     }
     this.model = null;
+    this.rootMotionNode = null;
     this.vrm = null;
     this.clips = [];
     this.activeClip = "";

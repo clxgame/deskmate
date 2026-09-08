@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Dict } from "../../lib/i18n";
 import { deleteSchedule, retryRun, saveSchedule, type Run, type RunState, type Schedule } from "../../lib/worklog";
 import { TimePicker } from "../widgets/TimePicker";
@@ -49,10 +49,12 @@ function ScheduleEditor({ schedule, labels, t, onDone }: {
     <div className="worklog-actions"><button className="set-btn" type="submit" disabled={action.busy || !days.length}>{labels.save}</button><button className="set-btn" type="button" disabled={action.busy} onClick={onDone}>{labels.cancel}</button></div>
   </form>;
 }
-export function ReportSchedulePanel({ schedules, runs, targetId, labels, t, onChanged }: {
-  readonly schedules: readonly Schedule[]; readonly runs: readonly Run[]; readonly targetId: string | null;
+export function ReportSchedulePanel({ schedules, runs, targetId, targetRunId, labels, t, onChanged }: {
+  readonly schedules: readonly Schedule[]; readonly runs: readonly Run[]; readonly targetId: string | null; readonly targetRunId?: string | null;
   readonly labels: WorklogLabels; readonly t: Dict; readonly onChanged: () => void;
 }) {
+  const targetRunRef = useRef<HTMLLIElement>(null);
+  useEffect(() => { targetRunRef.current?.scrollIntoView({ block: "nearest" }); }, [targetRunId]);
   const [editing, setEditing] = useState<Schedule | "new" | null>(() => schedules.find((schedule) => schedule.id === targetId) ?? null);
   const [deleting, setDeleting] = useState<Schedule | null>(null);
   const action = useWorklogAction(labels);
@@ -77,7 +79,7 @@ export function ReportSchedulePanel({ schedules, runs, targetId, labels, t, onCh
     }} />}
     <h3 className="worklog-heading">{labels.runs}</h3>
     {!runs.length && <p className="worklog-meta">{labels.noRuns}</p>}
-    <ul className="worklog-list">{runs.map((run) => <li key={run.id} className="worklog-item">
+    <ul className="worklog-list">{runs.map((run) => <li key={run.id} className="worklog-item" ref={run.id === targetRunId ? targetRunRef : undefined} aria-current={run.id === targetRunId ? "true" : undefined}>
       <p>{run.periodStart} — {run.periodEnd} · {runLabel(run.state, labels)}</p>
       {run.errorCode && <p className="worklog-error">{run.errorCode}</p>}
       {run.nextRetryAt && <p className="worklog-meta">{labels.next}: {nextRunFormatter.format(new Date(run.nextRetryAt))}</p>}

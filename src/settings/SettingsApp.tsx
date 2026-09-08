@@ -19,8 +19,8 @@ import { dict, LANGS, type Dict } from "../lib/i18n";
 import { UpdateFooter } from "./UpdateFooter";
 import { AiTab } from "./AiTab";
 import { MemoryTab } from "./MemoryTab";
-import { WorklogTab, type WorklogTarget } from "./worklog/WorklogTab";
-import { WidgetTab } from "./widgets/WidgetTab";
+import { type WorklogTarget } from "./worklog/WorklogTab";
+import { WidgetTab, type WidgetId } from "./widgets/WidgetTab";
 import { PersonaPacks } from "./PersonaPacks";
 import { Row, Switch, type TabProps } from "./settingsPrimitives";
 import type { InstalledPack } from "../lib/packs";
@@ -39,7 +39,6 @@ type TabId =
   | "shortcuts"
   | "account"
   | "memory"
-  | "worklog"
   | "about";
 
 const TAB_ICONS = [
@@ -49,11 +48,10 @@ const TAB_ICONS = [
   { id: "shortcuts", icon: "shortcuts" },
   { id: "account", icon: "pet" },
   { id: "memory", icon: "memory" },
-  { id: "worklog", icon: "history" },
   { id: "about", icon: "about" },
 ] as const satisfies readonly { readonly id: TabId; readonly icon: AppIconName }[];
 
-function tabLabel(t: Dict, id: TabId, language: string): string {
+function tabLabel(t: Dict, id: TabId): string {
   switch (id) {
     case "general":
       return t.tabGeneral;
@@ -67,8 +65,6 @@ function tabLabel(t: Dict, id: TabId, language: string): string {
       return t.tabAccount;
     case "memory":
       return t.tabMemory;
-    case "worklog":
-      return language === "en-US" ? "Work journal" : language === "ja-JP" ? "作業記録" : language === "ko-KR" ? "업무 기록" : "工作记录";
     case "about":
       return t.tabAbout;
   }
@@ -93,7 +89,8 @@ const SAVE_DELAY_MS = 400;
 // allow: SIZE_OK — existing settings composition root; widget controls are extracted and remaining tabs are outside this change.
 export default function SettingsApp() {
   const [tab, setTab] = useState<TabId>("general");
-  const [worklogTarget, setWorklogTarget] = useState<WorklogTarget | null>(null);
+  const [activeWidget, setActiveWidget] = useState<WidgetId>("tasks");
+  const [worklogRequest, setWorklogRequest] = useState<{ readonly target: WorklogTarget | null; readonly id: number } | null>(null);
   const [settings, setLocalSettings] = useState<Settings | null>(null);
   const t = dict(settings?.language ?? "zh-CN");
 
@@ -103,11 +100,13 @@ export default function SettingsApp() {
   useEffect(() => {
     const unlisten = listen<string>("deskmate://settings-tab", (event) => {
       if (event.payload === "widget") setTab("widget");
-      if (event.payload === "worklog") setTab("worklog");
+      if (event.payload === "worklog") {
+        setTab("widget"); setActiveWidget("worklog");
+      }
     });
     const targetListener = listen<WorklogTarget | null>("deskmate://worklog-target", (event) => {
-      setWorklogTarget(event.payload);
-      setTab("worklog");
+      setWorklogRequest((previous) => ({ target: event.payload, id: (previous?.id ?? 0) + 1 }));
+      setTab("widget"); setActiveWidget("worklog");
     });
     return () => {
       void unlisten.then((stopListening) => stopListening());
@@ -198,7 +197,7 @@ export default function SettingsApp() {
               onClick={() => setTab(item.id)}
             >
               <AppIcon className="set-tab-icon" name={item.icon} size={20} />
-              {tabLabel(t, item.id, settings?.language ?? "zh-CN")}
+              {tabLabel(t, item.id)}
             </button>
           ))}
         </nav>
@@ -222,7 +221,7 @@ export default function SettingsApp() {
               />
             )}
             {tab === "widget" && (
-              <WidgetTab settings={settings} patch={patch} t={t} />
+              <WidgetTab settings={settings} patch={patch} t={t} activeWidget={activeWidget} onSelect={setActiveWidget} worklogRequest={worklogRequest} />
             )}
             {tab === "shortcuts" && (
               <ShortcutsTab settings={settings} patch={patch} t={t} />
@@ -246,7 +245,6 @@ export default function SettingsApp() {
             {tab === "about" && (
               <AboutTab settings={settings} patch={patch} t={t} />
             )}
-            {tab === "worklog" && <WorklogTab language={settings.language} t={t} target={worklogTarget} />}
           </main>
         )}
       </div>

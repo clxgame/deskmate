@@ -12,8 +12,8 @@ import { useWorklogAction } from "./useWorklogAction";
 import { worklogLabels } from "./worklogLabels";
 import "./worklog.css";
 
-export interface WorklogTarget { readonly kind: "entry" | "report" | "schedule"; readonly id: string }
-export interface WorklogTabProps { readonly language: string; readonly t: Dict; readonly target?: WorklogTarget | null }
+export interface WorklogTarget { readonly kind: "entry" | "report" | "schedule" | "run"; readonly id: string }
+export interface WorklogTabProps { readonly language: string; readonly t: Dict; readonly target?: WorklogTarget | null; readonly targetRequestId?: number }
 type View = "entries" | "daily" | "weekly" | "schedules";
 type Detail = { readonly kind: "entry"; readonly entry: Entry | null } | { readonly kind: "report"; readonly detail: ReportDetail | null } | null;
 type Data = { readonly entries: readonly Entry[]; readonly reports: readonly Report[]; readonly schedules: readonly Schedule[]; readonly runs: readonly Run[] };
@@ -26,7 +26,7 @@ function thisWeek(): { readonly start: string; readonly end: string } {
   return { start, end: date.toISOString().slice(0, 10) };
 }
 
-export function WorklogTab({ language, t, target }: WorklogTabProps) {
+export function WorklogTab({ language, t, target, targetRequestId }: WorklogTabProps) {
   const labels = worklogLabels(language);
   const [view, setView] = useState<View>("entries");
   const [start, setStart] = useState(() => `${today().slice(0, 7)}-01`);
@@ -36,10 +36,13 @@ export function WorklogTab({ language, t, target }: WorklogTabProps) {
   const [loading, setLoading] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const [targetState, setTargetState] = useState<{ readonly failure: string | null; readonly retry: number; readonly scheduleId: string | null; readonly runId: string | null }>({ failure: null, retry: 0, scheduleId: null, runId: null });
+  const { failure: targetFailure, retry: targetRetry, scheduleId: scheduleTarget, runId: runTarget } = targetState;
   const [detail, setDetail] = useState<Detail>(null);
   const [editorEpoch, setEditorEpoch] = useState(0);
   const [clear, setClear] = useState<readonly Entry[] | null>(null);
   const sequence = useRef(0);
+  const consumedTarget = useRef<{ readonly target: WorklogTarget | null; readonly id: number | undefined; readonly retry: number } | null>(null);
   const action = useWorklogAction(labels);
   const load = useCallback(async () => {
     const current = ++sequence.current;
@@ -58,20 +61,49 @@ export function WorklogTab({ language, t, target }: WorklogTabProps) {
     return () => { void subscription.then((unlisten) => unlisten(), () => undefined); };
   }, [load]);
   useEffect(() => {
-    if (!target) return;
+    if (target === undefined || (consumedTarget.current?.target === target && consumedTarget.current.id === targetRequestId && consumedTarget.current.retry === targetRetry)) return;
     let cancelled = false;
+    setDetail(null); setClear(null); setTargetState((current) => ({ ...current, failure: null, scheduleId: null, runId: null }));
+    setEditorEpoch((epoch) => epoch + 1);
     async function openTarget() {
-      if (!target) return;
+      if (target === undefined) return;
       try {
-        switch (target.kind) {
-          case "schedule": setDetail(null); setView("schedules"); break;
-          case "report": { const report = await getReport(target.id); if (!cancelled) { setView(report.report.kind === "daily" ? "daily" : "weekly"); setDetail({ kind: "report", detail: report }); } break; }
-          case "entry": { const records = await queryEntries({ start: "0001-01-01", end: "9999-12-31", project: null }); const entry = records.find((item) => item.id === target.id); if (!cancelled && entry) { setView("entries"); setDetail({ kind: "entry", entry }); } break; }
+        if (target === null) { setView("entries"); }
+        else switch (target.kind) {
+          case "run": {
+            const runs = await listRuns();
+            if (!cancelled) {
+              setView("schedules"); setData((current) => ({ ...current, runs }));
+              setTargetState((current) => ({ ...current, runId: target.id }));
+            }
+            break;
+          }
+          case "schedule": {
+            const schedules = await listSchedules();
+            if (!cancelled) {
+              setView("schedules"); setData((current) => ({ ...current, schedules }));
+              if (schedules.some((schedule) => schedule.id === target.id)) setTargetState((current) => ({ ...current, scheduleId: target.id }));
+              else setTargetState((current) => ({ ...current, failure: "NOT_FOUND" }));
+            }
+            break;
+          }
+          case "report": {
+            const report = await getReport(target.id);
+            if (!cancelled) { setView(report.report.kind === "daily" ? "daily" : "weekly"); setDetail({ kind: "report", detail: report }); }
+            break;
+          }
+          case "entry": {
+            const records = await queryEntries({ start: "0001-01-01", end: "9999-12-31", project: null });
+            const entry = records.find((item) => item.id === target.id);
+            if (!cancelled) { setView("entries"); if (entry) setDetail({ kind: "entry", entry }); else setTargetState((current) => ({ ...current, failure: "NOT_FOUND" })); }
+            break;
+          }
         }
-      } catch (error) { const code = error instanceof Error ? error.name : asWorklogError(error).code; if (!cancelled) setFailure(code); }
+      } catch (error) { const code = error instanceof Error ? error.name : asWorklogError(error).code; if (!cancelled) setTargetState((current) => ({ ...current, failure: code })); }
+      if (!cancelled) consumedTarget.current = { target, id: targetRequestId, retry: targetRetry };
     }
     void openTarget(); return () => { cancelled = true; };
-  }, [target]);
+  }, [target, targetRequestId, targetRetry]);
   async function openReport(report: Report) { await action.run(`open:${report.id}`, async () => { setDetail({ kind: "report", detail: await getReport(report.id) }); return ""; }); }
   async function reloadDetail() {
     if (!detail) return;
@@ -92,7 +124,7 @@ export function WorklogTab({ language, t, target }: WorklogTabProps) {
   const back = () => setDetail(null);
   const changed = () => { void load(); };
   return <div className="worklog">
-    {!detail && <div className="worklog-nav" role="group" aria-label={labels.entries}>{(["entries", "daily", "weekly", "schedules"] as const).map((item) => <button className="set-btn" type="button" key={item} aria-pressed={view === item} onClick={() => { setView(item); setClear(null); if (item === "weekly" && view !== "weekly") { const week = thisWeek(); setStart(week.start); setEnd(week.end); } }}>{labels[item]}</button>)}</div>}
+    {!detail && <div className="worklog-nav" role="group" aria-label={labels.entries}>{(["entries", "daily", "weekly", "schedules"] as const).map((item) => <button className="set-btn" type="button" key={item} aria-pressed={view === item} onClick={() => { setView(item); setClear(null); setTargetState((current) => ({ ...current, failure: null, scheduleId: null, runId: null })); if (item === "weekly" && view !== "weekly") { const week = thisWeek(); setStart(week.start); setEnd(week.end); } }}>{labels[item]}</button>)}</div>}
     <WorklogFeedback error={action.error} notice={detail ? null : action.notice} />
     {detail?.kind === "entry" && <EntryEditor key={`entry:${editorEpoch}:${detail.entry?.id ?? "new"}`} entry={detail.entry} date={end} labels={labels} onBack={back} onChanged={changed} onReload={() => { void reloadDetail(); }} />}
     {detail?.kind === "report" && <ReportEditor key={`report:${editorEpoch}:${detail.detail?.report.id ?? "new"}`} detail={detail.detail} kind={view === "weekly" ? "weekly" : "daily"} start={end} end={end} labels={labels} onBack={back} onChanged={changed} onReload={() => { void reloadDetail(); }} />}
@@ -113,8 +145,9 @@ export function WorklogTab({ language, t, target }: WorklogTabProps) {
         {view === "entries" && data.entries.length > 0 && <button className="set-btn set-btn-danger" type="button" disabled={loading} onClick={() => setClear(data.entries)}>{labels.clearRange}</button>}
       </div>{(view === "daily" || view === "weekly") && <p className="worklog-meta">{labels.generate} · {view === "daily" ? end : `${start} — ${end}`}</p>}</>}
       {loading && <p className="worklog-meta" role="status">{labels.loading}</p>}
+      {targetFailure && <div><p className="worklog-error" role="alert">{labels.failed}</p><button className="set-btn" type="button" onClick={() => setTargetState((current) => ({ ...current, retry: current.retry + 1 }))}>{labels.retry}</button></div>}
       {failure && <div><p className="worklog-error" role="alert">{labels.failed}</p><button className="set-btn" type="button" onClick={changed}>{labels.retry}</button></div>}
-      {loaded && (view === "schedules" ? <ReportSchedulePanel key={target?.kind === "schedule" ? target.id : "schedules"} schedules={data.schedules} runs={data.runs} targetId={target?.kind === "schedule" ? target.id : null} labels={labels} t={t} onChanged={changed} /> : <WorklogList entries={view === "entries" ? data.entries : []} reports={view === "entries" ? [] : data.reports.filter((report) => report.kind === view)} labels={labels} onEntry={(entry) => setDetail({ kind: "entry", entry })} onReport={(report) => { void openReport(report); }} />)}
+      {loaded && (view === "schedules" ? <ReportSchedulePanel key={`schedules:${editorEpoch}:${scheduleTarget ?? "list"}`} schedules={data.schedules} runs={data.runs} targetId={scheduleTarget} targetRunId={runTarget} labels={labels} t={t} onChanged={changed} /> : <WorklogList entries={view === "entries" ? data.entries : []} reports={view === "entries" ? [] : data.reports.filter((report) => report.kind === view)} labels={labels} onEntry={(entry) => setDetail({ kind: "entry", entry })} onReport={(report) => { void openReport(report); }} />)}
       {clear && <RangeDelete entries={clear} labels={labels} onChanged={changed} onClose={() => setClear(null)} />}
     </>}
   </div>;

@@ -9,7 +9,7 @@ Users of the packaged app do not need to install OpenCode separately.
 
 Ask the pet to save a work entry, generate a daily report, or schedule a weekly
 report. Explicit message actions also let you save the visible text and arrange
-a Friday 17:00 weekly report. Settings → Work journal lets you correct dates and
+a Friday 17:00 weekly report. Settings → Widgets → Work journal (设置 → 小组件 → 工作日志) lets you correct dates and
 projects, archive a complete daily report, edit report versions, copy or export
 Markdown/plain text, and change or pause schedules. Automatic reports start off.
 

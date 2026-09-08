@@ -30,7 +30,7 @@ pub fn grant(text: &str) -> WorklogResult<Grant> {
     if has(&["不要", "不用", "无需", "不必", "不需要", "不保存", "不安排", "不生成", "不修改", "请勿", "别保存", "别记录", "解释", "这句话", "do not", "don't", "no need to", "explain", "とは", "しないで", "하지 마", "설명"]) {
         return Ok(Grant { text, original, received_date: chrono::Local::now().date_naive(), actions, created: std::time::Instant::now() });
     }
-    let journal = has(&["日报", "工作记录", "work log", "work journal", "daily report", "日報", "업무 기록", "일일 보고"]);
+    let journal = has(&["日报", "工作记录", "工作日志", "work log", "work journal", "daily report", "日報", "업무 기록", "일일 보고"]);
     let report = journal || has(&["周报", "weekly report", "週報", "주간 보고"]);
     if report && has(&["查看", "查询", "show", "find", "表示", "確認", "조회", "보여"]) {
         actions.insert("query".into());
@@ -39,7 +39,8 @@ pub fn grant(text: &str) -> WorklogResult<Grant> {
     if journal && has(&["记入", "记录到", "保存", "save", "record", "記録", "保存して", "저장", "기록해"]) { actions.insert("record".into()); }
     if report && has(&["生成", "整理", "汇总", "generate", "summarize", "作成", "まとめ", "생성", "정리"]) { actions.insert("generate_report".into()); }
     if report && has(&["补充", "修改", "update", "amend", "修正", "追記", "수정", "추가"]) { actions.insert("update".into()); }
-    if report && has(&["每周", "周五", "每天", "每日", "工作日", "every week", "every friday", "every day", "weekdays", "毎週", "毎日", "매주", "매일"])
+    let workday = text.match_indices("工作日").any(|(offset, _)| !text[offset..].starts_with("工作日志"));
+    if report && (workday || has(&["每周", "周五", "每天", "每日", "every week", "every friday", "every day", "weekdays", "毎週", "毎日", "매주", "매일"]))
         && has(&["安排", "汇总", "生成", "整理", "schedule", "generate", "summarize", "作成", "まとめ", "예약", "생성", "정리"]) { actions.insert("schedule_report".into()); }
     if report && has(&["查看", "查询", "show", "find", "表示", "確認", "조회", "보여"]) { actions.insert("query".into()); }
     if actions.contains("schedule_report") && !has(&["现在","立即","now"]) { actions.remove("generate_report"); }
@@ -69,4 +70,53 @@ mod tests {
     }
     #[test]
     fn long_request_is_rejected_without_truncation() { assert!(grant(&"保".repeat(65536)).is_err()); }
+
+    #[test]
+    fn work_journal_alias_grants_only_the_same_explicit_action() {
+        // Given the renamed feature in each supported direct request.
+        for (text, action) in [
+            ("保存今天完成登录联调到工作日志", "record"),
+            ("查询今天的工作日志", "query"),
+            ("修改今天的工作日志", "update"),
+            ("生成今天的工作日志", "generate_report"),
+            ("生成本周的工作日志", "generate_report"),
+            ("安排每天生成工作日志", "schedule_report"),
+            ("安排每个工作日生成工作日志", "schedule_report"),
+        ] {
+            // When evaluating the new name and its existing compatible name.
+            let renamed = grant(text).expect("renamed request");
+            let legacy = grant(&text.replace("工作日志", "工作记录")).expect("legacy request");
+            // Then both names authorize exactly the requested operation.
+            let expected = BTreeSet::from([action.to_owned()]);
+            assert_eq!(legacy.actions, expected, "legacy: {text}");
+            assert_eq!(renamed.actions, expected, "renamed: {text}");
+        }
+    }
+
+    #[test]
+    fn work_journal_alias_preserves_non_authorizing_contexts() {
+        // Given references to the feature without direct authorization.
+        for text in [
+            "“保存今天的工作日志”",
+            "‘修改今天的工作日志’",
+            "\"生成今天的工作日志\"",
+            "`安排每天生成工作日志`",
+            "> 保存今天的工作日志",
+            "```\n安排每天生成工作日志\n```",
+            "不要保存今天的工作日志",
+            "不用查询今天的工作日志",
+            "不修改今天的工作日志",
+            "不生成今天的工作日志",
+            "不安排每天生成工作日志",
+            "工作日志很有用",
+            "今天的工作日志",
+        ] {
+            // When evaluating each context with either feature name.
+            let renamed = grant(text).expect("renamed context");
+            let legacy = grant(&text.replace("工作日志", "工作记录")).expect("legacy context");
+            // Then neither name grants any operation.
+            assert!(legacy.actions.is_empty(), "legacy: {text}");
+            assert!(renamed.actions.is_empty(), "renamed: {text}");
+        }
+    }
 }

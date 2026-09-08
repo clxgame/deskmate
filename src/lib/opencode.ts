@@ -196,6 +196,7 @@ export async function promptAsync(
     system?: string;
     model?: { providerID: string; modelID: string };
     attachments?: OpenCodeFilePart[];
+    messageID?: string;
   },
 ): Promise<void> {
   const parts = [
@@ -205,6 +206,7 @@ export async function promptAsync(
   await api<void>(`/session/${sessionID}/prompt_async`, {
     method: "POST",
     body: JSON.stringify({
+      ...(options?.messageID ? { messageID: options.messageID } : {}),
       ...(options?.system ? { system: options.system } : {}),
       ...(options?.model ? { model: options.model } : {}),
       parts,

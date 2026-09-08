@@ -1,0 +1,23 @@
+.worklog, .worklog-detail, .worklog-form { display: flex; flex-direction: column; gap: var(--s-3); min-width: 0; }
+.worklog-nav, .worklog-actions, .worklog-filters { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; }
+.worklog-nav .set-btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent-ink); }
+.worklog-field { display: flex; flex-direction: column; gap: var(--s-1); min-width: 0; flex: 1; font-size: var(--t-body); }
+.worklog-field .set-input, .worklog-field .set-select { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
+.worklog-textarea { resize: vertical; line-height: 1.6; }
+.worklog-textarea, .worklog-source-text { line-break: strict; word-break: normal; text-wrap: pretty; }
+.worklog-source-text { white-space: pre-wrap; }
+.worklog-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-2); }
+.worklog-item, .worklog-confirm { padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-raised); min-width: 0; }
+.worklog-open { width: 100%; background: transparent; border: 0; color: var(--text); text-align: start; padding: 0; cursor: pointer; font: inherit; display: flex; flex-direction: column; gap: var(--s-1); }
+.worklog-open:hover { color: var(--accent-ink); }
+.worklog :focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+.worklog-meta { font-size: var(--t-small); color: var(--text-dim); margin: 0; }
+.worklog-heading { font-size: var(--t-body); color: var(--text); margin: var(--s-1) 0 0; }
+.worklog-error { color: var(--danger); margin: 0; }
+.worklog-warning { color: var(--warn); margin: 0; }
+.worklog p, .worklog button, .worklog label, .worklog summary { overflow-wrap: anywhere; }
+.worklog p { line-height: 1.6; }
+.worklog-detail > .set-btn { align-self: flex-start; }
+.worklog-days { display: flex; flex-wrap: wrap; gap: var(--s-2); border: 1px solid var(--line); border-radius: var(--r-sm); padding: var(--s-2); margin: 0; }
+.worklog-days label { display: flex; align-items: center; gap: var(--s-1); }
+.worklog-preview { white-space: pre-wrap; margin: 0; font: inherit; overflow-wrap: anywhere; }

@@ -20,10 +20,11 @@ mod local_ai_deploy;
 mod memory;
 /// User-installable persona packs imported from local `.dmpack` archives.
 mod packs;
-mod settings;
 mod pomodoro;
+mod settings;
 mod updater;
 mod window_layout;
+mod worklog;
 use ai_usage::fetch_ai_usage;
 use chat_attachments::AttachmentStore;
 use history::HistoryState;
@@ -141,6 +142,37 @@ pub(crate) fn hide_chat_impl(app: &tauri::AppHandle) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn worklog_tool_integrity_failure_removes_only_owned_tools() {
+        let root =
+            std::env::temp_dir().join(format!("worklog-tool-integrity-{}", uuid::Uuid::new_v4()));
+        let tools = root.join("shipped").join("tools");
+        let data = root.join("data");
+        let runtime = data.join("workspace").join(".opencode").join("tools");
+        std::fs::create_dir_all(&tools).expect("fixture resources");
+        std::fs::create_dir_all(&runtime).expect("fixture runtime");
+        std::fs::write(tools.join("worklog_record.ts"), "corrupted").expect("corrupt fixture");
+        std::fs::write(runtime.join("worklog_record.ts"), "stale").expect("stale fixture");
+        std::fs::write(
+            runtime.join("ccswitch_prepare_opencode_provider.ts"),
+            "sentinel",
+        )
+        .expect("unrelated fixture");
+        assert_eq!(
+            super::overwrite_worklog_tools(&tools, &data)
+                .expect_err("must reject corruption")
+                .kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        assert!(!runtime.join("worklog_record.ts").exists());
+        assert_eq!(
+            std::fs::read_to_string(runtime.join("ccswitch_prepare_opencode_provider.ts"))
+                .expect("read sentinel"),
+            "sentinel"
+        );
+        std::fs::remove_dir_all(root).expect("fixture cleanup");
+    }
+
     use super::{
         configure_sidecar_command, configure_sidecar_environment, migrate_legacy_xiaozhu_intro,
         overwrite_builtin_xiaozhu_persona, overwrite_yume_opencode_tool, resource_error_event,
@@ -782,6 +814,8 @@ fn sync_ship_resources(app: &tauri::AppHandle, data_dir: &Path) -> Result<(), St
     .ok_or_else(|| "找不到内置 OpenCode 工具资源".to_string())?;
     overwrite_yume_opencode_tool(&shipped_opencode_tools, data_dir)
         .map_err(|error| format!("无法刷新内置 OpenCode 工具: {error}"))?;
+    overwrite_worklog_tools(&shipped_opencode_tools, data_dir)
+        .map_err(|error| format!("无法刷新工作记录工具: {error}"))?;
 
     Ok(())
 }
@@ -805,6 +839,76 @@ fn overwrite_yume_opencode_tool(shipped_tools_dir: &Path, data_dir: &Path) -> st
     let target_dir = data_dir.join("workspace").join(".opencode").join("tools");
     std::fs::create_dir_all(&target_dir)?;
     std::fs::write(target_dir.join(TOOL_FILE), source)?;
+    Ok(())
+}
+
+fn overwrite_worklog_tools(shipped_tools_dir: &Path, data_dir: &Path) -> std::io::Result<()> {
+    const FILES: &[(&str, &[u8])] = &[
+        (
+            "worklog_record.ts",
+            include_bytes!("../resources/opencode-tools/worklog_record.ts"),
+        ),
+        (
+            "worklog_query.ts",
+            include_bytes!("../resources/opencode-tools/worklog_query.ts"),
+        ),
+        (
+            "worklog_update.ts",
+            include_bytes!("../resources/opencode-tools/worklog_update.ts"),
+        ),
+        (
+            "worklog_generate_report.ts",
+            include_bytes!("../resources/opencode-tools/worklog_generate_report.ts"),
+        ),
+        (
+            "worklog_schedule_report.ts",
+            include_bytes!("../resources/opencode-tools/worklog_schedule_report.ts"),
+        ),
+        (
+            "../worklog-bridge.ts",
+            include_bytes!("../resources/worklog-bridge.ts"),
+        ),
+    ];
+    let config_dir = data_dir.join("workspace").join(".opencode");
+    let target_dir = config_dir.join("tools");
+    let validated = FILES
+        .iter()
+        .map(|(name, expected)| {
+            let source = std::fs::read(shipped_tools_dir.join(name))?;
+            if Sha256::digest(&source) != Sha256::digest(expected) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Work journal tool integrity check failed",
+                ));
+            }
+            Ok((*name, source))
+        })
+        .collect::<std::io::Result<Vec<_>>>();
+    let validated = match validated {
+        Ok(files) => files,
+        Err(error) => {
+            for (name, _) in FILES {
+                let target = if *name == "../worklog-bridge.ts" {
+                    config_dir.join("worklog-bridge.ts")
+                } else {
+                    target_dir.join(name)
+                };
+                if target.is_file() {
+                    std::fs::remove_file(target)?;
+                }
+            }
+            return Err(error);
+        }
+    };
+    std::fs::create_dir_all(&target_dir)?;
+    for (name, source) in validated {
+        let target = if name == "../worklog-bridge.ts" {
+            config_dir.join("worklog-bridge.ts")
+        } else {
+            target_dir.join(name)
+        };
+        std::fs::write(target, source)?;
+    }
     Ok(())
 }
 
@@ -940,6 +1044,15 @@ fn spawn_sidecar(app: &tauri::AppHandle, port: u16) -> std::io::Result<Child> {
     let mut cmd = Command::new(&bin);
     configure_sidecar_command(&mut cmd, port, &workspace);
     configure_sidecar_environment(&mut cmd, &data_dir);
+    cmd.env_remove("YUME_WORKLOG_IPC_DIR");
+    if let Some(bridge) = app.try_state::<worklog::bridge::WorklogBridge>() {
+        match bridge.reset_launch(format!("http://127.0.0.1:{port}")) {
+            Ok(directory) => {
+                cmd.env("YUME_WORKLOG_IPC_DIR", directory);
+            }
+            Err(error) => eprintln!("work journal bridge unavailable: {}", error.code),
+        }
+    }
     cmd.env_remove("OPENCODE_SERVER_PASSWORD")
         .env_remove("OPENCODE_SERVER_USERNAME");
 
@@ -1077,6 +1190,33 @@ fn open_widget_settings(app: tauri::AppHandle) {
 }
 
 #[tauri::command]
+fn open_worklog_settings(app: tauri::AppHandle, target: Option<serde_json::Value>) {
+    show_settings_window(&app);
+    let _ = app.emit("deskmate://settings-tab", "worklog");
+    let _ = app.emit("deskmate://worklog-target", target);
+}
+
+#[cfg(feature = "worklog-qa")]
+fn validate_worklog_qa_identity(app: &tauri::AppHandle) -> Result<(), String> {
+    let identifier = &app.config().identifier;
+    if identifier != "com.deskmate.worklogqa" {
+        return Err("QA build requires com.deskmate.worklogqa application identity".into());
+    }
+    for path in [
+        app.path().app_data_dir(),
+        app.path().app_config_dir(),
+        app.path().app_local_data_dir(),
+    ] {
+        let path = path.map_err(|error| error.to_string())?;
+        if path.file_name().and_then(|name| name.to_str()) != Some(identifier.as_str()) {
+            return Err("QA application directory must end in isolated QA identity".into());
+        }
+        eprintln!("worklog QA isolated directory: {}", path.display());
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn app_version(app: tauri::AppHandle) -> String {
     app.package_info().version.to_string()
 }
@@ -1087,7 +1227,7 @@ pub fn run() {
     // previous runs (identified by our unique `--cors http://tauri.localhost`
     // marker). Runs synchronously BEFORE spawning the new sidecar so the
     // fresh one is never targeted.
-    #[cfg(windows)]
+    #[cfg(all(windows, not(feature = "worklog-qa")))]
     cleanup_orphan_sidecars();
 
     let port = pick_free_port();
@@ -1132,6 +1272,26 @@ pub fn run() {
         .manage(ChatShown(Mutex::new(false)))
         .manage(Arc::new(ChatMotion::default()))
         .invoke_handler(tauri::generate_handler![
+            open_worklog_settings,
+            worklog::bridge::worklog_register_turn,
+            worklog::commands::worklog_available,
+            worklog::commands::worklog_record,
+            worklog::commands::worklog_update,
+            worklog::commands::worklog_query,
+            worklog::commands::worklog_delete_entry,
+            worklog::commands::worklog_list_reports,
+            worklog::commands::worklog_get_report,
+            worklog::commands::worklog_save_report,
+            worklog::commands::worklog_apply_version,
+            worklog::commands::worklog_delete_report,
+            worklog::commands::worklog_list_schedules,
+            worklog::commands::worklog_save_schedule,
+            worklog::commands::worklog_delete_schedule,
+            worklog::commands::worklog_generate_report,
+            worklog::commands::worklog_list_runs,
+            worklog::commands::worklog_retry_run,
+            worklog::commands::worklog_get_operation,
+            worklog::export::worklog_export_report,
             sidecar_base_url,
             load_persona,
             chat_attachments::stage_chat_attachment,
@@ -1195,6 +1355,8 @@ pub fn run() {
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
+            #[cfg(feature = "worklog-qa")]
+            validate_worklog_qa_identity(&handle)?;
             chat_attachments::start_stale_sweep(&handle);
 
             // Load persisted settings and apply startup side-effects.
@@ -1236,6 +1398,9 @@ pub fn run() {
             // `MemoryState` records that and every memory command answers
             // MEMORY_DISABLED while chat and the pet keep working.
             app.manage(memory::MemoryState::initialize(&handle));
+            app.manage(worklog::commands::WorklogState::initialize(&handle));
+            app.manage(worklog::bridge::WorklogBridge::initialize(&handle));
+            worklog::bridge::start_worker(handle.clone());
             settings::start_scheduler(handle.clone());
 
             setup_tray(&handle)?;
@@ -1248,6 +1413,7 @@ pub fn run() {
                     eprintln!("failed to spawn opencode sidecar: {e}");
                 }
             }
+            worklog::runner_runtime::start(handle.clone());
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -1255,6 +1421,7 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             if let RunEvent::Exit = event {
+                worklog::runner_runtime::stop(app);
                 pomodoro::stop_checker(app);
                 settings::flush_pet_position(app);
                 // SAFE-UNWRAP: a poisoned sidecar mutex means an earlier setup command panicked.

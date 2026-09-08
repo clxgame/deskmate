@@ -1,0 +1,16 @@
+.chat-worklog-actions,
+.chat-worklog-receipt {
+  flex-wrap: wrap;
+}
+
+.chat-worklog-receipt .chat-memory-receipt-text {
+  flex-basis: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.chat-worklog-receipt .chat-memory-undo:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}

@@ -142,6 +142,10 @@ Widget selection uses `--widget-tile-size` at `88px`, with `--s-3` gaps and `--s
 - Structure: a 20px `AppIcon` plus label in `.set-tab`.
 - States: default, hover, active/selected, and keyboard focus. Selected label and icon use `--accent-ink` on `--accent-soft` so light-theme text stays readable.
 
+### Work journal receipt (chat)
+- Reuses the memory receipt strip, inline button and focus tokens for committed work entry, scheduled rule, queued report, pending, failure and deleted states. The label is derived from host operation lookup; report completion requires persisted run success. Pending includes an explicit result query action; committed entries offer Undo and all states link to the work journal.
+- User-message actions offer saving the visible text and scheduling a Friday 17:00 weekly report. These are explicit user actions, keyboard reachable, and do not run merely because text resembles an instruction. Next occurrence includes a full local date and timezone; refresh never steals focus.
+
 ### Memory receipt (chat)
 - Structure: `.chat-memory-receipt` — an accent-tinted strip under the message, holding the remembered text and an inline Undo link.
 - States: default; the Undo link disappears once the memory is no longer freshly saved.

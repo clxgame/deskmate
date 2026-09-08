@@ -311,7 +311,10 @@ impl Default for SettingsState {
 
 /// The API key is a credential, not a preference: it lives in the OS keystore
 /// (Windows Credential Manager / macOS Keychain) instead of settings.json.
+#[cfg(not(feature = "worklog-qa"))]
 const KEYRING_SERVICE: &str = "com.deskmate.desktop";
+#[cfg(feature = "worklog-qa")]
+const KEYRING_SERVICE: &str = "com.deskmate.worklogqa";
 /// Legacy single-key entry; superseded by per-provider entries once a
 /// provider list exists. Kept only to migrate an existing key into
 /// `providers[0]`.
@@ -1505,12 +1508,22 @@ fn sidecar_permission_policy() -> serde_json::Map<String, serde_json::Value> {
     for permission_id in DENIED_OPENCODE_PERMISSIONS {
         permission.insert((*permission_id).to_string(), serde_json::json!("deny"));
     }
+    for tool in [
+        "worklog_record",
+        "worklog_query",
+        "worklog_update",
+        "worklog_generate_report",
+        "worklog_schedule_report",
+    ] {
+        permission.insert(tool.to_string(), serde_json::json!("allow"));
+    }
     permission
 }
 
 /// Apply side-effectful settings (autostart, shortcuts, window state).
 pub fn apply(app: &tauri::AppHandle, old: &Settings, new: &Settings) {
     // Autostart.
+    #[cfg(not(feature = "worklog-qa"))]
     if old.autostart != new.autostart {
         use tauri_plugin_autostart::ManagerExt;
         let manager = app.autolaunch();
@@ -1667,6 +1680,10 @@ pub fn verify_api_key(
 /// Spawn the scheduler loop: every 20s, fire enabled tasks whose HH:MM
 /// matches the current local minute. Firing = show chat + emit event with
 /// the prompt; the chat window sends it to the AI like a user message.
+fn scheduled_minute_key(local: chrono::NaiveDateTime) -> String {
+    local.format("%Y-%m-%d %H:%M").to_string()
+}
+
 pub fn start_scheduler(app: tauri::AppHandle) {
     std::thread::spawn(move || {
         // Guards against double-firing within the same minute.
@@ -1674,7 +1691,9 @@ pub fn start_scheduler(app: tauri::AppHandle) {
             std::collections::HashMap::new();
         loop {
             std::thread::sleep(std::time::Duration::from_secs(20));
-            let now = chrono::Local::now().format("%H:%M").to_string();
+            let local = chrono::Local::now();
+            let now = local.format("%H:%M").to_string();
+            let occurrence = scheduled_minute_key(local.naive_local());
             let tasks: Vec<ScheduledTask> = {
                 let Some(state) = app.try_state::<SettingsState>() else {
                     continue;
@@ -1689,10 +1708,10 @@ pub fn start_scheduler(app: tauri::AppHandle) {
                     .collect()
             };
             for task in tasks {
-                if last_fired.get(&task.id) == Some(&now) {
+                if last_fired.get(&task.id) == Some(&occurrence) {
                     continue;
                 }
-                last_fired.insert(task.id.clone(), now.clone());
+                last_fired.insert(task.id.clone(), occurrence.clone());
                 // Bring the chat window up, then hand the prompt to it.
                 let _ = crate::show_chat(&app);
                 let _ = app.emit("deskmate://scheduled-task", &task);
@@ -1736,6 +1755,10 @@ pub fn apply_pet_scale(pet: &tauri::WebviewWindow, scale: f64) {
 }
 
 /// (Re-)register all global shortcuts from settings.
+#[cfg(feature = "worklog-qa")]
+pub fn register_shortcuts(_app: &tauri::AppHandle, _settings: &Settings) {}
+
+#[cfg(not(feature = "worklog-qa"))]
 pub fn register_shortcuts(app: &tauri::AppHandle, settings: &Settings) {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
@@ -1767,6 +1790,23 @@ pub fn register_shortcuts(app: &tauri::AppHandle, settings: &Settings) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn scheduled_task_deduplication_includes_the_local_date() {
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 9, 8)
+            .expect("date")
+            .and_hms_opt(17, 0, 0)
+            .expect("time");
+        let tomorrow = today + chrono::Duration::days(1);
+        assert_ne!(
+            super::scheduled_minute_key(today),
+            super::scheduled_minute_key(tomorrow)
+        );
+        assert_eq!(
+            super::scheduled_minute_key(today),
+            super::scheduled_minute_key(today + chrono::Duration::seconds(20))
+        );
+    }
+
     use super::{
         api_key_fingerprint, delete_api_key, discard_unsafe_loaded_providers,
         finalize_sidecar_environment, hydrate_provider_api_keys, insert_verified_sidecar_provider,
@@ -2210,7 +2250,17 @@ mod tests {
             .filter(|(_, value)| **value == "allow")
             .map(|(tool, _)| tool.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(allowed, vec!["ccswitch_prepare_opencode_provider"]);
+        assert_eq!(
+            allowed,
+            vec![
+                "ccswitch_prepare_opencode_provider",
+                "worklog_generate_report",
+                "worklog_query",
+                "worklog_record",
+                "worklog_schedule_report",
+                "worklog_update"
+            ]
+        );
     }
 
     #[test]

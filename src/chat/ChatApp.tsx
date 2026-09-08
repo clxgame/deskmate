@@ -66,6 +66,9 @@ import {
 import { ArtifactCard } from "./ArtifactCard";
 import { AttachmentTray } from "./AttachmentTray";
 import { ChatText } from "./ChatText";
+import { useWorklogChat } from "./useWorklogChat";
+import { WorklogReceipt, worklogChatCopy } from "./WorklogReceipt";
+import { newUserMessageId, registerWorklogTurn, WORKLOG_SYSTEM_INSTRUCTION, WORKLOG_TOOLS } from "./worklogActions";
 import { CcSwitchSetupCard } from "./CcSwitchSetupCard";
 import {
   CCSWITCH_PREPARE_OPENCODE_PROVIDER_TOOL,
@@ -173,6 +176,7 @@ export default function ChatApp() {
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [isDragActive, setIsDragActive] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const worklog = useWorklogChat(currentSessionId);
   /** Inline memory receipts, keyed by the message they belong to. */
   const [memoryReceipts, setMemoryReceipts] = useState<
     Record<string, MemoryReceipt>
@@ -666,6 +670,11 @@ export default function ChatApp() {
           broadcastMood("talking");
           queueAssistantText(part.messageID, part.text ?? "");
         } else if (part.type === "tool") {
+          if (WORKLOG_TOOLS.some((tool) => tool === part.tool)) {
+            worklog.acceptTool(part);
+            clearAssistantTool(part.messageID);
+            return;
+          }
           const toolPart = toOpenCodeToolPart(part);
           if (!toolPart) {
             if (part.tool === CCSWITCH_PREPARE_OPENCODE_PROVIDER_TOOL) {
@@ -699,6 +708,7 @@ export default function ChatApp() {
         if (props.sessionID !== sessionRef.current) return;
         if (typeof props.sessionID === "string") {
           void recoverCcSwitchToolResultsOnIdle(props.sessionID);
+          void worklog.recover(props.sessionID);
         }
         completeReplyPacing();
         break;
@@ -809,10 +819,12 @@ export default function ChatApp() {
     const messageAttachments = prepared.fileParts.map(attachmentPreviewFromPart);
     const attachmentNames = messageAttachments.map((item) => item.name).join(", ");
     const promptText = text || prepared.fallbackPrompt;
+    const userMessageId = newUserMessageId();
+    rolesRef.current.set(userMessageId, "user");
     setMessages((prev) => [
       ...prev,
       {
-        id: `user-${Date.now()}`,
+        id: userMessageId,
         role: "user",
         text: text || `附件：${attachmentNames}`,
         attachments: messageAttachments,
@@ -901,8 +913,14 @@ export default function ChatApp() {
         memoryBlock,
         userNameInstruction: userNameInstruction(s?.userName ?? ""),
       });
+      try {
+        await registerWorklogTurn(sessionID, userMessageId, text);
+      } catch (error: unknown) {
+        setMemoryNotice(`${worklogChatCopy(lang).failed}: ${error instanceof Error ? error.message : "BRIDGE_UNAVAILABLE"}`);
+      }
       await promptAsync(sessionID, promptText, {
-        system,
+        messageID: userMessageId,
+        system: [system, WORKLOG_SYSTEM_INSTRUCTION].filter(Boolean).join("\n\n"),
         attachments: [...prepared.fileParts],
         model:
           s?.providerId && s.modelId
@@ -1272,7 +1290,11 @@ export default function ChatApp() {
                     </div>
                   )}
                   {m.text.trim().length > 0 && (
-                    <div className="chat-msg-actions">
+                    <div className="chat-msg-actions chat-worklog-actions">
+                      {m.role === "user" && <>
+                        <button type="button" className="chat-memory-action" disabled={worklog.operations.some((operation) => operation.messageId === m.id && !operation.receipt && !operation.error)} onClick={() => void worklog.save(m.id, m.text)}>{worklogChatCopy(lang).save}</button>
+                        <button type="button" className="chat-memory-action" disabled={worklog.operations.some((operation) => operation.messageId === m.id && !operation.receipt && !operation.error)} onClick={() => void worklog.schedule(m.id)}>{worklogChatCopy(lang).schedule}</button>
+                      </>}
                       <button
                         type="button"
                         className="chat-memory-action"
@@ -1313,6 +1335,7 @@ export default function ChatApp() {
                       )}
                     </div>
                   )}
+                  {worklog.operations.filter((operation) => operation.messageId === m.id).map((operation) => <WorklogReceipt key={operation.requestId} operation={operation} language={lang} onUndo={worklog.undo} onRefresh={worklog.refresh} />)}
                   {sensitivePrompt?.messageId === m.id && (
                     <div className="chat-memory-confirm" role="alertdialog">
                       <div className="chat-memory-confirm-title">
@@ -1347,6 +1370,7 @@ export default function ChatApp() {
                 {t.chatTyping}
               </div>
             )}
+            {worklog.operations.filter((operation) => !messages.some((message) => message.id === operation.messageId)).map((operation) => <WorklogReceipt key={operation.requestId} operation={operation} language={lang} onUndo={worklog.undo} onRefresh={worklog.refresh} />)}
           </div>
 
           {memoryNotice && (

@@ -1,0 +1,10 @@
+import { frozenReport } from "./report-output.js";
+const source = { source: { kind: "entry", id: "synthetic-a", revision: 3 }, businessDate: "2026-09-08", project: "合成测试", entryStatus: "done", text: "完成界面核对" };
+const material = `Report kind: weekly\nSOURCE entry:synthetic-a:3\n${JSON.stringify(source)}\n`;
+const output = JSON.parse(frozenReport([{ role: "user", content: material }]));
+if (output.blocks[0].heading !== "本周成果（按项目）" || !output.blocks[0].text.includes(source.text)) throw new Error("Factual output missing");
+if (output.blocks.some(block => (block.text !== "待补充" && block.sources.length === 0) || block.sources.some(key => key !== "entry:synthetic-a:3"))) throw new Error("Exact source citation missing");
+const merged = JSON.parse(frozenReport([{ role: "user", content: `Merge summaries. Return the required JSON report: ${JSON.stringify(output)}` }]));
+if (JSON.stringify(merged) !== JSON.stringify(output)) throw new Error("Merge dropped source or content");
+if (frozenReport([{ role: "user", content: "ordinary chat" }]) !== null) throw new Error("Ordinary chat treated as report");
+console.log("4 frozen-source report assertions passed.");

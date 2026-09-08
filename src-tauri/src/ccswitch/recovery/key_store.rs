@@ -2,7 +2,10 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
 use super::{RecoveryError, SnapshotId};
 
+#[cfg(not(feature = "worklog-qa"))]
 pub(crate) const KEYRING_SERVICE: &str = "com.yume.desktop.ccswitch-recovery";
+#[cfg(feature = "worklog-qa")]
+pub(crate) const KEYRING_SERVICE: &str = "com.deskmate.worklogqa.ccswitch-recovery";
 
 pub trait RecoveryKeyStore {
     fn store(&self, id: &SnapshotId, key: &[u8]) -> Result<(), RecoveryError>;

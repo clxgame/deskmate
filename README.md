@@ -5,6 +5,27 @@ YUME is a desktop pet application built with Tauri, React, TypeScript, and Bun.
 OpenCode is pinned as a project dependency and bundled into release builds.
 Users of the packaged app do not need to install OpenCode separately.
 
+## Work journal and reports
+
+Ask the pet to save a work entry, generate a daily report, or schedule a weekly
+report. Explicit message actions also let you save the visible text and arrange
+a Friday 17:00 weekly report. Settings → Work journal lets you correct dates and
+projects, archive a complete daily report, edit report versions, copy or export
+Markdown/plain text, and change or pause schedules. Automatic reports start off.
+
+Entries and reports are stored in a separate local database shared by all
+personas. Deleting chat history does not delete archived work records. Report
+generation sends the selected material to your configured AI provider. Background
+reports use their own sessions and do not interrupt the current conversation.
+The computer must be running the app to execute a schedule; after restart, the
+latest missed occurrence is caught up. An empty range makes no model request.
+Receipts distinguish saved data, queued reports, pending results and failures.
+
+Manual edits are retained when a regenerated candidate arrives. Deleting an
+entry marks dependent reports and offers deletion of linked reports; report
+text may still contain the source unless those reports are deleted too. Previously
+exported files and sidecar/provider logs are not erased by deleting local entries.
+
 ## Development
 
 Install dependencies:

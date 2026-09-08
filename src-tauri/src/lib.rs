@@ -1256,6 +1256,7 @@ pub fn run() {
         .run(|app, event| {
             if let RunEvent::Exit = event {
                 pomodoro::stop_checker(app);
+                settings::flush_pet_position(app);
                 // SAFE-UNWRAP: a poisoned sidecar mutex means an earlier setup command panicked.
                 if let Some(mut child) = app.state::<Sidecar>().child.lock().unwrap().take() {
                     let _ = child.kill();

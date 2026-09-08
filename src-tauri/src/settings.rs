@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -630,24 +631,151 @@ fn migrate_legacy_key_and_catalog(
     Ok(())
 }
 
+/// Quiet period a pet drag must settle into before its position reaches disk.
+/// A drag emits one `Moved` event per frame; writing each one re-serialized the
+/// whole settings file hundreds of times per drag.
+const PET_POSITION_QUIET: Duration = Duration::from_millis(500);
+
+/// Timing core of the pet-position write coalescer. Pure so the trailing-edge
+/// behaviour is unit-testable without real sleeping.
+#[derive(Default)]
+struct PetPositionFlush {
+    dirty: bool,
+    last_change: Option<Instant>,
+    flusher_running: bool,
+}
+
+impl PetPositionFlush {
+    /// Records a move. Returns true when the caller must start a flusher,
+    /// i.e. when no flusher is already waiting out the quiet period.
+    fn record(&mut self, now: Instant) -> bool {
+        self.dirty = true;
+        self.last_change = Some(now);
+        if self.flusher_running {
+            return false;
+        }
+        self.flusher_running = true;
+        true
+    }
+
+    /// `None` means the quiet period elapsed and the caller should write now.
+    /// `Some(wait)` means a newer move arrived, so keep waiting that long.
+    fn poll(&mut self, now: Instant) -> Option<Duration> {
+        let elapsed = self
+            .last_change
+            .map_or(PET_POSITION_QUIET, |at| now.saturating_duration_since(at));
+        match PET_POSITION_QUIET.checked_sub(elapsed) {
+            Some(remaining) if !remaining.is_zero() => Some(remaining),
+            _ => {
+                self.dirty = false;
+                self.flusher_running = false;
+                None
+            }
+        }
+    }
+
+    /// Claims an unwritten position, for the shutdown flush.
+    fn take_dirty(&mut self) -> bool {
+        std::mem::take(&mut self.dirty)
+    }
+}
+
+fn pet_position_flush() -> &'static Mutex<PetPositionFlush> {
+    static FLUSH: OnceLock<Mutex<PetPositionFlush>> = OnceLock::new();
+    FLUSH.get_or_init(|| Mutex::new(PetPositionFlush::default()))
+}
+
+/// Writes the current in-memory settings to disk.
+fn save_current_settings(app: &tauri::AppHandle) {
+    let Some(state) = app.try_state::<SettingsState>() else {
+        return;
+    };
+    let Ok(settings) = state.0.lock() else {
+        eprintln!("could not persist pet position: settings state poisoned");
+        return;
+    };
+    if let Err(error) = save(app, &settings) {
+        eprintln!("could not persist pet position: {error}");
+    }
+}
+
+/// Records a pet move in memory and schedules a single coalesced disk write
+/// once the drag settles. The in-memory position is authoritative for
+/// `get_settings`, so the UI never observes the delay.
 pub fn persist_pet_position(app: &tauri::AppHandle, position: tauri::PhysicalPosition<i32>) {
     let Some(state) = app.try_state::<SettingsState>() else {
         return;
     };
-    let Ok(mut settings) = state.0.lock() else {
-        eprintln!("could not persist pet position: settings state poisoned");
+    {
+        let Ok(mut settings) = state.0.lock() else {
+            eprintln!("could not persist pet position: settings state poisoned");
+            return;
+        };
+        let next = PetPosition {
+            x: position.x,
+            y: position.y,
+        };
+        if settings.pet_position == Some(next) {
+            return;
+        }
+        settings.pet_position = Some(next);
+    }
+
+    let Ok(mut flush) = pet_position_flush().lock() else {
+        eprintln!("could not schedule pet position write: flush state poisoned");
         return;
     };
-    let next = PetPosition {
-        x: position.x,
-        y: position.y,
-    };
-    if settings.pet_position == Some(next) {
+    if !flush.record(Instant::now()) {
         return;
     }
-    settings.pet_position = Some(next);
-    if let Err(error) = save(app, &settings) {
-        eprintln!("could not persist pet position: {error}");
+    drop(flush);
+
+    let app = app.clone();
+    if let Err(error) = std::thread::Builder::new()
+        .name("yume-pet-position".into())
+        .spawn({
+            let app = app.clone();
+            move || loop {
+                let wait = {
+                    let Ok(mut flush) = pet_position_flush().lock() else {
+                        eprintln!("could not flush pet position: flush state poisoned");
+                        return;
+                    };
+                    flush.poll(Instant::now())
+                };
+                match wait {
+                    Some(remaining) => std::thread::sleep(remaining),
+                    None => {
+                        save_current_settings(&app);
+                        return;
+                    }
+                }
+            }
+        })
+    {
+        // Without a flusher the position would only reach disk on exit, so fall
+        // back to writing immediately.
+        eprintln!("could not spawn pet position writer: {error}");
+        if let Ok(mut flush) = pet_position_flush().lock() {
+            flush.dirty = false;
+            flush.flusher_running = false;
+        }
+        save_current_settings(&app);
+    }
+}
+
+/// Writes a pending pet position on shutdown, so closing the app mid-drag
+/// cannot lose the last move.
+pub fn flush_pet_position(app: &tauri::AppHandle) {
+    let pending = match pet_position_flush().lock() {
+        Ok(mut flush) => flush.take_dirty(),
+        Err(_) => {
+            eprintln!("could not flush pet position: flush state poisoned");
+            return;
+        }
+    };
+    if pending {
+        save_current_settings(app);
     }
 }
 
@@ -1647,9 +1775,69 @@ mod tests {
         LegacyApiKeyMigrationOps, ModelCatalog, PetPosition, Settings, SettingsState,
         SettingsTransactionOps, VerifiedSettingsWrite,
     };
+    use super::{PetPositionFlush, PET_POSITION_QUIET};
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::fs;
+    use std::time::Instant;
+
+    /// A drag emits one `Moved` event per frame. Only the first schedules a
+    /// writer; the rest extend its wait, so the whole drag costs one write.
+    #[test]
+    fn coalesces_a_whole_drag_into_one_pet_position_write() {
+        // Given: a fresh coalescer and a drag of 300 move events.
+        let mut flush = PetPositionFlush::default();
+        let start = Instant::now();
+        let mut writers_started = 0;
+
+        // When: the events arrive roughly one per frame.
+        for frame in 0..300 {
+            let now = start + PET_POSITION_QUIET.mul_f64(0.016 * f64::from(frame));
+            if flush.record(now) {
+                writers_started += 1;
+            }
+        }
+
+        // Then: exactly one writer was spawned for the whole drag.
+        assert_eq!(writers_started, 1);
+        // And: while moves keep arriving, it defers instead of writing.
+        let last_event = start + PET_POSITION_QUIET.mul_f64(0.016 * 299.0);
+        assert!(flush.poll(last_event).is_some());
+    }
+
+    #[test]
+    fn writes_once_after_the_drag_settles_and_not_before() {
+        // Given: a recorded move.
+        let mut flush = PetPositionFlush::default();
+        let start = Instant::now();
+        assert!(flush.record(start));
+
+        // When: polled inside the quiet period.
+        let remaining = flush.poll(start + PET_POSITION_QUIET / 2);
+        // Then: it waits out the rest instead of writing.
+        assert_eq!(remaining, Some(PET_POSITION_QUIET / 2));
+
+        // When: polled once the pet has been still for the full quiet period.
+        // Then: the write is released and the writer retires.
+        assert_eq!(flush.poll(start + PET_POSITION_QUIET), None);
+        // And: nothing remains for the exit flush to write.
+        assert!(!flush.take_dirty());
+        // And: the next drag can start a fresh writer.
+        assert!(flush.record(start + PET_POSITION_QUIET * 2));
+    }
+
+    #[test]
+    fn keeps_a_pending_position_for_the_exit_flush_when_the_app_closes_mid_drag() {
+        // Given: a move that has not reached disk yet.
+        let mut flush = PetPositionFlush::default();
+        let start = Instant::now();
+        flush.record(start);
+
+        // When: the app exits before the quiet period elapses.
+        // Then: the shutdown flush claims the unwritten position exactly once.
+        assert!(flush.take_dirty());
+        assert!(!flush.take_dirty());
+    }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum MigrationEvent {

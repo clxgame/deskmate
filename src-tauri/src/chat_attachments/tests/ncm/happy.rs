@@ -1,6 +1,25 @@
 use super::*;
 
 #[test]
+fn authorizes_third_generation_only_with_declared_skill() {
+    let persona_id = "xiaozhu-sandaime";
+    assert!(crate::chat_attachments::ncm::is_authorized(
+        persona_id, true
+    ));
+    assert!(!crate::chat_attachments::ncm::is_authorized(
+        persona_id, false
+    ));
+    for lookalike in [
+        "xiaozhu-sandaime-fake",
+        "xiaozhu-sandaime ",
+        "Xiaozhu-sandaime",
+    ] {
+        assert!(!crate::chat_attachments::ncm::is_authorized(
+            lookalike, true
+        ));
+    }
+}
+#[test]
 fn authorizes_only_xiaozhu_with_declared_skill() {
     assert!(crate::chat_attachments::ncm::is_authorized("xiaozhu", true));
     assert!(!crate::chat_attachments::ncm::is_authorized(
@@ -35,6 +54,28 @@ fn second_generation_converts_staged_music() {
             },
         )
         .expect("convert music with second generation");
+    assert_eq!(artifact.file_name, "music.mp3");
+    assert_eq!(artifact.mime, "audio/mpeg");
+    assert_eq!(
+        decoded_sha256(&artifact.data_url),
+        format!("{:x}", Sha256::digest(MP3_BYTES))
+    );
+}
+
+#[test]
+fn third_generation_converts_staged_music() {
+    let root = TempAttachmentRoot::new("ncm-sandaime");
+    let store = AttachmentStore::default();
+    let staged = stage_named_ncm(&store, root.path(), "music.ncm");
+    let artifact = store
+        .convert_staged_ncm(
+            root.path(),
+            convert_request("xiaozhu-sandaime", &staged.id),
+            &FakeRunner {
+                run: FakeRun::OneMp3,
+            },
+        )
+        .expect("convert music with third generation");
     assert_eq!(artifact.file_name, "music.mp3");
     assert_eq!(artifact.mime, "audio/mpeg");
     assert_eq!(

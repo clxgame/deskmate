@@ -1,0 +1,50 @@
+{
+  "description": "Seven independent authored rigs, meshes, materials and clips. Runtime selects one clip root. Only byte-identical buffer views, images, textures and samplers are shared.",
+  "sourceFiles": [
+    {
+      "action": "等待",
+      "file": "等待.glb",
+      "sha256": "d9b7b135c34a954aa90ccbaa1ef86f9d8d3d9acb5c89766852634d943fd10b92",
+      "bytes": 12777328
+    },
+    {
+      "action": "思考",
+      "file": "思考.glb",
+      "sha256": "5de459e42c8a3675d5c4393de3b36da0b4af83b00b44b66daf2d55393f4dae1e",
+      "bytes": 12697740
+    },
+    {
+      "action": "打招呼",
+      "file": "打招呼.glb",
+      "sha256": "8d329ee6646c3909c70fdc631bc5266bc2f854ce118286c82493351dc4a4ba9b",
+      "bytes": 12615016
+    },
+    {
+      "action": "跳舞",
+      "file": "跳舞.glb",
+      "sha256": "44b33f2995b80f16fad4ea0f5bcfe0ae720b05de4dfb0e020b273e6ff6c6ebf3",
+      "bytes": 12645840
+    },
+    {
+      "action": "哭",
+      "file": "哭.glb",
+      "sha256": "4d7cdefd65e1d9fd6f29d98b5b8bca70ed62c20ef3941378e4d2db46f02e9ce3",
+      "bytes": 12614504
+    },
+    {
+      "action": "开心",
+      "file": "开心.glb",
+      "sha256": "766dfcc10da17a32118316959c79834fa97e0b9f444528b1a421e321bf3de62c",
+      "bytes": 12596540
+    },
+    {
+      "action": "争辩",
+      "file": "争辩.glb",
+      "sha256": "10f5771e5c8366e544faefcadb2f530c8feb48d3ec3dc30c64dcb519087ea132",
+      "bytes": 12938916
+    }
+  ],
+  "images": 10,
+  "meshes": 7,
+  "outputBytes": 75641656
+}

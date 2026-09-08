@@ -1,89 +1,15 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import {
-  VRMLoaderPlugin,
-  VRMUtils,
-  type VRM,
-  VRMHumanBoneName,
-} from "@pixiv/three-vrm";
+import { VRMLoaderPlugin, VRMUtils, type VRM } from "@pixiv/three-vrm";
 import type { PetMood } from "../lib/petState";
-import { personaAssets, type PersonaAssets } from "./personaAssets";
-import { personaById, personaClipName } from "./personaCatalog";
+import { personaAssets } from "./personaAssets";
+import { personaById } from "./personaCatalog";
 import { ToonShading } from "./toonShader";
-
-type StandardMaterial = THREE.MeshStandardMaterial;
-
-export interface PetRenderTuning {
-  outlineWidth: number;
-  rimWidth: number;
-  rimIntensity: number;
-  specularIntensity: number;
-}
-
-export interface PetMouseTarget {
-  x: number;
-  y: number;
-}
-
-const DEFAULT_RENDER_TUNING: PetRenderTuning = {
-  outlineWidth: 0.0008,
-  rimWidth: 0.1,
-  rimIntensity: 0.3,
-  specularIntensity: 0.05,
-};
-
-const MOUSE_YAW_LIMIT = 0.55;
-const MOUSE_PITCH_LIMIT = 0.3;
-const MOUSE_YAW_GAIN = 0.45;
-const MOUSE_PITCH_GAIN = 0.28;
-const MOUSE_SMOOTHING = 10;
-
-/// Idle rendering never exceeds this rate. The animation loop is driven by
-/// requestAnimationFrame, which cannot outrun the display, so the effective
-/// idle rate is min(refresh rate, IDLE_FPS_CAP).
-export const IDLE_FPS_CAP = 60;
-const IDLE_FRAME_INTERVAL = 1 / IDLE_FPS_CAP;
-/// A display running at exactly the cap must not be gated: frame times jitter
-/// slightly below the nominal interval, and comparing against the exact
-/// interval would drop every other frame and halve the rate.
-const FRAME_INTERVAL_TOLERANCE = 0.9;
-const IDLE_FRAME_THRESHOLD = IDLE_FRAME_INTERVAL * FRAME_INTERVAL_TOLERANCE;
-
-/// Decides whether enough time has accumulated to render. Returns the delta to
-/// advance animation by, or `null` to skip this frame.
-///
-/// Skipped time is carried, never dropped, so the deltas handed to the
-/// animation mixer always sum to real elapsed time regardless of the cap.
-export function gateFrame(
-  accumulated: number,
-  uncapped: boolean,
-): number | null {
-  if (uncapped) return accumulated;
-  return accumulated >= IDLE_FRAME_THRESHOLD ? accumulated : null;
-}
-
-/// Frame-rate independent exponential smoothing. The blend factor is derived
-/// from elapsed time, so the same wall-clock duration converges to the same
-/// angle whether it arrived as few long frames or many short ones. This keeps
-/// the eased motion within a bounded rate at any frame rate.
-export function smoothTowards(
-  current: number,
-  target: number,
-  delta: number,
-  smoothing: number = MOUSE_SMOOTHING,
-): number {
-  const blend = 1 - Math.exp(-Math.max(delta, 0) * smoothing);
-  return current + (target - current) * blend;
-}
-
-export function mouseFollowPitchTarget(normalizedY: number): number {
-  const y = Number.isFinite(normalizedY) ? normalizedY : 0;
-  return THREE.MathUtils.clamp(
-    y * MOUSE_PITCH_GAIN,
-    -MOUSE_PITCH_LIMIT,
-    MOUSE_PITCH_LIMIT,
-  );
-}
+import { PetAnimation, pickWeightedClip, variantAnimationBounds } from "./PetAnimation";
+import { PetRendererView, gateFrame, findRootMotionNode, type PetRenderTuning, type PetMouseTarget } from "./PetRendererView";
+import { applyPersonaTextures, disposeObject, errorMessage, isVrm, poseArms, updateVrm } from "./PetRendererResources";
+export { gateFrame, smoothTowards, mouseFollowPitchTarget, findRootMotionNode, IDLE_FPS_CAP } from "./PetRendererView";
+export type { PetRenderTuning, PetMouseTarget } from "./PetRendererView";
 
 export function nonIdleClipNames(personaId: string): readonly string[] {
   const clips = personaById(personaId).clips;
@@ -107,35 +33,6 @@ export function pickRandomClip(
   return clipNames[index];
 }
 
-/// Finds the node whose baked root motion must be pinned to the origin, so the
-/// pet animates in place. The result is stable for the lifetime of a model.
-export function findRootMotionNode(
-  model: THREE.Object3D,
-): THREE.Object3D | null {
-  let found: THREE.Object3D | null = null;
-  model.traverse((object) => {
-    if (found === null && object.name === "Root") found = object;
-  });
-  return found;
-}
-
-function isVrm(value: unknown): value is VRM {  return (
-    value !== null &&
-    typeof value === "object" &&
-    "scene" in value &&
-    "humanoid" in value
-  );
-}
-
-function materialsOf(object: THREE.Object3D): readonly THREE.Material[] {
-  if (!(object instanceof THREE.Mesh)) return [];
-  return Array.isArray(object.material) ? object.material : [object.material];
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function expressionTagForMood(mood: PetMood): number {
   switch (mood) {
     case "idle":
@@ -153,69 +50,32 @@ function expressionTagForMood(mood: PetMood): number {
 }
 
 export class PetRenderer {
-  private readonly renderer: THREE.WebGLRenderer;
-  private readonly scene = new THREE.Scene();
-  private readonly camera: THREE.PerspectiveCamera;
+  private readonly view: PetRendererView;
   private readonly clock = new THREE.Clock();
   private readonly loader = new GLTFLoader();
   private model: THREE.Object3D | null = null;
   private vrm: VRM | null = null;
   private toon: ToonShading | null = null;
-  private mixer: THREE.AnimationMixer | null = null;
-  private clips: readonly THREE.AnimationClip[] = [];
-  private activeClip = "";
+  private animation: PetAnimation | null = null;
   private mood: PetMood = "idle";
-  private renderTuning: PetRenderTuning = { ...DEFAULT_RENDER_TUNING };
-  private mouseFollowEnabled = false;
-  private mouseTargetYaw = 0;
-  private mouseTargetPitch = 0;
-  private mouseYaw = 0;
-  private mousePitch = 0;
-  private readonly baseModelRotation = new THREE.Euler();
-  /// The root node whose motion is stripped each frame. Resolved once per model
-  /// because the node identity never changes, replacing a full scene-graph
-  /// traversal on every rendered frame.
+  private renderTuning: PetRenderTuning = { outlineWidth: 0.0008, rimWidth: 0.1, rimIntensity: 0.3, specularIntensity: 0.05 };
   private rootMotionNode: THREE.Object3D | null = null;
-  /// Real elapsed time not yet handed to the animation mixer.
   private pendingDelta = 0;
   private personaId = "xiaozhu";
   private loadToken = 0;
-  private nudgeToken = 0;
-  private nudgeCleanup: (() => void) | null = null;
   private disposed = false;
 
-  constructor(private readonly canvas: HTMLCanvasElement) {
-    this.renderer = new THREE.WebGLRenderer({
-      canvas,
-      alpha: true,
-      antialias: true,
-    });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.NoToneMapping;
-    this.renderer.toneMappingExposure = 1;
-    this.renderer.setClearColor(0x000000, 0);
-
-    this.camera = new THREE.PerspectiveCamera(28, 1, 0.01, 100);
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x536070, 1.8));
-    const key = new THREE.DirectionalLight(0xffffff, 2.5);
-    key.position.set(2, 4, 4);
-    this.scene.add(key);
-    const fill = new THREE.DirectionalLight(0xaecbff, 0.8);
-    fill.position.set(-3, 2, 2);
-    this.scene.add(fill);
-
+  constructor(canvas: HTMLCanvasElement) {
+    this.view = new PetRendererView(canvas);
     this.loader.register((parser) => new VRMLoaderPlugin(parser));
-    this.resize();
     window.addEventListener("resize", this.handleResize);
   }
 
   async load(requestedId: string): Promise<void> {
-    const token = ++this.loadToken;
     const persona = personaById(requestedId);
+    if (this.disposed) return;
+    const token = ++this.loadToken;
     if (this.model !== null && this.personaId === persona.id) return;
-    // Built-in personas load from the bundled frontend; imported packs come off
-    // disk through the asset protocol.
     const assets = await personaAssets(persona.id);
     let gltf: Awaited<ReturnType<GLTFLoader["loadAsync"]>>;
     try {
@@ -237,7 +97,7 @@ export class PetRenderer {
       VRMUtils.rotateVRM0(vrm);
     } else if (!persona.embeddedMaterials) {
       try {
-        await this.applyPersonaTextures(model, assets);
+        await applyPersonaTextures(model, assets);
       } catch (error: unknown) {
         throw new Error(
           `角色 ${persona.id} 贴图加载失败: ${errorMessage(error)}`,
@@ -261,24 +121,26 @@ export class PetRenderer {
 
     if (this.disposed || token !== this.loadToken) {
       toon?.dispose();
-      this.disposeObject(model);
+      disposeObject(model);
       return;
     }
 
     this.unloadModel();
     this.personaId = persona.id;
-    this.baseModelRotation.copy(model.rotation);
+    this.view.baseModelRotation.copy(model.rotation);
     this.model = model;
-    this.rootMotionNode = findRootMotionNode(model);
+    this.rootMotionNode = persona.clipRoots === undefined ? findRootMotionNode(model) : null;
     this.vrm = vrm;
     this.toon = toon;
-    this.clips = gltf.animations;
-    this.scene.add(model);
-    this.frameCamera(model);
-    this.setupAnimation();
-    this.poseArms();
+    this.view.scene.add(model);
+    const bounds = persona.clipRoots === undefined ? null : variantAnimationBounds(model, gltf.animations, persona.clipRoots);
+    this.animation = vrm === null ? new PetAnimation(model, gltf.animations, persona) : null;
+    this.animation?.setMood(this.mood);
+    this.rootMotionNode?.position.set(0, 0, 0);
+    poseArms(vrm);
+    this.view.frameCamera(bounds ?? new THREE.Box3().setFromObject(model));
     try {
-      this.renderer.setAnimationLoop(this.tick);
+      this.view.renderer.setAnimationLoop(this.tick);
       this.tick();
     } catch (error: unknown) {
       throw new Error(
@@ -288,50 +150,23 @@ export class PetRenderer {
   }
 
   setMood(mood: PetMood): void {
-    this.cancelNudge();
     this.mood = mood;
     this.toon?.setExpression(expressionTagForMood(mood));
-    if (this.vrm === null)
-      this.selectClip(personaClipName(this.personaId, mood));
+    this.animation?.setMood(mood);
   }
 
   playNudge(): void {
-    if (this.mixer === null || this.model === null) return;
-    const requestedName = pickRandomClip(
-      nonIdleClipNames(this.personaId),
-      Math.random(),
-    );
-    if (requestedName === undefined) return;
-    const clip = this.clips.find((candidate) => candidate.name === requestedName);
-    if (clip === undefined) return;
-
-    const mixer = this.mixer;
-    const resumeName = personaClipName(this.personaId, this.mood);
-    this.cancelNudge();
-    const token = ++this.nudgeToken;
-    mixer.stopAllAction();
-    const action = mixer.clipAction(clip);
-    action.reset().setLoop(THREE.LoopOnce, 1);
-    action.clampWhenFinished = true;
-    let cleanup = (): void => undefined;
-    const onFinished = (event: { action: THREE.AnimationAction }): void => {
-      if (event.action !== action || token !== this.nudgeToken) return;
-      cleanup();
-      this.activeClip = "";
-      this.selectClip(resumeName);
-    };
-    cleanup = () => {
-      mixer.removeEventListener("finished", onFinished);
-      if (this.nudgeCleanup === cleanup) this.nudgeCleanup = null;
-    };
-    this.nudgeCleanup = cleanup;
-    mixer.addEventListener("finished", onFinished);
-    action.play();
-    this.activeClip = clip.name;
+    if (this.animation === null || this.model === null) return;
+    const persona = personaById(this.personaId);
+    const random = Math.random();
+    const name = persona.pokeClips === undefined
+      ? pickRandomClip(nonIdleClipNames(this.personaId), random)
+      : pickWeightedClip(persona.pokeClips, random);
+    if (name !== undefined) this.animation.playNudge(name);
   }
 
   setScale(scale: number): void {
-    if (Number.isFinite(scale)) this.resize();
+    if (Number.isFinite(scale)) this.view.resize();
   }
 
   setRenderTuning(tuning: PetRenderTuning): void {
@@ -339,38 +174,22 @@ export class PetRenderer {
     this.applyRenderTuning(this.toon);
   }
 
-  setMouseFollowEnabled(enabled: boolean): void {
-    this.mouseFollowEnabled = enabled;
-    if (!enabled) {
-      this.mouseTargetYaw = 0;
-      this.mouseTargetPitch = 0;
-    }
-  }
-
-  setMouseTarget(target: PetMouseTarget): void {
-    if (!this.mouseFollowEnabled) return;
-    const x = Number.isFinite(target.x) ? target.x : 0;
-    this.mouseTargetYaw = THREE.MathUtils.clamp(
-      x * MOUSE_YAW_GAIN,
-      -MOUSE_YAW_LIMIT,
-      MOUSE_YAW_LIMIT,
-    );
-    this.mouseTargetPitch = mouseFollowPitchTarget(target.y);
-  }
+  setMouseFollowEnabled(enabled: boolean): void { this.view.setMouseFollowEnabled(enabled); }
+  setMouseTarget(target: PetMouseTarget): void { this.view.setMouseTarget(target); }
 
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
     this.loadToken += 1;
     window.removeEventListener("resize", this.handleResize);
-    this.renderer.setAnimationLoop(null);
+    this.view.renderer.setAnimationLoop(null);
     this.unloadModel();
-    this.renderer.dispose();
-    this.renderer.forceContextLoss();
+    this.view.renderer.dispose();
+    this.view.renderer.forceContextLoss();
   }
 
   private readonly handleResize = (): void => {
-    this.resize();
+    this.view.resize();
   };
 
   private readonly tick = (): void => {
@@ -380,32 +199,18 @@ export class PetRenderer {
     this.pendingDelta += this.clock.getDelta();
     // A nudge is a one-shot interaction animation: render it at full rate so
     // poking the pet stays responsive.
-    const delta = gateFrame(this.pendingDelta, this.nudgeCleanup !== null);
+    const delta = gateFrame(this.pendingDelta, this.animation?.nudging ?? false);
     if (delta === null) return;
     this.pendingDelta = 0;
     if (this.vrm !== null) {
-      this.updateVrm(delta);
+      updateVrm(this.vrm, delta, this.clock.elapsedTime);
     } else {
-      this.mixer?.update(delta);
-      this.stripRootMotion();
+      this.animation?.update(delta);
+      this.rootMotionNode?.position.set(0, 0, 0);
     }
-    this.updateMouseFollow(delta);
-    if (this.model !== null) this.renderer.render(this.scene, this.camera);
+    this.view.updateMouseFollow(this.model, delta);
+    if (this.model !== null) this.view.renderer.render(this.view.scene, this.view.camera);
   };
-
-  private updateMouseFollow(delta: number): void {
-    const yaw = this.mouseFollowEnabled ? this.mouseTargetYaw : 0;
-    const pitch = this.mouseFollowEnabled ? this.mouseTargetPitch : 0;
-    this.mouseYaw = smoothTowards(this.mouseYaw, yaw, delta);
-    this.mousePitch = smoothTowards(this.mousePitch, pitch, delta);
-    if (this.model !== null) {
-      this.model.rotation.set(
-        this.baseModelRotation.x + this.mousePitch,
-        this.baseModelRotation.y + this.mouseYaw,
-        this.baseModelRotation.z,
-      );
-    }
-  }
 
   private applyRenderTuning(toon: ToonShading | null): void {
     if (toon === null) return;
@@ -417,163 +222,17 @@ export class PetRenderer {
     });
   }
 
-  private resize(): void {
-    const width = this.canvas.clientWidth || window.innerWidth;
-    const height = this.canvas.clientHeight || window.innerHeight;
-    this.renderer.setSize(width, height, false);
-    this.camera.aspect = width / height;
-    this.camera.updateProjectionMatrix();
-  }
-
-  private frameCamera(model: THREE.Object3D): void {
-    const box = new THREE.Box3().setFromObject(model);
-    if (box.isEmpty()) return;
-    const size = box.getSize(new THREE.Vector3());
-    const center = box.getCenter(new THREE.Vector3());
-    const fov = THREE.MathUtils.degToRad(this.camera.fov);
-    const heightDistance = size.y / (2 * Math.tan(fov / 2));
-    const widthDistance = size.x / (2 * Math.tan(fov / 2) * this.camera.aspect);
-    const distance = Math.max(heightDistance, widthDistance, size.z) * 1.55;
-    this.camera.near = Math.max(distance / 1000, 0.001);
-    this.camera.far = Math.max(distance * 100, 100);
-    this.camera.updateProjectionMatrix();
-    this.camera.position.set(
-      center.x,
-      center.y + size.y * 0.03,
-      center.z + distance,
-    );
-    this.camera.lookAt(center.x, center.y + size.y * 0.02, center.z);
-  }
-
-  private setupAnimation(): void {
-    if (this.model === null || this.clips.length === 0) return;
-    this.mixer = new THREE.AnimationMixer(this.model);
-    this.selectClip(personaClipName(this.personaId, this.mood));
-  }
-
-  private selectClip(name: string): void {
-    if (this.mixer === null || this.model === null || this.clips.length === 0)
-      return;
-    const clip =
-      this.clips.find((candidate) => candidate.name === name) ??
-      this.clips.find((candidate) => candidate.name === "Idle") ??
-      this.clips[0];
-    if (clip === undefined || clip.name === this.activeClip) return;
-    this.mixer.stopAllAction();
-    const action = this.mixer.clipAction(clip);
-    action.reset().setLoop(THREE.LoopRepeat, Infinity).play();
-    this.mixer.update(0);
-    this.stripRootMotion();
-    this.activeClip = clip.name;
-  }
-
-  private stripRootMotion(): void {
-    this.rootMotionNode?.position.set(0, 0, 0);
-  }
-
-  private poseArms(): void {
-    const humanoid = this.vrm?.humanoid;
-    if (humanoid === undefined) return;
-    const left = humanoid.getNormalizedBoneNode(VRMHumanBoneName.LeftUpperArm);
-    const right = humanoid.getNormalizedBoneNode(
-      VRMHumanBoneName.RightUpperArm,
-    );
-    if (left !== null) left.rotation.z = 1.15;
-    if (right !== null) right.rotation.z = -1.15;
-  }
-
-  private updateVrm(delta: number): void {
-    if (this.vrm === null) return;
-    const t = this.clock.elapsedTime;
-    const spine = this.vrm.humanoid?.getNormalizedBoneNode(
-      VRMHumanBoneName.Spine,
-    );
-    if (spine !== null && spine !== undefined) {
-      spine.rotation.z = Math.sin(t * 1.2) * 0.02;
-      spine.rotation.x = Math.sin(t * 0.8) * 0.015;
-    }
-    const head = this.vrm.humanoid?.getNormalizedBoneNode(
-      VRMHumanBoneName.Head,
-    );
-    if (head !== null && head !== undefined) {
-      head.rotation.z = Math.sin(t * 0.5) * 0.03;
-      head.rotation.x = Math.sin(t * 0.7) * 0.03;
-    }
-    this.vrm.update(delta);
-  }
-
-  private async applyPersonaTextures(
-    root: THREE.Object3D,
-    assets: PersonaAssets,
-  ): Promise<void> {
-    const textureLoader = new THREE.TextureLoader();
-    const tasks: Promise<void>[] = [];
-    root.traverse((object) => {
-      for (const material of materialsOf(object)) {
-        if (!(material instanceof THREE.MeshStandardMaterial)) continue;
-        if (material.map !== null) continue;
-        const slot = material.name.replace(/^MI_/, "");
-        if (slot.length === 0) continue;
-        tasks.push(
-          assets
-            .textureUrl(slot)
-            .then((url) => this.applyTexture(material, textureLoader, url)),
-        );
-      }
-    });
-    await Promise.all(tasks);
-  }
-
-  private async applyTexture(
-    material: StandardMaterial,
-    loader: THREE.TextureLoader,
-    url: string,
-  ): Promise<void> {
-    try {
-      const texture = await loader.loadAsync(url);
-      texture.flipY = false;
-      texture.colorSpace = THREE.SRGBColorSpace;
-      material.map = texture;
-      material.color.setScalar(1);
-      material.needsUpdate = true;
-    } catch {
-      return;
-    }
-  }
-
   private unloadModel(): void {
-    this.cancelNudge();
-    this.mixer?.stopAllAction();
-    this.mixer = null;
+    this.animation?.dispose();
+    this.animation = null;
     this.toon?.dispose();
     this.toon = null;
     if (this.model !== null) {
-      this.scene.remove(this.model);
-      this.disposeObject(this.model);
+      this.view.scene.remove(this.model);
+      disposeObject(this.model);
     }
     this.model = null;
     this.rootMotionNode = null;
     this.vrm = null;
-    this.clips = [];
-    this.activeClip = "";
-  }
-
-  private cancelNudge(): void {
-    this.nudgeToken += 1;
-    this.nudgeCleanup?.();
-    this.nudgeCleanup = null;
-  }
-
-  private disposeObject(root: THREE.Object3D): void {
-    root.traverse((object) => {
-      if (object instanceof THREE.Mesh) object.geometry.dispose();
-      for (const material of materialsOf(object)) {
-        material.dispose();
-        if (material instanceof THREE.MeshStandardMaterial) {
-          material.map?.dispose();
-          material.normalMap?.dispose();
-        }
-      }
-    });
   }
 }

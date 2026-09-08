@@ -23,7 +23,7 @@ describe("persona packs", () => {
     expect(builtinPack.packId).toBe("ai-substitute");
     expect(builtinPack.builtin).toBe(true);
     // Bundling only 小著 keeps ~169 MB of aki assets out of the installer.
-    expect(PERSONAS.map((persona) => persona.id)).toEqual(["xiaozhu", "xiaozhu-nidaime"]);
+    expect(PERSONAS.map((persona) => persona.id)).toEqual(["xiaozhu", "xiaozhu-nidaime", "xiaozhu-sandaime"]);
   });
 
   test("keeps the default persona inside a built-in pack", () => {
@@ -47,7 +47,7 @@ describe("persona packs", () => {
   test("every known persona id is unique across packs", () => {
     const ids = ALL_PERSONAS.map((persona) => persona.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toHaveLength(27);
+    expect(ids).toHaveLength(28);
   });
 
   test("adds a pack's personas to the catalog once it is installed", () => {
@@ -56,8 +56,8 @@ describe("persona packs", () => {
       { packId: "aki", personaIds: AKI_PACK.personas.map((p) => p.id) },
     ]);
 
-    expect(before).toHaveLength(2);
-    expect(after).toHaveLength(27);
+    expect(before).toHaveLength(3);
+    expect(after).toHaveLength(28);
     expect(after.map((persona) => persona.id)).toContain("changli");
   });
 
@@ -69,19 +69,19 @@ describe("persona packs", () => {
       { packId: "aki", personaIds: ["changli"] },
     ]);
 
-    expect(partial.map((persona) => persona.id)).toEqual(["changli", "xiaozhu", "xiaozhu-nidaime"]);
+    expect(partial.map((persona) => persona.id)).toEqual(["changli", "xiaozhu", "xiaozhu-nidaime", "xiaozhu-sandaime"]);
     expect(partial.map((persona) => persona.id)).not.toContain("aimisi");
   });
 
   test("ignores unknown or duplicated pack ids in install state", () => {
     // A stale setting must never break the catalog.
     expect(personaCatalog([{ packId: "nope", personaIds: ["x"] }])).toHaveLength(
-      2,
+      3,
     );
     // Built-in packs are already present and must not be added twice.
     expect(
       personaCatalog([{ packId: "ai-substitute", personaIds: ["xiaozhu"] }]),
-    ).toHaveLength(2);
+    ).toHaveLength(3);
   });
 
   test("ignores persona ids a pack's manifest does not describe", () => {
@@ -91,7 +91,7 @@ describe("persona packs", () => {
       { packId: "aki", personaIds: ["changli", "not-a-persona"] },
     ]);
 
-    expect(catalog.map((persona) => persona.id)).toEqual(["changli", "xiaozhu", "xiaozhu-nidaime"]);
+    expect(catalog.map((persona) => persona.id)).toEqual(["changli", "xiaozhu", "xiaozhu-nidaime", "xiaozhu-sandaime"]);
   });
 
   test("resolves personas from packs that are not installed", () => {

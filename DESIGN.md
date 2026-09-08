@@ -173,3 +173,5 @@ Use `--ease` for control transitions and `--tooltip-delay` (`420ms`) for persona
 ## 7. Depth & Surface
 
 Strategy: mixed tonal layers with subtle borders. The settings shell uses `--surface`, raised titlebar/sidebar layers, sunken controls, and low-contrast divider lines; it avoids heavy drop shadows so the translucent desktop pet remains visually separate from the UI.
+
+小著（三代目）保留素材内嵌的 PBR 材质与七套独立骨骼、表情贴图；每帧仅显示当前动作的模型。普通五状态对应等待、思考、打招呼、跳舞、哭。右键‘戳’按 60% / 20% / 20% 选择打招呼、开心、争辩，单次播放结束恢复最新普通状态。角色选择沿用现有角色包卡片和选择控件。

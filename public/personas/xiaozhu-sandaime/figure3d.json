@@ -1,0 +1,13 @@
+{
+  "modelUrl": "figure.glb",
+  "scale": 1,
+  "embeddedMaterials": true,
+  "clips": { "idle": "等待", "thinking": "思考", "talking": "打招呼", "working": "跳舞", "error": "哭" },
+  "clipRoots": {
+    "等待": "Sandaime_等待", "思考": "Sandaime_思考", "打招呼": "Sandaime_打招呼",
+    "跳舞": "Sandaime_跳舞", "哭": "Sandaime_哭", "开心": "Sandaime_开心", "争辩": "Sandaime_争辩"
+  },
+  "pokeClips": [
+    { "name": "打招呼", "weight": 60 }, { "name": "开心", "weight": 20 }, { "name": "争辩", "weight": 20 }
+  ]
+}

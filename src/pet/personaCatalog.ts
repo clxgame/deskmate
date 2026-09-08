@@ -37,6 +37,8 @@ export interface PersonaEntry {
   readonly clips: PersonaClips;
   readonly scale: number;
   readonly embeddedMaterials?: boolean;
+  readonly clipRoots?: Readonly<Record<string, string>>;
+  readonly pokeClips?: readonly { readonly name: string; readonly weight: number }[];
   /** Pack this persona belongs to; drives install state and asset paths. */
   readonly packId: string;
   readonly skills?: readonly PersonaSkillRef[];
@@ -76,13 +78,13 @@ const PIXEL_CLIPS: PersonaClips = {
 };
 
 /**
- * Both 小著 generations are bundled, so a fresh install can switch between
+ * All three 小著 generations are bundled, so a fresh install can switch between
  * them without downloading a character pack.
  */
 export const AI_SUBSTITUTE_PACK: PackManifest = {
   packId: "ai-substitute",
   name: { zh: "小著", en: "Xiaozhu", ja: "小著", ko: "샤오주" },
-  version: "1.1.0",
+  version: "1.2.0",
   builtin: true,
   thumbnail: "/persona-packs/xiaozhu.png",
   personas: [
@@ -100,6 +102,21 @@ export const AI_SUBSTITUTE_PACK: PackManifest = {
       scale: 1,
       embeddedMaterials: true,
       skills: [{ id: "xiaozhu-nidaime", file: "ncmdump.md" }],
+    },
+    {
+      id: "xiaozhu-sandaime",
+      name: { zh: "小著（三代目）", en: "Xiaozhu (3rd Gen)", ja: "小著（三代目）", ko: "샤오주 (3세대)" },
+      clips: { idle: "等待", thinking: "思考", talking: "打招呼", working: "跳舞", error: "哭" },
+      scale: 1,
+      embeddedMaterials: true,
+      clipRoots: {
+        等待: "Sandaime_等待", 思考: "Sandaime_思考", 打招呼: "Sandaime_打招呼",
+        跳舞: "Sandaime_跳舞", 哭: "Sandaime_哭", 开心: "Sandaime_开心", 争辩: "Sandaime_争辩",
+      },
+      pokeClips: [
+        { name: "打招呼", weight: 60 }, { name: "开心", weight: 20 }, { name: "争辩", weight: 20 },
+      ],
+      skills: [{ id: "xiaozhu-sandaime", file: "ncmdump.md" }],
     },
   ],
 };

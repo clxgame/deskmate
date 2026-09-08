@@ -70,13 +70,13 @@ describe("persona pack management", () => {
     renderPacks();
 
     expect(await screen.findByRole("heading", { name: "角色包" })).toBeDefined();
-    expect(screen.getByText("1 个包可用 · 2 个角色")).toBeDefined();
+    expect(screen.getByText("1 个包可用 · 3 个角色")).toBeDefined();
 
     const builtin = screen.getByRole("article", { name: "小著" });
     const builtinTooltip = within(builtin).getByRole("tooltip");
     expect(builtinTooltip.textContent).toContain("随应用提供，始终可用");
     expect(within(builtin).getAllByText("随应用提供，始终可用")).toHaveLength(1);
-    expect(within(builtin).getByLabelText("2 个角色可用")).toBeDefined();
+    expect(within(builtin).getByLabelText("3 个角色可用")).toBeDefined();
 
     const optional = screen.getByRole("article", { name: "导入" });
     const optionalTooltip = within(optional).getByRole("tooltip");

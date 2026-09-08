@@ -10,7 +10,10 @@ use super::validation::has_windows_reserved_stem;
 
 pub(super) const NCM_SKILL_FILE: &str = "ncmdump.md";
 pub(super) fn is_xiaozhu(persona_id: &str) -> bool {
-    matches!(persona_id, "xiaozhu" | "xiaozhu-nidaime")
+    matches!(
+        persona_id,
+        "xiaozhu" | "xiaozhu-nidaime" | "xiaozhu-sandaime"
+    )
 }
 
 pub(super) fn is_authorized(persona_id: &str, has_declared_skill: bool) -> bool {

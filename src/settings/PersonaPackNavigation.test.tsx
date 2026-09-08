@@ -100,7 +100,7 @@ test("selects a pack by its icon and filters the sole role dropdown", async () =
   await user.click(screen.getByRole("button", { name: "aki 团子" }));
   expect(selections.mock.calls.map(([id]) => id)).toEqual(["changli", "jinxi"]);
   await user.click(screen.getByRole("button", { name: "小著" }));
-  expect(within(role).getAllByRole("option").map((option) => option.textContent)).toEqual(["小著", "小著（二代目）"]);
+  expect(within(role).getAllByRole("option").map((option) => option.textContent)).toEqual(["小著", "小著（二代目）", "小著（三代目）"]);
   expect(screen.getByRole("button", { name: "小著", pressed: true })).toBeDefined();
 });
 

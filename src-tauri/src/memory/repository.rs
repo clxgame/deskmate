@@ -1,6 +1,7 @@
 //! SQL for the memory domain. The only module that writes memory rows.
 
 use rusqlite::{params, Connection, OptionalExtension, Row, Transaction};
+use std::collections::HashMap;
 
 use super::domain::{
     Memory, MemoryQuery, MemoryRecord, MemoryScope, MemorySource, MemoryStatus, MemoryType,
@@ -196,16 +197,23 @@ impl<C: Clock> MemoryRepository<C> {
         self.store.with_transaction(|tx| {
             expire_due(tx, &now)?;
             let memories = select_memories(tx, query, bound)?;
-            let mut records = Vec::with_capacity(memories.len());
-            for memory in memories {
-                let sources = select_sources(tx, &memory.id)?;
-                let linked_task_ids = select_task_links(tx, &memory.id)?;
-                records.push(MemoryRecord {
-                    memory,
-                    sources,
-                    linked_task_ids,
-                });
-            }
+            // Provenance is fetched in batches rather than per memory, so the
+            // query count does not scale with the number of listed rows.
+            let ids: Vec<String> = memories.iter().map(|memory| memory.id.clone()).collect();
+            let mut sources = select_sources_for(tx, &ids)?;
+            let mut task_links = select_task_links_for(tx, &ids)?;
+            let records = memories
+                .into_iter()
+                .map(|memory| {
+                    let sources = sources.remove(&memory.id).unwrap_or_default();
+                    let linked_task_ids = task_links.remove(&memory.id).unwrap_or_default();
+                    MemoryRecord {
+                        memory,
+                        sources,
+                        linked_task_ids,
+                    }
+                })
+                .collect();
             Ok(records)
         })
     }
@@ -703,35 +711,91 @@ fn load_relationship(
         .map_err(storage_error)
 }
 
-fn select_sources(connection: &Connection, memory_id: &str) -> MemoryResult<Vec<MemorySource>> {
-    let mut statement = connection
-        .prepare(
-            "SELECT conversation_id, message_id, source_kind, created_at \
-             FROM memory_sources WHERE memory_id = ?1 ORDER BY created_at",
-        )
-        .map_err(storage_error)?;
-    let rows = statement
-        .query_map(params![memory_id], |row| {
-            let kind: String = row.get(2)?;
-            Ok(MemorySource {
-                conversation_id: row.get(0)?,
-                message_id: row.get(1)?,
-                source_kind: SourceKind::parse(&kind).unwrap_or(SourceKind::Explicit),
-                created_at: row.get(3)?,
-            })
-        })
-        .map_err(storage_error)?;
-    rows.collect::<Result<_, _>>().map_err(storage_error)
+/// Ids per batched `IN (...)` lookup. Export is unbounded, so the ids are
+/// chunked to stay well inside SQLite's bound-parameter limit.
+const PROVENANCE_BATCH: usize = 400;
+
+/// Runs `query_batch` over chunks of `ids` and groups the rows by memory id.
+///
+/// Replaces one query per listed memory with one query per chunk: listing the
+/// capped 200 rows costs 2 queries instead of 401.
+fn grouped_by_memory<T, F>(
+    ids: &[String],
+    mut query_batch: F,
+) -> MemoryResult<HashMap<String, Vec<T>>>
+where
+    F: FnMut(&[String], &mut HashMap<String, Vec<T>>) -> MemoryResult<()>,
+{
+    let mut grouped: HashMap<String, Vec<T>> = HashMap::new();
+    for chunk in ids.chunks(PROVENANCE_BATCH) {
+        query_batch(chunk, &mut grouped)?;
+    }
+    Ok(grouped)
 }
 
-fn select_task_links(connection: &Connection, memory_id: &str) -> MemoryResult<Vec<String>> {
-    let mut statement = connection
-        .prepare("SELECT task_id FROM memory_task_links WHERE memory_id = ?1 ORDER BY created_at")
-        .map_err(storage_error)?;
-    let rows = statement
-        .query_map(params![memory_id], |row| row.get(0))
-        .map_err(storage_error)?;
-    rows.collect::<Result<_, _>>().map_err(storage_error)
+/// `?1, ?2, ...` for a chunk of bound ids.
+fn placeholders(count: usize) -> String {
+    (1..=count)
+        .map(|index| format!("?{index}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn select_sources_for(
+    connection: &Connection,
+    ids: &[String],
+) -> MemoryResult<HashMap<String, Vec<MemorySource>>> {
+    grouped_by_memory(ids, |chunk, grouped| {
+        let sql = format!(
+            "SELECT memory_id, conversation_id, message_id, source_kind, created_at \
+             FROM memory_sources WHERE memory_id IN ({}) ORDER BY created_at",
+            placeholders(chunk.len()),
+        );
+        let mut statement = connection.prepare(&sql).map_err(storage_error)?;
+        let rows = statement
+            .query_map(rusqlite::params_from_iter(chunk), |row| {
+                let kind: String = row.get(3)?;
+                Ok((
+                    row.get::<_, String>(0)?,
+                    MemorySource {
+                        conversation_id: row.get(1)?,
+                        message_id: row.get(2)?,
+                        source_kind: SourceKind::parse(&kind).unwrap_or(SourceKind::Explicit),
+                        created_at: row.get(4)?,
+                    },
+                ))
+            })
+            .map_err(storage_error)?;
+        for row in rows {
+            let (memory_id, source) = row.map_err(storage_error)?;
+            grouped.entry(memory_id).or_default().push(source);
+        }
+        Ok(())
+    })
+}
+
+fn select_task_links_for(
+    connection: &Connection,
+    ids: &[String],
+) -> MemoryResult<HashMap<String, Vec<String>>> {
+    grouped_by_memory(ids, |chunk, grouped| {
+        let sql = format!(
+            "SELECT memory_id, task_id FROM memory_task_links \
+             WHERE memory_id IN ({}) ORDER BY created_at",
+            placeholders(chunk.len()),
+        );
+        let mut statement = connection.prepare(&sql).map_err(storage_error)?;
+        let rows = statement
+            .query_map(rusqlite::params_from_iter(chunk), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(storage_error)?;
+        for row in rows {
+            let (memory_id, task_id) = row.map_err(storage_error)?;
+            grouped.entry(memory_id).or_default().push(task_id);
+        }
+        Ok(())
+    })
 }
 
 /// Build the filtered listing query.

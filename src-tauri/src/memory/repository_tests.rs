@@ -647,3 +647,77 @@ impl MemoryRepository<FixedClock> {
         self.clock().advance_hours(hours);
     }
 }
+
+/// Provenance is loaded in batches rather than one query per row. A batch that
+/// mixed rows up would attach one memory's sources to another, so every listed
+/// memory must keep exactly its own provenance.
+#[test]
+fn batched_provenance_stays_attributed_to_its_own_memory() {
+    let repo = repo();
+    // Enough rows to span more than one provenance batch, with a distinct
+    // conversation and task per memory.
+    const TOTAL: usize = 450;
+    let mut ids = Vec::with_capacity(TOTAL);
+    for index in 0..TOTAL {
+        let mut memory = global_preference(&format!("偏好 {index}"), Some(&format!("pref.{index}")));
+        memory.conversation_id = Some(format!("ses_{index}"));
+        memory.message_id = Some(format!("msg_{index}"));
+        let created = repo.create(&memory).expect("create");
+        repo.link_task(&created.id, &format!("task-{index}"))
+            .expect("link task");
+        ids.push(created.id);
+    }
+
+    // Export is the unbounded path, so it exercises chunking across batches.
+    let records = repo
+        .export_records(&MemoryQuery::default())
+        .expect("export records");
+    assert_eq!(records.len(), TOTAL);
+
+    for record in &records {
+        let index = record
+            .memory
+            .memory_key
+            .as_deref()
+            .and_then(|key| key.strip_prefix("pref."))
+            .and_then(|value| value.parse::<usize>().ok())
+            .expect("memory key");
+        // Then: each memory carries only the conversation and task that were
+        // recorded for it.
+        assert_eq!(
+            record
+                .sources
+                .iter()
+                .map(|source| source.conversation_id.as_deref().unwrap_or_default())
+                .collect::<Vec<_>>(),
+            vec![format!("ses_{index}").as_str()],
+            "memory {index} received another memory's sources"
+        );
+        assert_eq!(
+            record.linked_task_ids,
+            vec![format!("task-{index}")],
+            "memory {index} received another memory's task links"
+        );
+    }
+
+    // And: a memory created without a conversation still gets its own source
+    // row, and no task links, rather than inheriting another memory's.
+    let bare = repo
+        .create(&global_preference("没有来源的偏好", Some("pref.bare")))
+        .expect("create bare");
+    let listed = repo
+        .list(&MemoryQuery {
+            search: Some("没有来源的偏好".into()),
+            ..MemoryQuery::default()
+        })
+        .expect("list bare");
+    let found = listed
+        .iter()
+        .find(|record| record.memory.id == bare.id)
+        .expect("bare memory is listed");
+    assert!(found
+        .sources
+        .iter()
+        .all(|source| source.conversation_id.is_none()));
+    assert!(found.linked_task_ids.is_empty());
+}

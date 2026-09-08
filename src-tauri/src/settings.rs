@@ -1705,12 +1705,16 @@ pub fn start_scheduler(app: tauri::AppHandle) {
 const PET_BASE_W: f64 = 320.0;
 const PET_BASE_H: f64 = 420.0;
 
+fn pet_window_dimensions(scale: f64) -> (f64, f64) {
+    let window_scale = normalize_pet_scale(scale).max(0.5);
+    (PET_BASE_W * window_scale, PET_BASE_H * window_scale)
+}
+
 /// Resize the pet window to `scale`, keeping its bottom-center anchored so
 /// the pet stays planted where the user put it.
 pub fn apply_pet_scale(pet: &tauri::WebviewWindow, scale: f64) {
-    let scale = normalize_pet_scale(scale);
-    let new_w = PET_BASE_W * scale;
-    let new_h = PET_BASE_H * scale;
+    // Transparent padding keeps the timer readable; the canvas retains the model scale.
+    let (new_w, new_h) = pet_window_dimensions(scale);
 
     let (Ok(pos), Ok(size), Ok(factor)) =
         (pet.outer_position(), pet.outer_size(), pet.scale_factor())
@@ -3113,5 +3117,25 @@ mod tests {
         // Missing memory fields fall back to the conservative defaults.
         assert!(!settings.memory_auto_extract);
         assert!(settings.memory_ai_use);
+    }
+}
+
+#[cfg(test)]
+mod pet_window_size_tests {
+    #[test]
+    fn timer_space_is_floored_without_changing_larger_pet_windows() {
+        // Given supported model scales, when calculating the transparent host size.
+        let sizes = [0.1, 0.5, 1.0, 2.0, 3.0].map(super::pet_window_dimensions);
+        // Then small models retain half-scale timer space and larger sizes remain proportional.
+        assert_eq!(
+            sizes,
+            [
+                (160.0, 210.0),
+                (160.0, 210.0),
+                (320.0, 420.0),
+                (640.0, 840.0),
+                (640.0, 840.0)
+            ]
+        );
     }
 }

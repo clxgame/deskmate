@@ -1,0 +1,41 @@
+.pet-root { width: 100vw; height: 100vh; position: relative; }
+.pet-canvas { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); display: block; }
+.pet-pomodoro {
+  --pet-timer-gap: calc(1em / 6);
+  --pet-timer-button: calc(4em / 3);
+  --pet-timer-shadow: drop-shadow(0 1px 1px rgb(0 0 0 / 85%));
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--pet-timer-gap);
+  box-sizing: border-box;
+  width: 6em;
+  padding: var(--pet-timer-gap);
+  background: transparent;
+  color: var(--text-on-media);
+  user-select: none;
+}
+.pet-pomodoro-time { min-width: 0; filter: var(--pet-timer-shadow); }
+.pet-pomodoro button {
+  font: inherit;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: var(--pet-timer-button);
+  height: var(--pet-timer-button);
+  padding: 0;
+  border: 0;
+  border-radius: var(--pet-timer-gap);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.pet-pomodoro button .app-icon { width: 62.5%; height: 62.5%; filter: var(--pet-timer-shadow); }
+.pet-pomodoro button:hover:not(:disabled),
+.pet-pomodoro button:active:not(:disabled) { background: var(--accent-soft); color: var(--accent-ink); }
+.pet-pomodoro button:focus-visible { outline: 2px solid var(--accent-ink); box-shadow: var(--shadow-focus); }
+.pet-pomodoro button:disabled { color: var(--text-disabled); cursor: wait; }
+.pet-pomodoro .pet-pomodoro-error { color: var(--danger); }

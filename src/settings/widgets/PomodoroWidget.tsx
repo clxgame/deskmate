@@ -4,6 +4,7 @@ import {
   selectPomodoroPhase, startPomodoro, type PomodoroPreferences,
 } from "../../lib/pomodoro";
 import { AppIcon } from "../../ui/AppIcon";
+import { PomodoroCountdown } from "../../ui/PomodoroCountdown";
 import type { TabProps } from "../settingsPrimitives";
 import { usePomodoro } from "./usePomodoro";
 import "./pomodoro.css";
@@ -41,8 +42,6 @@ export function PomodoroWidget({ settings, patch, t }: TabProps) {
     idle: t.pomodoroIdle, running: t.pomodoroRunning, paused: t.pomodoroPaused,
     ready: { focus: t.pomodoroReadyFocus, break: t.pomodoroReadyBreak }[phase],
   }[status];
-  const seconds = Math.ceil((snapshot?.remainingMs ?? 0) / 1000);
-  const remaining = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
   const action = activeAction[status];
   const available = snapshot !== null && !timer.busy && valid;
   function edit(field: keyof PomodoroPreferences, value: string) {
@@ -68,7 +67,7 @@ export function PomodoroWidget({ settings, patch, t }: TabProps) {
         ))}
       </div>
       <div className="set-pomodoro-countdown" role="timer" aria-label={t.pomodoroRemaining}>
-        {snapshot === null ? "--:--" : remaining}
+        <PomodoroCountdown remainingMs={snapshot?.remainingMs ?? null} />
       </div>
       <p className="set-pomodoro-status" role="status">
         {timer.busy ? t.pomodoroBusy : snapshot === null ? t.pomodoroLoading : statusText}

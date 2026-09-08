@@ -1,5 +1,6 @@
 .set-root,
-.chat-root {
+.chat-root,
+.pet-root {
   color-scheme: dark;
   --surface: #20212b;
   --surface-raised: #2a2c38;
@@ -32,7 +33,8 @@
 }
 
 .set-root[data-theme="mint"],
-.chat-root[data-theme="mint"] {
+.chat-root[data-theme="mint"],
+.pet-root[data-theme="mint"] {
   color-scheme: light;
   --surface: #fbf8ee;
   --surface-raised: #fffdf8;
@@ -62,7 +64,8 @@
 }
 
 .set-root[data-theme="peach"],
-.chat-root[data-theme="peach"] {
+.chat-root[data-theme="peach"],
+.pet-root[data-theme="peach"] {
   color-scheme: light;
   --surface: #fff8ee;
   --surface-raised: #fffcf8;
@@ -92,7 +95,8 @@
 }
 
 .set-root[data-theme="lavender"],
-.chat-root[data-theme="lavender"] {
+.chat-root[data-theme="lavender"],
+.pet-root[data-theme="lavender"] {
   color-scheme: light;
   --surface: #fcf9f1;
   --surface-raised: #fffcf7;

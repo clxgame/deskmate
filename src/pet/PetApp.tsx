@@ -11,6 +11,9 @@ import {
 } from "../lib/settings";
 import type { ThemeId } from "../settings/theme";
 import { PetRenderer } from "./PetRenderer";
+import { PetPomodoro } from "./PetPomodoro";
+import { petLayout } from "./petLayout";
+
 
 async function getSettingsWithRetry(): Promise<Settings> {
   let lastError: unknown = new Error("settings unavailable");
@@ -36,6 +39,10 @@ export default function PetApp() {
   const contextMenuPromiseRef = useRef<Promise<Menu> | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeId>("dark");
+  const [language, setLanguage] = useState("zh-CN");
+  const [petScale, setPetScale] = useState(0.5);
+  const layout = petLayout(petScale);
+
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -87,9 +94,9 @@ export default function PetApp() {
           if (disposed) return;
           geometry = {
             centerX: position.x + size.width / 2,
-            centerY: position.y + size.height / 2,
-            halfWidth: Math.max(size.width / 2, 1),
-            halfHeight: Math.max(size.height / 2, 1),
+            centerY: position.y + size.height * (1 - canvas.clientHeight / window.innerHeight / 2),
+            halfWidth: Math.max(size.width * canvas.clientWidth / window.innerWidth / 2, 1),
+            halfHeight: Math.max(size.height * canvas.clientHeight / window.innerHeight / 2, 1),
           };
         })
         .catch((error: unknown) => {
@@ -104,6 +111,11 @@ export default function PetApp() {
           geometryPending = false;
         });
     };
+    const canvasResize = new ResizeObserver(() => {
+      renderer.setScale(1);
+      refreshGeometry();
+    });
+    canvasResize.observe(canvas);
     const pollCursor = (): void => {
       if (!mouseFollow || cursorPollBusy) return;
       if (geometry === null) {
@@ -149,8 +161,9 @@ export default function PetApp() {
     void getSettingsWithRetry()
       .then((settings) => {
         setTheme(settings.theme);
+        setLanguage(settings.language);
         mouseFollow = settings.mouseFollow;
-        renderer.setScale(settings.petScale);
+        setPetScale(settings.petScale);
         renderer.setRenderTuning(settings);
         renderer.setMouseFollowEnabled(mouseFollow);
         syncCursorPoll();
@@ -163,12 +176,13 @@ export default function PetApp() {
       });
     const unlistenMood = onMood((mood) => renderer.setMood(mood));
     const unlistenScalePreview = onPetScalePreview((scale) =>
-      renderer.setScale(scale),
+      setPetScale(scale),
     );
     const unlistenSettings = onSettingsChanged((settings) => {
       setTheme(settings.theme);
+      setLanguage(settings.language);
       mouseFollow = settings.mouseFollow;
-      renderer.setScale(settings.petScale);
+      setPetScale(settings.petScale);
       renderer.setRenderTuning(settings);
       renderer.setMouseFollowEnabled(mouseFollow);
       syncCursorPoll();
@@ -179,6 +193,7 @@ export default function PetApp() {
     const unlistenResized = petWindow.onResized(() => refreshGeometry());
     return () => {
       disposed = true;
+      canvasResize.disconnect();
       if (cursorPoll !== null) window.clearInterval(cursorPoll);
       void unlistenMood.then((stopListening) => stopListening());
       void unlistenScalePreview.then((stopListening) => stopListening());
@@ -278,24 +293,18 @@ export default function PetApp() {
   };
 
   return (
-    <div
-      className="pet-root"
-      data-theme={theme}
-      style={{ width: "100vw", height: "100vh", position: "relative" }}
-    >
+    <div className="pet-root" data-theme={theme}>
       <canvas
         ref={canvasRef}
         aria-label="3D desktop pet"
-        style={{
-          width: "100vw",
-          height: "100vh",
-          display: "block",
-        }}
+        className="pet-canvas"
+        style={{ width: layout.width, height: layout.height }}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
         onContextMenu={onContextMenu}
       />
+      <PetPomodoro language={language} scale={petScale} />
       {loadError !== null && (
         <div
           role="alert"

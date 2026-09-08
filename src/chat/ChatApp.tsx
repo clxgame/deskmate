@@ -13,6 +13,7 @@ import { listen } from "@tauri-apps/api/event";
 import {
   abortSession,
   createSession,
+  getSessionMessages,
   promptAsync,
   subscribeEvents,
   waitForServer,
@@ -540,10 +541,8 @@ export default function ChatApp() {
   const recoverCcSwitchToolResultsOnIdle = useCallback(
     async (sessionID: string) => {
       try {
-        const opencode = await import("../lib/opencode");
-        if (typeof opencode.getSessionMessages !== "function") return;
         const results = recoverCcSwitchToolResultsFromMessages(
-          await opencode.getSessionMessages(sessionID),
+          await getSessionMessages(sessionID),
           ccSwitchToolTrackerRef.current,
         );
         results.forEach((result, index) => {
@@ -560,6 +559,7 @@ export default function ChatApp() {
   useEffect(() => {
     let closed = false;
     let unsubscribe: (() => void) | null = null;
+    let stopSettingsListener: (() => void) | null = null;
 
     (async () => {
       try {
@@ -572,7 +572,7 @@ export default function ChatApp() {
           setTheme(settingsRef.current.theme);
         }
         await loadPersona(initialPersonaId);
-        void onSettingsChanged((s) => {
+        const settingsListener = await onSettingsChanged((s) => {
           settingsRef.current = s;
           setLang(s.language);
           setTheme(s.theme);
@@ -597,9 +597,24 @@ export default function ChatApp() {
             });
           }
         });
+        // Unmounting while the listener was still being registered must still
+        // detach it, otherwise it outlives the component.
+        if (closed) {
+          settingsListener();
+          return;
+        }
+        stopSettingsListener = settingsListener;
         await resetSession();
         if (closed) return;
-        unsubscribe = await subscribeEvents(handleEvent);
+        const eventStream = await subscribeEvents(handleEvent);
+        // The stream is opened inside the await above, so a teardown that ran
+        // meanwhile never saw it. Close it here instead of leaking the
+        // connection for the lifetime of the window.
+        if (closed) {
+          eventStream();
+          return;
+        }
+        unsubscribe = eventStream;
         setStatus("ready");
         broadcastMood("idle");
       } catch (error: unknown) {
@@ -614,6 +629,7 @@ export default function ChatApp() {
     return () => {
       closed = true;
       unsubscribe?.();
+      stopSettingsListener?.();
     };
   }, [loadPersona, resetSession]);
 

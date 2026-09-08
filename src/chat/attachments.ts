@@ -1,5 +1,3 @@
-import * as mammoth from "mammoth";
-
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const MAX_TEXT_CHARS = 160_000;
 const DOCX_MIME =
@@ -73,8 +71,7 @@ export async function prepareModelReadyAttachment(
   if (mime === "application/pdf" || extension === "pdf") {
     text = await extractPdfText(bytes);
   } else if (mime === DOCX_MIME || extension === "docx") {
-    const input = { arrayBuffer: bytes, buffer: new Uint8Array(bytes) };
-    text = (await mammoth.extractRawText(input)).value;
+    text = await extractDocxText(bytes);
   } else if (TEXT_EXTENSIONS.has(extension) || mime.startsWith("text/")) {
     text = new TextDecoder().decode(bytes);
   } else {
@@ -173,6 +170,12 @@ async function readDataUrl(value: Blob): Promise<string> {
     chunks.push(String.fromCharCode(...bytes.slice(offset, offset + chunkSize)));
   }
   return `data:${value.type};base64,${btoa(chunks.join(""))}`;
+}
+
+async function extractDocxText(data: ArrayBuffer): Promise<string> {
+  const mammoth = await import("mammoth");
+  const input = { arrayBuffer: data, buffer: new Uint8Array(data) };
+  return (await mammoth.extractRawText(input)).value;
 }
 
 async function extractPdfText(data: ArrayBuffer): Promise<string> {

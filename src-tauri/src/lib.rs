@@ -22,6 +22,7 @@ mod memory;
 mod packs;
 mod pomodoro;
 mod settings;
+mod startup_settings;
 mod updater;
 mod window_layout;
 mod worklog;
@@ -1232,7 +1233,7 @@ pub fn run() {
 
     let port = pick_free_port();
 
-    let mut builder = tauri::Builder::default().manage(SettingsState::default());
+    let mut builder = tauri::Builder::default();
 
     // Registered first, before any other plugin or window is created: a second
     // launch (double-clicking the icon again, autostart racing a manual start,
@@ -1252,6 +1253,11 @@ pub fn run() {
     }
 
     builder
+        .plugin(startup_settings::plugin(|app| {
+            #[cfg(feature = "worklog-qa")]
+            validate_worklog_qa_identity(app)?;
+            Ok(settings::load(app))
+        }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -1359,10 +1365,9 @@ pub fn run() {
             validate_worklog_qa_identity(&handle)?;
             chat_attachments::start_stale_sweep(&handle);
 
-            // Load persisted settings and apply startup side-effects.
-            let loaded = settings::load(&handle);
+            // Settings are hydrated by the startup plugin before any window exists.
             // SAFE-UNWRAP: a poisoned settings mutex means an earlier setup command panicked.
-            *app.state::<SettingsState>().0.lock().unwrap() = loaded.clone();
+            let loaded = app.state::<SettingsState>().0.lock().unwrap().clone();
             pomodoro::apply_preferences(&handle, loaded.pomodoro)?;
             pomodoro::start_checker(handle.clone())?;
             settings::register_shortcuts(&handle, &loaded);

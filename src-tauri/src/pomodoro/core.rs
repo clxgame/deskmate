@@ -33,6 +33,13 @@ impl Timer {
         self.revision
     }
 
+    /// A stopped timer cannot change on its own: only `Progress::Running` has a
+    /// deadline that `expire` can cross, so the background checker has nothing
+    /// to observe until the user starts or resumes the timer.
+    pub const fn needs_tick(&self) -> bool {
+        matches!(self.progress, Progress::Running { .. })
+    }
+
     pub fn dispatch(
         &mut self,
         operation: Operation,

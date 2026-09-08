@@ -290,3 +290,53 @@ fn rejects_clock_overflow_without_partial_preference_update() {
         initial
     );
 }
+
+#[test]
+fn reports_no_tick_needed_for_every_stopped_progress_state() {
+    // Given: a timer driven into each state that cannot advance on its own.
+    let mut idle = Timer::new(Preferences::default());
+    idle.dispatch(Operation::Get, Duration::ZERO).expect("idle");
+
+    let mut paused = running_timer();
+    paused
+        .dispatch(Operation::Pause, Duration::from_secs(10))
+        .expect("pause");
+
+    let mut ready = running_timer();
+    ready
+        .dispatch(Operation::Get, Duration::from_secs(1500))
+        .expect("expire");
+
+    let mut reset = running_timer();
+    reset
+        .dispatch(Operation::Reset, Duration::from_secs(10))
+        .expect("reset");
+
+    // Then: the background checker skips dispatching for all of them, so an
+    // untouched pet emits no `pomodoro-changed` event.
+    for timer in [&idle, &paused, &ready, &reset] {
+        assert!(!timer.needs_tick());
+    }
+    // And: only a running deadline asks to be polled.
+    assert!(running_timer().needs_tick());
+}
+
+#[test]
+fn keeps_revision_stable_while_stopped_so_idle_emits_no_event() {
+    // Given: a stopped timer at its initial revision. `execute` emits only when
+    // the revision moves, so a stable revision means a silent event channel.
+    let mut timer = Timer::new(Preferences::default());
+    let baseline = timer
+        .dispatch(Operation::Get, Duration::ZERO)
+        .expect("baseline")
+        .revision;
+    // When: the checker reads it repeatedly across simulated idle minutes.
+    for second in 1..=300 {
+        let snapshot = timer
+            .dispatch(Operation::Get, Duration::from_secs(second))
+            .expect("idle read");
+        // Then: nothing changes, so no event would be emitted.
+        assert_eq!(snapshot.revision, baseline);
+        assert_eq!(snapshot.status, Status::Idle);
+    }
+}

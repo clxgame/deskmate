@@ -248,8 +248,8 @@ For a public release, bump the app version, push a matching tag, publish the dra
 
 ### GIF character packs
 
-GIF packs require an application build containing the `figure2d` schema v1 support
-(introduced after the existing 0.3.3 release). The pack version `1.0.1` is independent
+GIF packs require YUME 0.3.4 or newer with `figure2d` schema v1 support.
+The pack version `1.0.1` is independent
 of the application version. Older application builds cannot import these packs.
 Existing packs without `renderType` continue to use GLB.
 

@@ -13,6 +13,7 @@ const report: ReportDetail = { report: { id: "r1", revision: 1, kind: "weekly", 
 const schedule: Schedule = { id: "s1", revision: 1, kind: "weekly", weekdaySet: [5], localTime: "17:00", enabled: true, timezoneMode: "system_local", createdAt: entry.createdAt, updatedAt: entry.updatedAt, nextDueAt: null };
 function hostInvoke(command: string): Promise<unknown> {
   switch (command) {
+    case "get_pet_visibility_error": return Promise.resolve(null);
     case "get_settings": return Promise.resolve(legacySettingsFixture());
     case "app_version": return Promise.resolve("0.3.2");
     case "worklog_get_report": return Promise.resolve(report);

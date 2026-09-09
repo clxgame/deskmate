@@ -19,7 +19,8 @@ import {
   waitForServer,
   type OpenCodeEvent,
 } from "../lib/opencode";
-import { broadcastMood } from "../lib/petState";
+import { broadcastMood, broadcastPetActivity } from "../lib/petState";
+import { createChatPetActivity } from "./petActivity";
 import { DEFAULT_PERSONA_ID } from "../pet/personaCatalog";
 import {
   XIAOZHU_IDENTITY_REPLY,
@@ -194,6 +195,7 @@ export default function ChatApp() {
   const tRef = useRef(t);
   tRef.current = t;
   const sessionRef = useRef<string | null>(null);
+  const [petActivity] = useState(() => createChatPetActivity(broadcastPetActivity));
   const personaRef = useRef<PersonaData | null>(null);
   const activePersonaIdRef = useRef(DEFAULT_PERSONA_ID);
   const personaLoadRef = useRef<Promise<void>>(Promise.resolve());
@@ -400,6 +402,7 @@ export default function ChatApp() {
     await waitForDelay(FIXED_REPLY_TYPING_DELAY_MS);
     if (fixedReplySequenceRef.current !== sequence) return false;
     setIsPersonaTyping(true);
+    petActivity.mood("thinking");
     broadcastMood("thinking");
     await waitForDelay(FIXED_REPLY_TYPING_DELAY_MS);
     return fixedReplySequenceRef.current === sequence;
@@ -407,6 +410,7 @@ export default function ChatApp() {
 
   useEffect(() => {
     return () => {
+      petActivity.cancel();
       fixedReplySequenceRef.current += 1;
       clearReplyPacing();
     };
@@ -454,6 +458,7 @@ export default function ChatApp() {
   }, []);
 
   const resetSession = useCallback(async (): Promise<void> => {
+    petActivity.cancel();
     fixedReplySequenceRef.current += 1;
     clearReplyPacing();
     setIsPersonaTyping(false);
@@ -477,7 +482,7 @@ export default function ChatApp() {
     setView("chat");
     setStatus("ready");
     broadcastMood("idle");
-  }, [cleanupAttachmentSession, resetAttachmentSession]);
+  }, [cleanupAttachmentSession, resetAttachmentSession, petActivity]);
 
   const loadPersona = useCallback((id: string): Promise<void> => {
     const resolvedId = resolvePersonaId(id);
@@ -587,6 +592,7 @@ export default function ChatApp() {
               nextPersonaId,
             )
           ) {
+            petActivity.cancel();
             const switchRequest = loadPersona(nextPersonaId).then(() =>
               activePersonaIdRef.current === nextPersonaId
                 ? resetSession()
@@ -649,6 +655,7 @@ export default function ChatApp() {
         };
         if (info.sessionID === sessionRef.current) {
           rolesRef.current.set(info.id, info.role);
+          petActivity.message(props.info);
         }
         break;
       }
@@ -662,6 +669,7 @@ export default function ChatApp() {
           state?: { title?: string; status?: string };
         };
         if (part.sessionID !== sessionRef.current) return;
+        petActivity.part(props.part);
         // Parts of the user's own message echo back over SSE; skip them.
         if (rolesRef.current.get(part.messageID) === "user") return;
 
@@ -706,6 +714,7 @@ export default function ChatApp() {
       }
       case "session.idle": {
         if (props.sessionID !== sessionRef.current) return;
+        petActivity.idle(props.sessionID);
         if (typeof props.sessionID === "string") {
           void recoverCcSwitchToolResultsOnIdle(props.sessionID);
           void worklog.recover(props.sessionID);
@@ -715,6 +724,7 @@ export default function ChatApp() {
       }
       case "session.error": {
         if (props.sessionID && props.sessionID !== sessionRef.current) return;
+        petActivity.sessionError(props.sessionID);
         clearReplyPacing();
         setIsPersonaTyping(false);
         setStatus("ready");
@@ -816,6 +826,7 @@ export default function ChatApp() {
     const sessionID = sessionRef.current;
     if ((!text && !prepared.shouldSendToModel) || !sessionID) return false;
     await personaLoadRef.current;
+    if (sessionRef.current !== sessionID) return false;
     const messageAttachments = prepared.fileParts.map(attachmentPreviewFromPart);
     const attachmentNames = messageAttachments.map((item) => item.name).join(", ");
     const promptText = text || prepared.fallbackPrompt;
@@ -831,6 +842,8 @@ export default function ChatApp() {
       },
     ]);
     if (!promptText) return false;
+    const petScope = { sessionId: sessionID, requestId: userMessageId };
+    petActivity.start(petScope);
     setStatus("busy");
     setIsPersonaTyping(false);
     broadcastMood("thinking");
@@ -861,10 +874,12 @@ export default function ChatApp() {
             },
           ]);
           broadcastMood("talking");
+          petActivity.mood("talking");
         }
         setIsPersonaTyping(false);
         setStatus("ready");
         broadcastMood("idle");
+        petActivity.success(petScope);
         return true;
       }
       if (isXiaozhuIdentityQuestion(text)) {
@@ -881,6 +896,7 @@ export default function ChatApp() {
         broadcastMood("talking");
         setStatus("ready");
         broadcastMood("idle");
+        petActivity.success(petScope);
         return true;
       }
     }
@@ -918,6 +934,7 @@ export default function ChatApp() {
       } catch (error: unknown) {
         setMemoryNotice(`${worklogChatCopy(lang).failed}: ${error instanceof Error ? error.message : "BRIDGE_UNAVAILABLE"}`);
       }
+      if (!petActivity.isCurrent(petScope)) return false;
       await promptAsync(sessionID, promptText, {
         messageID: userMessageId,
         system: [system, buildWorklogSystemInstruction()].filter(Boolean).join("\n\n"),
@@ -929,6 +946,8 @@ export default function ChatApp() {
       });
       return true;
     } catch (error: unknown) {
+      if (!petActivity.isCurrent(petScope)) return false;
+      petActivity.error(petScope);
       console.error(
         error instanceof Error ? error : new Error(String(error)),
       );
@@ -1109,6 +1128,7 @@ export default function ChatApp() {
   }, []);
 
   const abort = async () => {
+    petActivity.cancel();
     fixedReplySequenceRef.current += 1;
     clearReplyPacing();
     setIsPersonaTyping(false);
@@ -1120,6 +1140,7 @@ export default function ChatApp() {
 
   /** Resume a past session: adopt its opencode session id and reload messages. */
   const resumeSession = useCallback(async (id: string) => {
+    petActivity.cancel();
     fixedReplySequenceRef.current += 1;
     clearReplyPacing();
     setIsPersonaTyping(false);
@@ -1144,7 +1165,7 @@ export default function ChatApp() {
     setView("chat");
     setStatus("ready");
     broadcastMood("idle");
-  }, [cleanupAttachmentSession, resetAttachmentSession]);
+  }, [cleanupAttachmentSession, resetAttachmentSession, petActivity]);
 
   /** Start a fresh session. */
   const newChat = useCallback(async () => {

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { originalTauriWindow } from "../testing/tauriModuleFixture";
 
 type FocusChangedEvent = {
   readonly payload: boolean;
@@ -22,6 +23,7 @@ const onFocusChanged = mock<
 
 mock.module("@tauri-apps/api/core", () => ({ invoke }));
 mock.module("@tauri-apps/api/window", () => ({
+  ...originalTauriWindow,
   getCurrentWindow: () => ({ onFocusChanged }),
 }));
 

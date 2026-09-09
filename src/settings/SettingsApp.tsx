@@ -15,6 +15,7 @@ import {
   type Settings,
 } from "../lib/settings";
 import { listen } from "@tauri-apps/api/event";
+import { getPetVisibilityError, onPetVisibilityError } from "../lib/petVisibility";
 import { dict, LANGS, type Dict } from "../lib/i18n";
 import { UpdateFooter } from "./UpdateFooter";
 import { AiTab } from "./AiTab";
@@ -92,10 +93,25 @@ export default function SettingsApp() {
   const [activeWidget, setActiveWidget] = useState<WidgetId>("tasks");
   const [worklogRequest, setWorklogRequest] = useState<{ readonly target: WorklogTarget | null; readonly id: number } | null>(null);
   const [settings, setLocalSettings] = useState<Settings | null>(null);
+  const [petVisibilityError, setPetVisibilityError] = useState<string | null>(null);
   const t = dict(settings?.language ?? "zh-CN");
 
   const settingsRef = useRef<Settings | null>(null);
   const saveTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+    let eventObserved = false;
+    const showError = (message: string | null) => {
+      if (disposed) return;
+      setPetVisibilityError(message);
+      if (message !== null) setTab("account");
+    };
+    const unlisten = onPetVisibilityError((message) => { eventObserved = true; showError(message); });
+    void unlisten.then(() => getPetVisibilityError()).then((message) => { if (!eventObserved) showError(message); })
+      .catch((error: unknown) => console.error("pet recovery status unavailable", error instanceof Error ? error.message : String(error)));
+    return () => { disposed = true; void unlisten.then((stop) => stop()); };
+  }, []);
 
   useEffect(() => {
     const unlisten = listen<string>("deskmate://settings-tab", (event) => {
@@ -208,6 +224,9 @@ export default function SettingsApp() {
           </div>
         ) : (
           <main className="set-panel" aria-labelledby={`set-category-${tab}`}>
+            {petVisibilityError !== null && <div role="alert" className="set-note set-note-error">{petVisibilityError}
+              <button type="button" className="set-btn" onClick={() => setPetVisibilityError(null)}>{t.close}</button>
+            </div>}
             {tab === "general" && (
               <GeneralTab settings={settings} patch={patch} t={t} />
             )}
@@ -515,6 +534,7 @@ function AccountTab({ settings, patch, t }: TabProps) {
         onActivePersonaRemoved={() => patch("personaId", DEFAULT_PERSONA_ID)}
         onActivePersonaChange={(nextPersonaId) => patch("personaId", nextPersonaId)}
       />
+      {personaById(personaId).renderType !== "gif" && <>
       <Row label={t.mouseFollow}>
         <Switch
           label={t.mouseFollow}
@@ -558,6 +578,7 @@ function AccountTab({ settings, patch, t }: TabProps) {
         format={(value) => value.toFixed(2)}
         onChange={(value) => patch("specularIntensity", value)}
       />
+      </>}
     </>
   );
 }

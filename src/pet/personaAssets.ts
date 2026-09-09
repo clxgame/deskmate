@@ -1,5 +1,6 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
+import { parseGifPath } from "./figure2d";
 import { AI_SUBSTITUTE_PACK, personaById } from "./personaCatalog";
 
 /**
@@ -20,11 +21,19 @@ const BUILTIN_PACK_IDS: ReadonlySet<string> = new Set([
  * a root, because `convertFileSrc` percent-encodes the path and concatenating
  * onto an already-encoded URL would corrupt it.
  */
-export interface PersonaAssets {
+export interface GlbPersonaAssets {
+  readonly renderType: "glb";
   readonly modelUrl: string;
   /** URL for `textures/<slot>/baseColor.png`. */
   textureUrl(slot: string): Promise<string>;
 }
+
+export interface GifPersonaAssets {
+  readonly renderType: "gif";
+  readonly configUrl: string;
+  animationUrl(file: string): Promise<string>;
+}
+export type PersonaAssets = GlbPersonaAssets | GifPersonaAssets;
 
 /** Platform calls, injectable so tests need not mock Tauri modules globally. */
 export interface AssetHost {
@@ -40,9 +49,10 @@ export function isBuiltinPack(packId: string): boolean {
 }
 
 /** Built-in assets are served from the bundled frontend. */
-function builtinAssets(personaId: string): PersonaAssets {
+function builtinAssets(personaId: string): GlbPersonaAssets {
   const root = `/personas/${personaId}`;
   return {
+    renderType: "glb",
     modelUrl: `${root}/figure.glb`,
     textureUrl: (slot) =>
       Promise.resolve(`${root}/textures/${slot}/baseColor.png`),
@@ -65,7 +75,12 @@ async function importedAssets(
     "personas",
     personaId,
   );
+  if (personaById(personaId).renderType === "gif") {
+    return { renderType: "gif", configUrl: host.convertFileSrc(await host.join(personaRoot, "figure2d.json")),
+      animationUrl: async (file) => host.convertFileSrc(await host.join(personaRoot, ...parseGifPath(file).split("/"))), };
+  }
   return {
+    renderType: "glb",
     modelUrl: host.convertFileSrc(await host.join(personaRoot, "figure.glb")),
     textureUrl: async (slot) =>
       host.convertFileSrc(

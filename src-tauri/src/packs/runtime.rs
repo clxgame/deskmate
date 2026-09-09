@@ -6,6 +6,38 @@ use tauri::Manager;
 use super::manifest::read_manifest;
 use super::paths::{has_allowed_extension, is_safe_filename, is_safe_id};
 use super::{installed_packs, MANIFEST_NAME};
+pub(crate) fn persona_uses_gif(app: &tauri::AppHandle, persona_id: &str) -> bool {
+    if !is_safe_id(persona_id) {
+        return false;
+    }
+    let Ok(data_dir) = app.path().app_data_dir() else {
+        return false;
+    };
+    for pack in installed_packs(app.clone()).unwrap_or_default() {
+        if !pack.persona_ids.iter().any(|id| id == persona_id) {
+            continue;
+        }
+        if let Ok(manifest) = read_manifest(
+            &data_dir
+                .join("packs")
+                .join(pack.pack_id)
+                .join(MANIFEST_NAME),
+        ) {
+            if let Some(persona) = manifest
+                .personas
+                .iter()
+                .find(|persona| persona.id == persona_id)
+            {
+                return match persona.render_type {
+                    super::manifest::RenderType::Glb => false,
+                    super::manifest::RenderType::Gif => true,
+                };
+            }
+        }
+    }
+    false
+}
+
 /// Reads a persona's prompt files, preferring an installed pack and falling back
 /// to the personas shipped in the app data dir.
 pub fn persona_files(

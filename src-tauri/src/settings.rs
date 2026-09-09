@@ -1541,17 +1541,17 @@ pub fn apply(app: &tauri::AppHandle, old: &Settings, new: &Settings) {
     // whole window (the canvas fills it, so the model grows with it).
     if let Some(pet) = app.get_webview_window("pet") {
         if old.pet_visible != new.pet_visible {
-            let _ = if new.pet_visible {
-                pet.show()
-            } else {
-                pet.hide()
-            };
+            crate::pet_visibility::apply_settings(app, new);
         }
         if old.always_on_top != new.always_on_top {
             let _ = pet.set_always_on_top(new.always_on_top);
         }
-        if (old.pet_scale - new.pet_scale).abs() > f64::EPSILON {
-            apply_pet_scale(&pet, new.pet_scale);
+        if (old.pet_scale - new.pet_scale).abs() > f64::EPSILON || old.persona_id != new.persona_id {
+            crate::pet_geometry::apply(
+                &pet,
+                new.pet_scale,
+                crate::packs::persona_uses_gif(app, &new.persona_id),
+            );
         }
     }
 
@@ -1720,38 +1720,8 @@ pub fn start_scheduler(app: tauri::AppHandle) {
     });
 }
 
-/// Base pet window size at scale 1.0 (matches tauri.conf.json).
-const PET_BASE_W: f64 = 320.0;
-const PET_BASE_H: f64 = 420.0;
-
-fn pet_window_dimensions(scale: f64) -> (f64, f64) {
-    let window_scale = normalize_pet_scale(scale).max(0.5);
-    (PET_BASE_W * window_scale, PET_BASE_H * window_scale)
-}
-
-/// Resize the pet window to `scale`, keeping its bottom-center anchored so
-/// the pet stays planted where the user put it.
 pub fn apply_pet_scale(pet: &tauri::WebviewWindow, scale: f64) {
-    // Transparent padding keeps the timer readable; the canvas retains the model scale.
-    let (new_w, new_h) = pet_window_dimensions(scale);
-
-    let (Ok(pos), Ok(size), Ok(factor)) =
-        (pet.outer_position(), pet.outer_size(), pet.scale_factor())
-    else {
-        return;
-    };
-    let logical_pos: tauri::LogicalPosition<f64> = pos.to_logical(factor);
-    let logical_size: tauri::LogicalSize<f64> = size.to_logical(factor);
-
-    // Keep bottom-center fixed.
-    let cx = logical_pos.x + logical_size.width / 2.0;
-    let bottom = logical_pos.y + logical_size.height;
-
-    let _ = pet.set_size(tauri::LogicalSize::new(new_w, new_h));
-    let _ = pet.set_position(tauri::LogicalPosition::new(
-        cx - new_w / 2.0,
-        (bottom - new_h).max(0.0),
-    ));
+    crate::pet_geometry::apply_scale(pet, scale);
 }
 
 /// (Re-)register all global shortcuts from settings.
@@ -3167,25 +3137,5 @@ mod tests {
         // Missing memory fields fall back to the conservative defaults.
         assert!(!settings.memory_auto_extract);
         assert!(settings.memory_ai_use);
-    }
-}
-
-#[cfg(test)]
-mod pet_window_size_tests {
-    #[test]
-    fn timer_space_is_floored_without_changing_larger_pet_windows() {
-        // Given supported model scales, when calculating the transparent host size.
-        let sizes = [0.1, 0.5, 1.0, 2.0, 3.0].map(super::pet_window_dimensions);
-        // Then small models retain half-scale timer space and larger sizes remain proportional.
-        assert_eq!(
-            sizes,
-            [
-                (160.0, 210.0),
-                (160.0, 210.0),
-                (320.0, 420.0),
-                (640.0, 840.0),
-                (640.0, 840.0)
-            ]
-        );
     }
 }

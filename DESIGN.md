@@ -177,6 +177,10 @@ Widget selection uses `--widget-tile-size` at `88px`, with `--s-3` gaps and `--s
 
 ## 6. Motion & Interaction
 
+GIF desktop pets use the supplied transparent 240×240 images in a square, bottom-centred display inside the existing pet footprint. Per-action scale and vertical offset preserve authored close-up/full-body framing. Seven native images preload before switching; loading keeps the previous ready image. GIF pets expose shared scale, chat, dragging and settings controls; mouse-follow, shader tuning and poke are absent. A load failure uses the themed alert surface and an actionable Settings button.
+
+Explicit GIF departure lasts 910ms: translate left by 50% of the displayed image width (legacy packs may retain 35%) with ease-in-out, while opacity decreases linearly. A fixed host reserves 50% of the display width on each side for horizontal travel and preserves the pet's desktop centre and bottom anchor. Transparent travel space passes mouse input through; the image footprint and timer controls remain interactive. Show cancels departure and resets transform/opacity before the native window becomes visible. GIF playback itself keeps the original loop and is not synchronized to load events.
+
 Use `--ease` for control transitions and `--tooltip-delay` (`420ms`) for persona-pack tooltip reveals. Tooltip depth uses `--shadow-tooltip`. Persona changes are stateful but not animated in the settings surface; the pet renderer fades through a model swap only if a future transition is added. Mouse-follow rotation eases at a bounded rate and returns to neutral when disabled. Respect reduced-motion preferences for any future model transition.
 
 ## 7. Depth & Surface

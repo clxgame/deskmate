@@ -3,12 +3,14 @@ import { copyFile, lstat, mkdir, mkdtemp, readdir, rm, stat, writeFile } from "n
 import { dirname, extname, resolve } from "node:path";
 import { PackAuthoringError, packMetadata, parsePersonaIds } from "./pack-metadata";
 
+import { personaRenderType } from "./pack-figure2d";
+
 const projectRoot = resolve(import.meta.dir, "..");
 const personasRoot = resolve(projectRoot, "public/personas");
 const skillsRoot = resolve(projectRoot, "src-tauri/resources/skills");
 
 type SkillRef = { readonly id: string; readonly file: string };
-type PersonaEntry = { readonly id: string; readonly skills?: readonly SkillRef[] };
+type PersonaEntry = { readonly id: string; readonly renderType?: "gif"; readonly skills?: readonly SkillRef[] };
 
 async function personaFiles(id: string): Promise<readonly string[]> {
   const root = resolve(personasRoot, id);
@@ -23,7 +25,7 @@ async function personaFiles(id: string): Promise<readonly string[]> {
       if (entry.isDirectory()) {
         await walk(child, relative);
       } else if (entry.isFile()) {
-        if (!/\.(glb|json|md|png)$/i.test(entry.name)) {
+        if (!/\.(glb|gif|json|md|png)$/i.test(entry.name)) {
           throw new PackAuthoringError("Unsupported persona asset: " + id + "/" + relative);
         }
         collected.push(relative);
@@ -84,6 +86,7 @@ async function main(): Promise<void> {
     let fileCount = 0;
     for (const id of ids) {
       const files = await personaFiles(id);
+      const renderType = await personaRenderType(resolve(personasRoot, id), files);
       if (files.length === 0) throw new PackAuthoringError("Persona has no assets: " + id);
       for (const relative of files) {
         const target = resolve(contents, "personas", id, relative);
@@ -98,7 +101,7 @@ async function main(): Promise<void> {
         await copyFile(resolve(skillsRoot, skill.id, skill.file), target);
         fileCount += 1;
       }
-      personas.push(skills.length > 0 ? { id, skills } : { id });
+      personas.push({ id, ...(renderType === "gif" ? { renderType } : {}), ...(skills.length > 0 ? { skills } : {}) });
     }
     await copyFile(
       resolve(import.meta.dir, "persona-packs", metadata.cover),

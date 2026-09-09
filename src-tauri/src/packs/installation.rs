@@ -55,6 +55,7 @@ pub(crate) fn import_pack_into(archive_path: &Path, dir: &Path) -> Result<Import
     let staging = Staging::create(dir)?;
     let sha256 = extract_verified(archive_path, &staging.0)?;
     let manifest = read_manifest(&staging.0.join(MANIFEST_NAME))?;
+    super::figure2d::validate_personas(&staging.0, &manifest)?;
     let destination = dir.join(&manifest.pack_id);
     let thumbnail_path = manifest
         .thumbnail

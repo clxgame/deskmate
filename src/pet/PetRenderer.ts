@@ -77,6 +77,7 @@ export class PetRenderer {
     const token = ++this.loadToken;
     if (this.model !== null && this.personaId === persona.id) return;
     const assets = await personaAssets(persona.id);
+    if (assets.renderType !== "glb") throw new Error("GIF personas require the GIF view");
     let gltf: Awaited<ReturnType<GLTFLoader["loadAsync"]>>;
     try {
       gltf = await this.loader.loadAsync(assets.modelUrl);

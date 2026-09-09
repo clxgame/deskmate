@@ -1,12 +1,18 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "node:path";
-import { realpathSync } from "node:fs";
+import { realpathSync, rmSync } from "node:fs";
 
 // Two entry pages: pet (transparent always-on-top mascot) and chat (chat panel).
 export default defineConfig({
   root: realpathSync(__dirname),
-  plugins: [react()],
+  plugins: [react(), {
+    name: "exclude-optional-gif-pack",
+    apply: "build",
+    closeBundle() {
+      rmSync(resolve(__dirname, "dist/personas/xiaoxiongchong"), { recursive: true, force: true });
+    },
+  }],
   clearScreen: false,
   server: {
     port: 1420,

@@ -51,6 +51,7 @@ const deployReceiptFixture = {
 };
 
 function defaultInvoke(command: string): Promise<unknown> {
+  if (command === "get_pet_visibility_error") return Promise.resolve(null);
   if (command === "get_settings") return Promise.resolve(settingsFixture);
   if (command === "sidecar_base_url") return Promise.resolve("http://127.0.0.1:48111");
   if (command === "ccswitch_capability_status") return Promise.resolve({ kind: "ready", version: "3.20.0" });
@@ -136,6 +137,8 @@ type InvokeFixture = {
 function useInvokeFixture(fixture: InvokeFixture) {
   invoke.mockImplementation((command) => {
     switch (command) {
+      case "get_pet_visibility_error":
+        return Promise.resolve(null);
       case "get_settings":
         return Promise.resolve(settingsFixture);
       case "sidecar_base_url":

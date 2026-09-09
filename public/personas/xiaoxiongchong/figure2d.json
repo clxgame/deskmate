@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "canvas": {
+    "height": 240,
+    "width": 240
+  },
+  "animations": {
+    "idle": {
+      "scale": 1,
+      "file": "animations/idle.gif",
+      "offsetY": 0
+    },
+    "thinking": {
+      "scale": 1,
+      "file": "animations/thinking.gif",
+      "offsetY": 0
+    },
+    "working": {
+      "scale": 1,
+      "file": "animations/working.gif",
+      "offsetY": 0
+    },
+    "talking": {
+      "scale": 1,
+      "file": "animations/talking.gif",
+      "offsetY": 0
+    },
+    "success": {
+      "scale": 1,
+      "file": "animations/success.gif",
+      "offsetY": 0
+    },
+    "error": {
+      "scale": 1,
+      "file": "animations/error.gif",
+      "offsetY": 0
+    },
+    "leaving": {
+      "scale": 1,
+      "file": "animations/leaving.gif",
+      "offsetY": 0
+    }
+  },
+  "feedback": {
+    "errorMs": 1440,
+    "successMs": 1400
+  },
+  "leaving": {
+    "translateXRatio": -0.5,
+    "opacityEasing": "linear",
+    "positionEasing": "ease-in-out",
+    "durationMs": 910
+  },
+  "thinkingEscalationMs": 8000
+}

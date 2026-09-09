@@ -14,7 +14,9 @@ test("offers the third generation in the built-in pack without changing the defa
   expect(DEFAULT_PERSONA_ID).toBe("xiaozhu");
   expect(persona.scale).toBe(1);
   expect(persona.embeddedMaterials).toBe(true);
-  expect((await personaAssets(id)).modelUrl).toBe(`/personas/${id}/figure.glb`);
+  const assets = await personaAssets(id);
+  if (assets.renderType !== "glb") throw new Error("Expected GLB assets");
+  expect(assets.modelUrl).toBe(`/personas/${id}/figure.glb`);
   expect(personaLabel(persona, "zh-CN")).toBe("小著（三代目）");
   expect(personaLabel(persona, "en-US")).toBe("Xiaozhu (3rd Gen)");
   expect(personaLabel(persona, "ja-JP")).toBe("小著（三代目）");

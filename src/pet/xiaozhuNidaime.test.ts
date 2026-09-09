@@ -17,6 +17,7 @@ test("ships the approved rig and a playable expression clip for every mood", asy
   expect(persona.embeddedMaterials).toBe(true);
   expect(DEFAULT_PERSONA_ID).toBe("xiaozhu");
   const assets = await personaAssets(id);
+  if (assets.renderType !== "glb") throw new Error("Expected GLB assets");
   expect(assets.modelUrl).toBe(`/personas/${id}/figure.glb`);
   const bytes = await Bun.file(resolve(root, `public${assets.modelUrl}`)).arrayBuffer();
   const gltf = await new GLTFLoader().parseAsync(bytes, "");

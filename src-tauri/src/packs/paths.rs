@@ -113,7 +113,11 @@ pub(super) fn safe_entry_path(name: &str) -> Option<PathBuf> {
     }
 
     let path: PathBuf = parts.iter().collect();
-    if !has_allowed_extension(&path) {
+    let persona_gif = parts.first() == Some(&"personas")
+        && path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("gif"));
+    if !has_allowed_extension(&path) && !persona_gif {
         return None;
     }
 

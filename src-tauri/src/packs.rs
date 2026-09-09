@@ -7,6 +7,8 @@ use serde::Serialize;
 use tauri::Manager;
 
 mod archive;
+mod figure2d;
+mod gif;
 mod installation;
 mod manifest;
 mod paths;
@@ -15,6 +17,7 @@ mod thumbnail;
 
 pub(crate) use installation::{import_pack_into, installed_packs_in, uninstall_pack_in};
 pub use manifest::PackName;
+pub(crate) use runtime::persona_uses_gif;
 pub use runtime::{persona_files, persona_grants_skill};
 
 #[cfg(test)]
@@ -91,6 +94,8 @@ pub fn uninstall_pack(app: tauri::AppHandle, pack_id: String) -> Result<(), Stri
 }
 
 #[cfg(test)]
+mod gif_tests;
+#[cfg(test)]
 mod import_tests;
 #[cfg(test)]
 mod metadata_tests;
@@ -98,3 +103,7 @@ mod metadata_tests;
 mod qa_tests;
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod gif_lzw_tests;
+mod gif_lzw;

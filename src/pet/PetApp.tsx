@@ -1,330 +1,111 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Menu, MenuItem } from "@tauri-apps/api/menu";
-import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
-import { onMood } from "../lib/petState";
-import {
-  getSettings,
-  onPetScalePreview,
-  onSettingsChanged,
-  type Settings,
-} from "../lib/settings";
-import type { ThemeId } from "../settings/theme";
-import { PetRenderer } from "./PetRenderer";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getSettings, onPetScalePreview, onSettingsChanged, type Settings } from "../lib/settings";
+import type { PetRenderer } from "./PetRenderer";
 import { PetPomodoro } from "./PetPomodoro";
 import { petLayout } from "./petLayout";
-
+import { personaById } from "./personaCatalog";
+import { GifPetView } from "./GifPetView";
+import { GlbPetView } from "./GlbPetView";
+import { useGifState } from "./useGifState";
+import { useGifVisibility } from "./useGifVisibility";
+import { useGifPassthrough } from "./useGifPassthrough";
+import { defaultGifTiming } from "./gifState";
+import type { LoadedGifPersona } from "./gifAssets";
+import "./gifPet.css";
 
 async function getSettingsWithRetry(): Promise<Settings> {
   let lastError: unknown = new Error("settings unavailable");
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    try {
-      return await getSettings();
-    } catch (error: unknown) {
+    try { return await getSettings(); }
+    catch (error: unknown) {
       lastError = error instanceof Error ? error : new Error(String(error));
       if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }
   throw lastError;
 }
-
-function toggleChat(): Promise<boolean> {
-  return invoke<boolean>("toggle_chat");
-}
+const report = (error: unknown) => console.error("pet interaction failed", error instanceof Error ? error.message : String(error));
+const openSettings = () => { void invoke("open_settings").catch(report); };
 
 export default function PetApp() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<PetRenderer | null>(null);
-  const contextMenuRef = useRef<Menu | null>(null);
-  const contextMenuPromiseRef = useRef<Promise<Menu> | null>(null);
+  const [settings, setSettings] = useState<Settings | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [theme, setTheme] = useState<ThemeId>("dark");
-  const [language, setLanguage] = useState("zh-CN");
   const [petScale, setPetScale] = useState(0.5);
+  const [gifData, setGifData] = useState<LoadedGifPersona | null>(null);
+  const personaId = settings?.personaId ?? "";
+  const gif = settings !== null && personaById(personaId).renderType === "gif";
+  const timing = useMemo(() => gifData === null ? defaultGifTiming : { ...gifData.config.feedback, thinkingEscalationMs: gifData.config.thinkingEscalationMs }, [gifData]);
+  const { leaving, visible } = useGifVisibility(personaId, gif, gifData?.config.leaving.durationMs ?? 910);
+  const state = useGifState(visible, timing);
   const layout = petLayout(petScale);
-
-
+  useGifPassthrough(gif, rootRef);
+  const loaded = useCallback((data: LoadedGifPersona) => setGifData(data), []);
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (canvas === null) return;
     let disposed = false;
-    let renderer: PetRenderer;
-    const petWindow = getCurrentWindow();
-    let mouseFollow = false;
-    let cursorPollBusy = false;
-    try {
-      renderer = new PetRenderer(canvas);
-      rendererRef.current = renderer;
-    } catch (error: unknown) {
-      const message =
-        error instanceof Error ? error.message : "unknown WebGL error";
-      canvas.setAttribute("aria-label", "3D desktop pet unavailable");
-      setLoadError(message);
-      console.error("3D pet renderer failed", message);
-      return;
-    }
-    const loadPersona = (personaId: string): void => {
-      setLoadError(null);
-      void renderer
-        .load(personaId)
-        .then(() => {
-          if (!disposed)
-            canvas.setAttribute("aria-label", "3D desktop pet ready");
-        })
-        .catch((error: unknown) => {
-          if (disposed) return;
-          const message =
-            error instanceof Error ? error.message : "unknown error";
-          canvas.setAttribute("aria-label", "3D desktop pet unavailable");
-          setLoadError(message);
-          console.error("3D pet load failed", message);
-        });
+    const apply = (next: Settings) => {
+      if (disposed) return;
+      setSettings(next);
+      setPetScale(next.petScale);
     };
-    // The pet window is not resizable and only moves on drag, so its geometry is
-    // read once and refreshed from window events instead of on every poll. That
-    // leaves one real IPC call per tick instead of three.
-    let geometry: { readonly centerX: number; readonly centerY: number; readonly halfWidth: number; readonly halfHeight: number } | null =
-      null;
-    let geometryPending = false;
-    const refreshGeometry = (): void => {
-      if (disposed || geometryPending) return;
-      geometryPending = true;
-      void Promise.all([petWindow.outerPosition(), petWindow.outerSize()])
-        .then(([position, size]) => {
-          if (disposed) return;
-          geometry = {
-            centerX: position.x + size.width / 2,
-            centerY: position.y + size.height * (1 - canvas.clientHeight / window.innerHeight / 2),
-            halfWidth: Math.max(size.width * canvas.clientWidth / window.innerWidth / 2, 1),
-            halfHeight: Math.max(size.height * canvas.clientHeight / window.innerHeight / 2, 1),
-          };
-        })
-        .catch((error: unknown) => {
-          if (!disposed) {
-            console.error(
-              "pet window geometry probe failed",
-              error instanceof Error ? error : new Error(String(error)),
-            );
-          }
-        })
-        .finally(() => {
-          geometryPending = false;
-        });
-    };
-    const canvasResize = new ResizeObserver(() => {
-      renderer.setScale(1);
-      refreshGeometry();
-    });
-    canvasResize.observe(canvas);
-    const pollCursor = (): void => {
-      if (!mouseFollow || cursorPollBusy) return;
-      if (geometry === null) {
-        refreshGeometry();
-        return;
-      }
-      const bounds = geometry;
-      cursorPollBusy = true;
-      void cursorPosition()
-        .then((cursor) => {
-          if (disposed || !mouseFollow) return;
-          renderer.setMouseTarget({
-            x: (cursor.x - bounds.centerX) / bounds.halfWidth,
-            y: (cursor.y - bounds.centerY) / bounds.halfHeight,
-          });
-        })
-        .catch((error: unknown) => {
-          if (!disposed) {
-            console.error(
-              "mouse follow probe failed",
-              error instanceof Error ? error : new Error(String(error)),
-            );
-          }
-        })
-        .finally(() => {
-          cursorPollBusy = false;
-        });
-    };
-    // Mouse follow is the only consumer of the cursor poll, so the timer exists
-    // only while the feature is on rather than idling at 25Hz.
-    let cursorPoll: number | null = null;
-    const syncCursorPoll = (): void => {
-      if (mouseFollow && cursorPoll === null) {
-        refreshGeometry();
-        cursorPoll = window.setInterval(pollCursor, 40);
-        return;
-      }
-      if (!mouseFollow && cursorPoll !== null) {
-        window.clearInterval(cursorPoll);
-        cursorPoll = null;
-      }
-    };
-    void getSettingsWithRetry()
-      .then((settings) => {
-        setTheme(settings.theme);
-        setLanguage(settings.language);
-        mouseFollow = settings.mouseFollow;
-        setPetScale(settings.petScale);
-        renderer.setRenderTuning(settings);
-        renderer.setMouseFollowEnabled(mouseFollow);
-        syncCursorPoll();
-        loadPersona(settings.personaId);
-      })
-      .catch((error: unknown) => {
-        const message =
-          error instanceof Error ? error.message : "settings unavailable";
-        setLoadError(message);
-      });
-    const unlistenMood = onMood((mood) => renderer.setMood(mood));
-    const unlistenScalePreview = onPetScalePreview((scale) =>
-      setPetScale(scale),
-    );
-    const unlistenSettings = onSettingsChanged((settings) => {
-      setTheme(settings.theme);
-      setLanguage(settings.language);
-      mouseFollow = settings.mouseFollow;
-      setPetScale(settings.petScale);
-      renderer.setRenderTuning(settings);
-      renderer.setMouseFollowEnabled(mouseFollow);
-      syncCursorPoll();
-      loadPersona(settings.personaId);
-    });
-    // Dragging the pet or a scale change is what actually invalidates the cache.
-    const unlistenMoved = petWindow.onMoved(() => refreshGeometry());
-    const unlistenResized = petWindow.onResized(() => refreshGeometry());
-    return () => {
-      disposed = true;
-      canvasResize.disconnect();
-      if (cursorPoll !== null) window.clearInterval(cursorPoll);
-      void unlistenMood.then((stopListening) => stopListening());
-      void unlistenScalePreview.then((stopListening) => stopListening());
-      void unlistenSettings.then((stopListening) => stopListening());
-      void unlistenMoved.then((stopListening) => stopListening());
-      void unlistenResized.then((stopListening) => stopListening());
-      rendererRef.current = null;
-      void contextMenuRef.current?.close();
-      contextMenuRef.current = null;
-      renderer.dispose();
-    };
+    let changed = false;
+    const unlisten = onSettingsChanged((next) => { changed = true; apply(next); });
+    void getSettingsWithRetry().then((next) => { if (!changed) apply(next); })
+      .catch((error: unknown) => { if (!disposed) setLoadError(error instanceof Error ? error.message : String(error)); });
+    const scale = onPetScalePreview((value) => { if (!disposed) setPetScale(value); });
+    return () => { disposed = true; void unlisten.then((stop) => stop()); void scale.then((stop) => stop()); };
   }, []);
+  const settingsReady = settings !== null;
+  useEffect(() => {
+    if (settingsReady) void invoke("configure_pet_geometry", { gif }).catch(report);
+  }, [gif, settingsReady]);
 
-  const getContextMenu = (): Promise<Menu> => {
-    if (contextMenuRef.current !== null) {
-      return Promise.resolve(contextMenuRef.current);
-    }
-    if (contextMenuPromiseRef.current !== null) {
-      return contextMenuPromiseRef.current;
-    }
-    const menuPromise = Promise.all([
-      MenuItem.new({
-        id: "open-widget-settings",
-        text: "小组件",
-        action: () => {
-          void invoke<void>("open_widget_settings").catch((error: unknown) => {
-            console.error(
-              "widget settings open failed",
-              error instanceof Error ? error : new Error(String(error)),
-            );
-          });
-        },
-      }),
-      MenuItem.new({
-        id: "poke-pet",
-        text: "戳",
-        action: () => rendererRef.current?.playNudge(),
-      }),
-    ])
-      .then(([widgetItem, pokeItem]) =>
-        Menu.new({ items: [widgetItem, pokeItem] }),
-      )
-      .then((menu) => {
-        contextMenuRef.current = menu;
-        return menu;
-      });
-    contextMenuPromiseRef.current = menuPromise;
-    void menuPromise.then(
-      () => {
-        contextMenuPromiseRef.current = null;
-      },
-      () => {
-        contextMenuPromiseRef.current = null;
-      },
-    );
-    return menuPromise;
+  const downAt = useRef<{ readonly x: number; readonly y: number; readonly t: number } | null>(null);
+  const onMouseDown = (event: MouseEvent) => {
+    if (event.button === 0) downAt.current = { x: event.screenX, y: event.screenY, t: Date.now() };
   };
-
-  const downAt = useRef<{ x: number; y: number; t: number } | null>(null);
-
-  const onMouseDown = (event: React.MouseEvent) => {
-    if (event.button !== 0) return;
-    downAt.current = { x: event.screenX, y: event.screenY, t: Date.now() };
-  };
-
-  const onMouseMove = (event: React.MouseEvent) => {
+  const onMouseMove = (event: MouseEvent) => {
     const start = downAt.current;
-    if (start === null) return;
-    if (Math.hypot(event.screenX - start.x, event.screenY - start.y) > 4) {
+    if (start !== null && Math.hypot(event.screenX - start.x, event.screenY - start.y) > 4) {
       downAt.current = null;
-      void getCurrentWindow().startDragging();
+      void getCurrentWindow().startDragging().catch(report);
     }
   };
-
   const onMouseUp = () => {
-    if (downAt.current !== null && Date.now() - downAt.current.t < 400) {
-      void toggleChat().catch((error: unknown) => {
-        console.error(
-          "chat wake failed",
-          error instanceof Error ? error : new Error(String(error)),
-        );
-      });
-    }
+    if (downAt.current !== null && Date.now() - downAt.current.t < 400) void invoke("toggle_chat").catch(report);
     downAt.current = null;
   };
-
-  const onContextMenu = (event: React.MouseEvent<HTMLCanvasElement>) => {
+  const onContextMenu = (event: MouseEvent) => {
     event.preventDefault();
-    void getContextMenu()
-      .then((menu) => menu.popup(undefined, getCurrentWindow()))
-      .catch((error: unknown) => {
-        console.error(
-          "pet context menu failed",
-          error instanceof Error ? error : new Error(String(error)),
-        );
-      });
+    void (async () => {
+      const items: MenuItem[] = [];
+      let menu: Menu | null = null;
+      try {
+        items.push(await MenuItem.new({ id: "open-widget-settings", text: "小组件", action: () => { void invoke("open_widget_settings").catch(report); } }));
+        items.push(await MenuItem.new({ id: "open-pet-settings", text: "设置", action: openSettings }));
+        if (!gif) items.push(await MenuItem.new({ id: "poke-pet", text: "戳", action: () => rendererRef.current?.playNudge() }));
+        menu = await Menu.new({ items });
+        await menu.popup(undefined, getCurrentWindow());
+      } finally {
+        const resources = menu === null ? items : [menu, ...items];
+        const results = await Promise.allSettled(resources.map((resource) => resource.close()));
+        for (const result of results) if (result.status === "rejected") report(result.reason);
+      }
+    })().catch(report);
   };
-
-  return (
-    <div className="pet-root" data-theme={theme}>
-      <canvas
-        ref={canvasRef}
-        aria-label="3D desktop pet"
-        className="pet-canvas"
-        style={{ width: layout.width, height: layout.height }}
-        onMouseDown={onMouseDown}
-        onMouseMove={onMouseMove}
-        onMouseUp={onMouseUp}
-        onContextMenu={onContextMenu}
-      />
-      <PetPomodoro language={language} scale={petScale} />
-      {loadError !== null && (
-        <div
-          role="alert"
-          style={{
-            position: "absolute",
-            top: 12,
-            left: 12,
-            right: 12,
-            padding: "8px 10px",
-            color: "#fff",
-            background: "rgba(120, 24, 24, 0.9)",
-            borderRadius: 8,
-            fontFamily: "system-ui, sans-serif",
-            fontSize: 12,
-            pointerEvents: "none",
-          }}
-        >
-          3D 桌宠加载失败：{loadError}
-        </div>
-      )}
-    </div>
-  );
+  return <div ref={rootRef} className="pet-root" data-theme={settings?.theme ?? "dark"}>
+    {settings !== null && <button type="button" className="pet-interaction" aria-label="Open chat"
+      onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onContextMenu={onContextMenu}
+      onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void invoke("toggle_chat").catch(report); } }}>
+      {gif ? <GifPetView personaId={personaId} state={leaving ? "leaving" : state} width={layout.width}
+        leaving={leaving} onError={setLoadError} onLoaded={loaded} />
+        : <GlbPetView settings={settings} width={layout.width} height={layout.height} rendererRef={rendererRef} onError={setLoadError} />}
+    </button>}
+    <PetPomodoro language={settings?.language ?? "zh-CN"} scale={petScale} />
+    {loadError !== null && <div role="alert" className="pet-load-error">桌宠加载失败 <button type="button" onClick={openSettings}>打开设置切换角色</button></div>}
+  </div>;
 }

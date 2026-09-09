@@ -26,6 +26,7 @@ describe("persona asset resolution", () => {
     const host = fakeHost();
     const assets = await personaAssets("xiaozhu", host);
 
+    if (assets.renderType !== "glb") throw new Error("Expected GLB assets");
     expect(assets.modelUrl).toBe("/personas/xiaozhu/figure.glb");
     expect(await assets.textureUrl("Hair")).toBe(
       "/personas/xiaozhu/textures/Hair/baseColor.png",
@@ -38,6 +39,7 @@ describe("persona asset resolution", () => {
     const host = fakeHost();
     const assets = await personaAssets("changli", host);
 
+    if (assets.renderType !== "glb") throw new Error("Expected GLB assets");
     expect(assets.modelUrl).toStartWith("asset://localhost/");
     expect(host.converted[0]).toBe(
       "C:\\data\\com.deskmate.desktop\\packs\\aki\\personas\\changli\\figure.glb",
@@ -49,6 +51,7 @@ describe("persona asset resolution", () => {
     // encoded root would produce an unfetchable URL.
     const host = fakeHost();
     const assets = await personaAssets("changli", host);
+    if (assets.renderType !== "glb") throw new Error("Expected GLB assets");
     const url = await assets.textureUrl("Hair");
 
     expect(host.converted).toContain(
@@ -73,6 +76,17 @@ describe("persona asset resolution", () => {
 
   test("falls back to the built-in persona for unknown ids", async () => {
     const assets = await personaAssets("does-not-exist", fakeHost());
+    if (assets.renderType !== "glb") throw new Error("Expected GLB assets");
     expect(assets.modelUrl).toBe("/personas/xiaozhu/figure.glb");
   });
+});
+
+test("resolves GIF config and safe animations for imported xiaoxiongchong", async () => {
+  const host = fakeHost();
+  const assets = await personaAssets("xiaoxiongchong", host);
+  if (assets.renderType !== "gif") throw new Error("Expected GIF assets");
+  expect(assets.configUrl).toContain("figure2d.json");
+  await assets.animationUrl("animations/idle.gif");
+  expect(host.converted.at(-1)).toEndWith("packs\\xiaoxiongchong\\personas\\xiaoxiongchong\\animations\\idle.gif");
+  await expect(assets.animationUrl("../bad.gif")).rejects.toThrow();
 });

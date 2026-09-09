@@ -13,6 +13,7 @@ const settings = legacySettingsFixture({ scheduledTasks: [
   { id: "daily", time: "14:25", prompt: "Take a walking break", enabled: true },
 ] });
 const invoke = mock<(command: string) => Promise<unknown>>((command) => {
+  if (command === "get_pet_visibility_error") return Promise.resolve(null);
   if (command === "get_settings") return Promise.resolve(settings);
   if (command === "app_version") return Promise.resolve("0.2.8");
   return Promise.resolve(undefined);

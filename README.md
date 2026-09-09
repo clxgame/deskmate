@@ -245,3 +245,30 @@ powershell -ExecutionPolicy Bypass -File scripts\publish.ps1 -Tag v0.1.1
 The GitHub Actions release workflow runs on `v*` tags. It checks the tag against the app version, builds the signed Windows NSIS installer, uploads updater signatures and `latest.json`, and creates a draft GitHub Release first. Inspect the draft assets before publishing the release.
 
 For a public release, bump the app version, push a matching tag, publish the draft GitHub Release with the installer, signature, and `latest.json`, then verify a real installed older build can update to the new release from `clxgame/deskmate`.
+
+### GIF character packs
+
+GIF packs require an application build containing the `figure2d` schema v1 support
+(introduced after the existing 0.3.3 release). The pack version `1.0.1` is independent
+of the application version. Older application builds cannot import these packs.
+Existing packs without `renderType` continue to use GLB.
+
+The optional `xiaoxiongchong-1.0.1.dmpack` contains the original seven 240×240 GIFs,
+a PNG cover, and the persona text. Import it in Settings → Persona packs, then select
+小熊虫. Its assets are excluded from the application build and remain an optional
+local import. The source GIFs retain their original framing and loop behavior.
+
+Each GIF persona declares `"renderType": "gif"` in `pack.json` and includes
+`persona.md` plus `figure2d.json`. The latter has `schemaVersion: 1`, a 240×240
+`canvas`, and `animations` entries for `idle`, `thinking`, `working`, `talking`,
+`success`, `error`, and `leaving`. Each entry has a safe relative `.gif` `file`,
+`scale` (0.1–1), and upward `offsetY` (0–240×(1−scale)). Paths may contain ASCII
+letters, digits, underscores, hyphens, and directory separators; external URLs,
+absolute paths, and traversal are rejected.
+
+The configuration also specifies `feedback.successMs` / `errorMs`,
+`thinkingEscalationMs`, and `leaving.durationMs`, `translateXRatio`,
+`positionEasing`, `opacityEasing`. Schema v1 supports leftward ratios −0.35 (legacy 1.0.0 pack) and −0.5
+(1.0.1 pack) with `ease-in-out` position and `linear` opacity. 小熊虫 uses 1400/1440 ms
+feedback, 8000 ms thinking escalation, and 910 ms departure. Import validates the
+configuration and referenced GIF resources before replacing an installed pack.

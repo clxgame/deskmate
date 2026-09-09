@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   AI_SUBSTITUTE_PACK,
   AKI_PACK,
+  XIAOXIONGCHONG_PACK,
   ALL_PERSONAS,
   BUILTIN_PACKS,
   DEFAULT_PERSONA_ID,
@@ -47,7 +48,8 @@ describe("persona packs", () => {
   test("every known persona id is unique across packs", () => {
     const ids = ALL_PERSONAS.map((persona) => persona.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toHaveLength(28);
+    expect(ids).toHaveLength(29);
+    expect(ids).toContain("xiaoxiongchong");
   });
 
   test("adds a pack's personas to the catalog once it is installed", () => {
@@ -128,7 +130,8 @@ describe("persona packs", () => {
     expect(packById("aki")).toBe(AKI_PACK);
     expect(packById("ai-substitute")).toBe(AI_SUBSTITUTE_PACK);
     expect(packById("missing")).toBeUndefined();
-    expect(KNOWN_PACKS).toHaveLength(2);
+    expect(packById("xiaoxiongchong")).toBe(XIAOXIONGCHONG_PACK);
+    expect(KNOWN_PACKS).toEqual([AI_SUBSTITUTE_PACK, AKI_PACK, XIAOXIONGCHONG_PACK]);
   });
 
   test("grants the ncm skill only to 小著", () => {
@@ -138,4 +141,13 @@ describe("persona packs", () => {
     ]);
     expect(personaById("aimisi").skills).toBeUndefined();
   });
+});
+
+test("offers the optional GIF persona only when its pack is installed", () => {
+  const installed = [{ packId: "xiaoxiongchong", personaIds: ["xiaoxiongchong"] }];
+  const catalog = personaCatalog(installed);
+  expect(catalog.map(persona => persona.id)).toEqual(["xiaoxiongchong", "xiaozhu", "xiaozhu-nidaime", "xiaozhu-sandaime"]);
+  expect(catalog.find(persona => persona.id === "xiaoxiongchong")).toMatchObject({ renderType: "gif", packId: "xiaoxiongchong", name: { zh: "小熊虫" } });
+  expect(PERSONAS.some(persona => persona.id === "xiaoxiongchong")).toBe(false);
+  expect(XIAOXIONGCHONG_PACK.builtin).toBe(false);
 });

@@ -24,7 +24,17 @@ pub(super) struct PackSkill {
 pub(super) struct PackPersona {
     pub(super) id: String,
     #[serde(default)]
+    pub(super) render_type: RenderType,
+    #[serde(default)]
     pub(super) skills: Vec<PackSkill>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(super) enum RenderType {
+    #[default]
+    Glb,
+    Gif,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -76,6 +86,9 @@ fn validate_manifest(manifest: &PackManifest) -> Result<(), String> {
     for persona in &manifest.personas {
         if !is_safe_id(&persona.id) {
             return Err(format!("角色 id 不合法: {}", persona.id));
+        }
+        if persona.id == "xiaoxiongchong" && !matches!(persona.render_type, RenderType::Gif) {
+            return Err("xiaoxiongchong 必须声明 renderType gif".into());
         }
         for skill in &persona.skills {
             // The file name alone is declared; the directory comes from the

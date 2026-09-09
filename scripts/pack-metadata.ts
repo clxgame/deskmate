@@ -12,6 +12,10 @@ type PackDefinition = {
 };
 
 const definitions: Readonly<Record<string, PackDefinition>> = {
+  xiaoxiongchong: {
+    name: { zh: "小熊虫", en: "Xiaoxiongchong", ja: "小熊虫", ko: "샤오슝충" },
+    cover: "xiaoxiongchong.png", preferredPersona: "xiaoxiongchong",
+  },
   aki: {
     name: { zh: "aki 团子", en: "aki Dango", ja: "aki 団子", ko: "aki 당고" },
     cover: "aki.png",

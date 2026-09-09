@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { VRMHumanBoneName, type VRM } from "@pixiv/three-vrm";
-import type { PersonaAssets } from "./personaAssets";
+import type { GlbPersonaAssets } from "./personaAssets";
 export function isVrm(value: unknown): value is VRM {  return (
     value !== null &&
     typeof value === "object" &&
@@ -49,7 +49,7 @@ export function updateVrm(vrm: VRM, delta: number, t: number): void {
 
 export async function applyPersonaTextures(
     root: THREE.Object3D,
-    assets: PersonaAssets,
+    assets: GlbPersonaAssets,
   ): Promise<void> {
     const textureLoader = new THREE.TextureLoader();
     const tasks: Promise<void>[] = [];

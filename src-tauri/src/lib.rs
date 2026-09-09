@@ -20,6 +20,10 @@ mod local_ai_deploy;
 mod memory;
 /// User-installable persona packs imported from local `.dmpack` archives.
 mod packs;
+mod pet_geometry;
+mod pet_visibility;
+mod pet_visibility_recovery;
+mod pet_visibility_state;
 mod pomodoro;
 mod settings;
 mod startup_settings;
@@ -1105,16 +1109,7 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 
 /// Show/hide the pet; hiding the pet also hides the chat window.
 pub(crate) fn toggle_pet_visibility(app: &tauri::AppHandle) {
-    let Some(pet) = app.get_webview_window("pet") else {
-        return;
-    };
-    let visible = pet.is_visible().unwrap_or(true);
-    if visible {
-        let _ = pet.hide();
-        let _ = hide_chat_impl(app);
-    } else {
-        let _ = pet.show();
-    }
+    pet_visibility::request(app, None);
 }
 
 fn show_settings_window(app: &tauri::AppHandle) {
@@ -1248,8 +1243,16 @@ pub fn run() {
         .manage(AttachmentStore::default())
         .manage(ccswitch::contract::CcSwitchSetupState::default())
         .manage(ChatShown(Mutex::new(false)))
+        .manage(pet_visibility::PetVisibility::default())
+        .manage(pet_visibility_recovery::VisibilityError::default())
+        .manage(pet_geometry::PetGeometryState::default())
         .manage(Arc::new(ChatMotion::default()))
         .invoke_handler(tauri::generate_handler![
+            pet_visibility::acknowledge_pet_visibility,
+            pet_visibility::register_pet_visibility,
+            pet_visibility::get_pet_visibility,
+            pet_visibility_recovery::get_pet_visibility_error,
+            pet_geometry::configure_pet_geometry,
             open_worklog_settings,
             worklog::bridge::worklog_register_turn,
             worklog::commands::worklog_available,
@@ -1340,6 +1343,7 @@ pub fn run() {
             // Settings are hydrated by the startup plugin before any window exists.
             // SAFE-UNWRAP: a poisoned settings mutex means an earlier setup command panicked.
             let loaded = app.state::<SettingsState>().0.lock().unwrap().clone();
+            pet_visibility::initialize(&handle, loaded.pet_visible);
             pomodoro::apply_preferences(&handle, loaded.pomodoro)?;
             pomodoro::start_checker(handle.clone())?;
             settings::register_shortcuts(&handle, &loaded);
@@ -1361,9 +1365,11 @@ pub fn run() {
                 if !loaded.always_on_top {
                     let _ = pet.set_always_on_top(false);
                 }
-                if (loaded.pet_scale - 1.0).abs() > f64::EPSILON {
-                    settings::apply_pet_scale(&pet, loaded.pet_scale);
-                }
+                pet_geometry::apply(
+                    &pet,
+                    loaded.pet_scale,
+                    packs::persona_uses_gif(&handle, &loaded.persona_id),
+                );
                 if let Some(position) = loaded.pet_position {
                     let _ = pet.set_position(tauri::PhysicalPosition::new(position.x, position.y));
                 } else {

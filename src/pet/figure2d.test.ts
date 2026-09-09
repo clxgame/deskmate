@@ -26,7 +26,7 @@ for (const file of ["../idle.gif", "/idle.gif", "https://host/a.gif", "C:/idle.g
 }
 
 test("rejects unknown version when loading a newer contract", () => {
-  const input = { ...fixture(), schemaVersion: 2 };
+  const input = { ...fixture(), schemaVersion: 3 };
   expect(() => parseFigure2dConfig(input)).toThrow("schemaVersion");
 });
 

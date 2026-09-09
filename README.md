@@ -248,18 +248,23 @@ For a public release, bump the app version, push a matching tag, publish the dra
 
 ### GIF character packs
 
-GIF packs require YUME 0.3.4 or newer with `figure2d` schema v1 support.
-The pack version `1.0.1` is independent
-of the application version. Older application builds cannot import these packs.
+Schema v1 GIF packs require YUME 0.3.4 or newer with schema v1 support.
+This source tree supports both `figure2d` schemas v1 and v2. The released YUME
+0.3.4 does **not** support schema v2 and cannot import the new 1.1.0 pack; use an
+application build containing this schema v2 implementation. Pack versions are
+independent of application versions; no new application release is implied.
 Existing packs without `renderType` continue to use GLB.
 
-The optional `xiaoxiongchong-1.0.1.dmpack` contains the original seven 240×240 GIFs,
+The optional `xiaoxiongchong-1.1.0.dmpack` contains the original seven 240×240 GIFs,
 a PNG cover, and the persona text. Import it in Settings → Persona packs, then select
 小熊虫. Its assets are excluded from the application build and remain an optional
 local import. The source GIFs retain their original framing and loop behavior.
+The upgrade is optional and never automatically overwrites an imported pack.
+Importing it explicitly replaces the same pack ID after validation. The original
+1.0.0 and 1.0.1 packs remain compatible with this source tree.
 
 Each GIF persona declares `"renderType": "gif"` in `pack.json` and includes
-`persona.md` plus `figure2d.json`. The latter has `schemaVersion: 1`, a 240×240
+`persona.md` plus `figure2d.json`. Schema v1 has `schemaVersion: 1`, a 240×240
 `canvas`, and `animations` entries for `idle`, `thinking`, `working`, `talking`,
 `success`, `error`, and `leaving`. Each entry has a safe relative `.gif` `file`,
 `scale` (0.1–1), and upward `offsetY` (0–240×(1−scale)). Paths may contain ASCII
@@ -272,3 +277,16 @@ The configuration also specifies `feedback.successMs` / `errorMs`,
 (1.0.1 pack) with `ease-in-out` position and `linear` opacity. 小熊虫 uses 1400/1440 ms
 feedback, 8000 ms thinking escalation, and 910 ms departure. Import validates the
 configuration and referenced GIF resources before replacing an installed pack.
+
+Schema v2 keeps the seven actions, canvas, feedback, and leaving settings, but
+replaces `thinkingEscalationMs` with `thinkingSelection: "random"`. Each new
+thinking episode selects `thinking` or `working` with 50% probability and keeps
+that selection until the episode ends. Explicit working events still use working.
+Each action adds `offsetX` and a simple `hitPolygon` of 3–64 source-coordinate
+points; scale is 0.1–2 and both offsets are −240–240. Rendering and subject hit
+testing use the same fixed transform, so transparent space and separate props
+do not capture subject clicks. The 1.1.0 calibration aligns the seven actions to
+idle while preserving idle size; the transparent host expands to fit the motion.
+The original GIF bytes are unchanged, including any cropping already in the
+source. Departure remains leftward by half the displayed action width with a
+910 ms fade. Existing schema v1 packs retain their eight-second thinking behavior.

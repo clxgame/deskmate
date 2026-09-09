@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 mod archive;
 mod figure2d;
@@ -83,7 +83,11 @@ pub fn installed_packs(app: tauri::AppHandle) -> Result<Vec<InstalledPack>, Stri
 /// through cannot leave a half-written pack in place of a working one.
 #[tauri::command]
 pub fn import_pack(app: tauri::AppHandle, path: String) -> Result<ImportedPack, String> {
-    import_pack_into(Path::new(&path), &packs_dir(&app)?)
+    let imported = import_pack_into(Path::new(&path), &packs_dir(&app)?)?;
+    if let Err(error) = app.emit("deskmate://pack-imported", &imported) {
+        eprintln!("pack import notification failed: {error}");
+    }
+    Ok(imported)
 }
 
 /// Removes an installed pack. Built-in packs live inside the app bundle, not

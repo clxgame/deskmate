@@ -1,5 +1,6 @@
+import fixtures from "../tests/fixtures/figure2d-contract.json";
 import { expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseFigure2dConfig } from "../src/pet/figure2d";
@@ -38,3 +39,26 @@ test("retains legacy GLB contract when no 2D config exists", async () => {
 test("rejects stale GIF assets when config has been removed", async () => {
   await expect(personaRenderType("unused", ["figure.glb", "idle.gif"])).rejects.toThrow("require figure2d.json");
 });
+
+for (const name of ["valid-v2", "polygon-bowtie"]) {
+  test(`pack authoring enforces ${name} with real GIF files`, async () => {
+    const fixture = fixtures.find(value => value.name === name);
+    if (!fixture) throw new Error("missing shared fixture");
+    const root = await mkdtemp(join(tmpdir(), "deskmate-v2-schema-"));
+    try {
+      await mkdir(join(root,"animations"));
+      const files = ["figure2d.json", "persona.md"];
+      for (const state of ["idle","thinking","working","talking","success","error","leaving"]) {
+        const file = `animations/${state}.gif`;
+        await copyFile(new URL(file,source), join(root,file));
+        files.push(file);
+      }
+      await writeFile(join(root,"figure2d.json"),JSON.stringify(fixture.config));
+      const result = personaRenderType(root,files);
+      if (fixture.valid) expect(await result).toBe("gif");
+      else await expect(result).rejects.toThrow("hitPolygon");
+    } finally {
+      await rm(root,{recursive:true,force:true});
+    }
+  });
+}

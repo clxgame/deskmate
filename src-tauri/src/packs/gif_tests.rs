@@ -57,8 +57,12 @@ fn imports_real_gif_assets_and_rejects_invalid_config_upgrades() {
     fs::create_dir_all(&root).unwrap();
     let source =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../public/personas/xiaoxiongchong");
-    let original: serde_json::Value =
-        serde_json::from_slice(&fs::read(source.join("figure2d.json")).unwrap()).unwrap();
+    let fixtures: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/figure2d-contract.json"
+    ))
+    .unwrap();
+    let original = fixtures[0]["config"].clone();
+    let v2 = fixtures[1]["config"].clone();
     let manifest =
         br#"{"packId":"bear","version":"1","personas":[{"id":"bear","renderType":"gif"}]}"#;
     let states = [
@@ -75,9 +79,9 @@ fn imports_real_gif_assets_and_rejects_invalid_config_upgrades() {
         .collect();
     let mut legacy = original.clone();
     legacy["leaving"]["translateXRatio"] = json!(-0.35);
-    let mut configs = vec![legacy.clone(), original.clone()];
+    let mut configs = vec![legacy.clone(), original.clone(), v2.clone()];
     for (pointer, value) in [
-        ("/schemaVersion", json!(2)),
+        ("/schemaVersion", json!(3)),
         ("/animations/idle/file", json!("../idle.gif")),
         ("/animations/idle/scale", json!(2)),
         ("/animations/idle/offsetY", json!(241)),
@@ -95,6 +99,15 @@ fn imports_real_gif_assets_and_rejects_invalid_config_upgrades() {
         .unwrap()
         .remove("error");
     configs.push(missing);
+    for name in ["polygon-bowtie", "missing-action-offsetX", "unknown-action"] {
+        let fixture = fixtures
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|fixture| fixture["name"] == name)
+            .unwrap();
+        configs.push(fixture["config"].clone());
+    }
     for (index, config) in configs.iter().enumerate() {
         let bytes = serde_json::to_vec(config).unwrap();
         let mut entries = vec![
@@ -110,14 +123,21 @@ fn imports_real_gif_assets_and_rejects_invalid_config_upgrades() {
         let archive = root.join("test.dmpack");
         fs::write(&archive, super::tests::archive(&entries)).unwrap();
         let result = super::import_pack_into(&archive, &root.join("packs"));
-        if index < 2 {
+        if index < 3 {
             assert!(result.is_ok(), "{result:?}");
         } else {
             assert!(result.is_err(), "invalid config {index}");
         }
         assert_eq!(
             fs::read(root.join("packs/bear/personas/bear/figure2d.json")).unwrap(),
-            serde_json::to_vec(if index == 0 { &legacy } else { &original }).unwrap()
+            serde_json::to_vec(if index == 0 {
+                &legacy
+            } else if index == 1 {
+                &original
+            } else {
+                &v2
+            })
+            .unwrap()
         );
     }
     for (_, bytes) in &files {
@@ -163,4 +183,21 @@ fn imports_actual_xiaoxiongchong_artifact() {
     super::uninstall_pack_in(&root, "xiaoxiongchong").unwrap();
     assert!(super::installed_packs_in(&root).unwrap().is_empty());
     fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn gif_shared_contract_fixtures() {
+    let fixtures: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/figure2d-contract.json"
+    ))
+    .unwrap();
+    for fixture in fixtures.as_array().unwrap() {
+        let result =
+            super::figure2d::parse_config(&serde_json::to_vec(&fixture["config"]).unwrap());
+        assert_eq!(
+            result.is_ok(),
+            fixture["valid"].as_bool().unwrap(),
+            "{}",
+            fixture["name"]
+        );
+    }
 }

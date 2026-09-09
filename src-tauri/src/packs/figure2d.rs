@@ -1,3 +1,5 @@
+#[path = "figure2d_v2.rs"]
+mod v2;
 use super::manifest::{PackManifest, RenderType};
 use serde::Deserialize;
 use std::{collections::BTreeMap, fs, path::Path};
@@ -8,7 +10,7 @@ const STATES: [&str; 7] = [
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Figure {
+pub(super) struct Figure {
     schema_version: u32,
     canvas: Canvas,
     animations: BTreeMap<String, Animation>,
@@ -69,10 +71,26 @@ fn validate(root: &Path) -> Result<(), String> {
     {
         return Err("figure2d.json 过大".into());
     }
-    let figure: Figure =
-        serde_json::from_slice(&fs::read(path).map_err(|error| error.to_string())?)
-            .map_err(|error| format!("figure2d.json 无效: {error}"))?;
-    if figure.schema_version != 1
+    let figure = parse_config(&fs::read(path).map_err(|error| error.to_string())?)?;
+    for animation in figure.animations.values() {
+        let bytes = fs::read(root.join(&animation.file))
+            .map_err(|error| format!("GIF 资源缺失: {error}"))?;
+        super::gif::validate(&bytes)?;
+    }
+    Ok(())
+}
+
+pub(super) fn parse_config(bytes: &[u8]) -> Result<Figure, String> {
+    let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+    let figure = match value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+    {
+        Some(1) => serde_json::from_slice(bytes).map_err(|e| e.to_string())?,
+        Some(2) => v2::parse(bytes)?,
+        _ => return Err("figure2d.json schemaVersion unsupported".into()),
+    };
+    if ![1, 2].contains(&figure.schema_version)
         || figure.canvas.width != 240
         || figure.canvas.height != 240
         || figure.animations.len() != STATES.len()
@@ -91,17 +109,19 @@ fn validate(root: &Path) -> Result<(), String> {
             .animations
             .get(state)
             .ok_or_else(|| format!("缺少 GIF 状态: {state}"))?;
-        if !bounded(animation.scale, 0.1, 1.0)
-            || !bounded(animation.offset_y, 0.0, 240.0 * (1.0 - animation.scale))
-            || !safe_gif_path(&animation.file)
-        {
+        let placement_valid = match figure.schema_version {
+            1 => {
+                bounded(animation.scale, 0.1, 1.0)
+                    && bounded(animation.offset_y, 0.0, 240.0 * (1.0 - animation.scale))
+            }
+            2 => bounded(animation.scale, 0.1, 2.0) && bounded(animation.offset_y, -240.0, 240.0),
+            _ => false,
+        };
+        if !placement_valid || !safe_gif_path(&animation.file) {
             return Err(format!("GIF 动作参数或路径无效: {state}"));
         }
-        let bytes = fs::read(root.join(&animation.file))
-            .map_err(|error| format!("GIF 资源缺失: {error}"))?;
-        super::gif::validate(&bytes)?;
     }
-    Ok(())
+    Ok(figure)
 }
 
 fn safe_gif_path(value: &str) -> bool {

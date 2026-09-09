@@ -9,11 +9,14 @@ import { petLayout } from "./petLayout";
 import { personaById } from "./personaCatalog";
 import { GifPetView } from "./GifPetView";
 import { GlbPetView } from "./GlbPetView";
+import { usePackRevision } from "./usePackRevision";
 import { useGifState } from "./useGifState";
 import { useGifVisibility } from "./useGifVisibility";
+import { usePetInteraction } from "./usePetInteraction";
 import { useGifPassthrough } from "./useGifPassthrough";
+import { gifEnvelope } from "./gifGeometry";
 import { defaultGifTiming } from "./gifState";
-import type { LoadedGifPersona } from "./gifAssets";
+import type { LoadedGifPersona, loadGifPersona } from "./gifAssets";
 import "./gifPet.css";
 
 async function getSettingsWithRetry(): Promise<Settings> {
@@ -30,21 +33,27 @@ async function getSettingsWithRetry(): Promise<Settings> {
 const report = (error: unknown) => console.error("pet interaction failed", error instanceof Error ? error.message : String(error));
 const openSettings = () => { void invoke("open_settings").catch(report); };
 
-export default function PetApp() {
+export default function PetApp({ gifLoad }: { readonly gifLoad?: typeof loadGifPersona } = {}) {
   const rootRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<PetRenderer | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [petScale, setPetScale] = useState(0.5);
-  const [gifData, setGifData] = useState<LoadedGifPersona | null>(null);
+  const [readyGif, setReadyGif] = useState<{ readonly identity: { readonly personaId: string }; readonly data: LoadedGifPersona } | null>(null);
   const personaId = settings?.personaId ?? "";
+  const revision = usePackRevision(personaById(personaId).packId);
+  const runtimeId = JSON.stringify([personaId, revision]);
+  const personaIdentity = useMemo(() => ({ personaId, revision }), [personaId, revision]);
   const gif = settings !== null && personaById(personaId).renderType === "gif";
-  const timing = useMemo(() => gifData === null ? defaultGifTiming : { ...gifData.config.feedback, thinkingEscalationMs: gifData.config.thinkingEscalationMs }, [gifData]);
+  const gifData = readyGif?.identity === personaIdentity && loadError === null ? readyGif.data : null;
+  const timing = useMemo(() => gifData === null ? defaultGifTiming : gifData.config.schemaVersion === 2 ? { ...gifData.config.feedback, thinkingSelection: gifData.config.thinkingSelection } : { ...gifData.config.feedback, thinkingEscalationMs: gifData.config.thinkingEscalationMs }, [gifData]);
   const { leaving, visible } = useGifVisibility(personaId, gif, gifData?.config.leaving.durationMs ?? 910);
-  const state = useGifState(visible, timing);
+  const state = useGifState(visible, timing, runtimeId);
   const layout = petLayout(petScale);
-  useGifPassthrough(gif, rootRef);
-  const loaded = useCallback((data: LoadedGifPersona) => setGifData(data), []);
+  const envelope = useMemo(() => gifData?.config.schemaVersion === 2 ? gifEnvelope(gifData.config) : null, [gifData]);
+  const setLocked = useGifPassthrough(gif, rootRef);
+  const interaction = usePetInteraction({ gif, active: visible && !leaving && gifData !== null, identity: runtimeId, root: rootRef }, setLocked);
+  const loaded = useCallback((data: LoadedGifPersona) => setReadyGif({ identity: personaIdentity, data }), [personaIdentity]);
   useEffect(() => {
     let disposed = false;
     const apply = (next: Settings) => {
@@ -61,26 +70,13 @@ export default function PetApp() {
   }, []);
   const settingsReady = settings !== null;
   useEffect(() => {
-    if (settingsReady) void invoke("configure_pet_geometry", { gif }).catch(report);
-  }, [gif, settingsReady]);
+    if (settingsReady) void invoke("configure_pet_geometry", { gif, envelope }).catch(report);
+  }, [gif, envelope, settingsReady]);
 
-  const downAt = useRef<{ readonly x: number; readonly y: number; readonly t: number } | null>(null);
-  const onMouseDown = (event: MouseEvent) => {
-    if (event.button === 0) downAt.current = { x: event.screenX, y: event.screenY, t: Date.now() };
-  };
-  const onMouseMove = (event: MouseEvent) => {
-    const start = downAt.current;
-    if (start !== null && Math.hypot(event.screenX - start.x, event.screenY - start.y) > 4) {
-      downAt.current = null;
-      void getCurrentWindow().startDragging().catch(report);
-    }
-  };
-  const onMouseUp = () => {
-    if (downAt.current !== null && Date.now() - downAt.current.t < 400) void invoke("toggle_chat").catch(report);
-    downAt.current = null;
-  };
   const onContextMenu = (event: MouseEvent) => {
     event.preventDefault();
+    if (!interaction.hit(event)) return;
+    const release = interaction.hold();
     void (async () => {
       const items: MenuItem[] = [];
       let menu: Menu | null = null;
@@ -95,14 +91,14 @@ export default function PetApp() {
         const results = await Promise.allSettled(resources.map((resource) => resource.close()));
         for (const result of results) if (result.status === "rejected") report(result.reason);
       }
-    })().catch(report);
+    })().catch(report).finally(release);
   };
   return <div ref={rootRef} className="pet-root" data-theme={settings?.theme ?? "dark"}>
-    {settings !== null && <button type="button" className="pet-interaction" aria-label="Open chat"
-      onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onContextMenu={onContextMenu}
+    {settings !== null && <button type="button" className="pet-interaction" aria-label="Open chat" style={gif ? { width: layout.width * 2 * (envelope?.horizontal ?? 0.5), height: layout.width * ((envelope?.top ?? 1) + (envelope?.bottom ?? 0)) } : undefined}
+      onMouseDown={interaction.onMouseDown} onMouseMove={interaction.onMouseMove} onMouseUp={interaction.onMouseUp} onContextMenu={onContextMenu}
       onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void invoke("toggle_chat").catch(report); } }}>
-      {gif ? <GifPetView personaId={personaId} state={leaving ? "leaving" : state} width={layout.width}
-        leaving={leaving} onError={setLoadError} onLoaded={loaded} />
+      {gif ? <GifPetView key={runtimeId} personaId={personaId} revision={revision} state={leaving ? "leaving" : state} width={layout.width}
+        leaving={leaving} visible={visible} onError={setLoadError} onLoaded={loaded} load={gifLoad} />
         : <GlbPetView settings={settings} width={layout.width} height={layout.height} rendererRef={rendererRef} onError={setLoadError} />}
     </button>}
     <PetPomodoro language={settings?.language ?? "zh-CN"} scale={petScale} />

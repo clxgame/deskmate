@@ -22,14 +22,15 @@ export function preloadGif(url: string, signal: AbortSignal): Promise<void> {
   });
 }
 
-export async function loadGifPersona(personaId: string, signal: AbortSignal): Promise<LoadedGifPersona> {
+export async function loadGifPersona(personaId: string, signal: AbortSignal, revision = ""): Promise<LoadedGifPersona> {
   const assets = await personaAssets(personaId);
   if (assets.renderType !== "gif") throw new GifAssetError(personaId);
-  const response = await fetch(assets.configUrl, { signal });
+  const versioned = (url: string) => revision === "" ? url : `${url}?packRevision=${encodeURIComponent(revision)}`;
+  const response = await fetch(versioned(assets.configUrl), { signal });
   if (!response.ok) throw new GifAssetError(assets.configUrl);
   const config = parseFigure2dConfig(await response.json());
   const resolve = async (state: GifAnimationState): Promise<string> => {
-    const url = await assets.animationUrl(config.animations[state].file);
+    const url = versioned(await assets.animationUrl(config.animations[state].file));
     await preloadGif(url, signal);
     return url;
   };

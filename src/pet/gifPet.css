@@ -1,6 +1,6 @@
 .pet-root { --s-2: 8px; --s-3: 12px; --r-sm: 8px; --t-small: 11px; }
-.gif-pet-frame { position: relative; display: flex; justify-content: center; pointer-events: none; }
-.gif-pet-image { position: absolute; object-fit: contain; user-select: none; pointer-events: auto; }
+.gif-pet-frame { position: absolute; left: 50%; transform: translateX(-50%); display: block; pointer-events: none; }
+.gif-pet-image { position: absolute; object-fit: contain; user-select: none; pointer-events: none; }
 .pet-interaction { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); border: 0; padding: 0; margin: 0; background: transparent; color: inherit; cursor: pointer; }
 .pet-interaction:focus-visible { outline: 2px solid var(--focus-ring); }
 .pet-load-error { position: absolute; inset: var(--s-3) var(--s-3) auto; padding: var(--s-2); color: var(--text); background: var(--surface-raised); border: 1px solid var(--danger); border-radius: var(--r-sm); font-size: var(--t-small); }

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { initialGifState, reduceGifState, gifDisplayState } from "./gifState";
+import { initialGifState, reduceGifState, gifDisplayState, gifNextDeadline, applyGifEvent } from "./gifState";
 
 const start = { type: "start", sessionId: "s", requestId: "r", eventId: "1" } as const;
 test("escalates continuous thinking only at eight seconds", () => {
@@ -55,4 +55,55 @@ test("error feedback lasts 1440ms and success cannot override a terminal error",
   const late = reduceGifState(state, { ...start, type: "success", eventId: "3" }, 30);
   expect(gifDisplayState(late, 1459)).toBe("error");
   expect(gifDisplayState(late, 1460)).toBe("idle");
+});
+
+const randomPlayback = { successMs: 1400, errorMs: 1440, thinkingSelection: "random" } as const;
+test("keeps selected thinking variant beyond eight seconds", () => {
+  // Given a random-policy request with a selected variant.
+  const state = reduceGifState(initialGifState, start, 100, true, randomPlayback);
+  // When the original escalation deadline passes.
+  // Then the same variant remains and no escalation is scheduled.
+  expect(gifDisplayState(state, 9000, randomPlayback)).toBe("thinking");
+  expect(gifNextDeadline(state, 100, randomPlayback)).toBeNull();
+});
+test("samples only accepted new thinking episodes", () => {
+  // Given a deterministic sequence and a new request.
+  let calls = 0;
+  const random = () => (++calls === 1 ? 0.9 : 0.1);
+  const first = applyGifEvent(initialGifState, start, 0, true, randomPlayback, random);
+  // When duplicate, repeated, stale, working and returning-thinking events arrive.
+  let state = applyGifEvent(first, start, 1, true, randomPlayback, random);
+  state = applyGifEvent(state, { ...start, type: "mood", mood: "thinking", eventId: "2" }, 2, true, randomPlayback, random);
+  state = applyGifEvent(state, { ...start, requestId: "old", type: "mood", mood: "thinking", eventId: "3" }, 3, true, randomPlayback, random);
+  expect(calls).toBe(1);
+  expect(gifDisplayState(state, 9000, randomPlayback)).toBe("working");
+  state = applyGifEvent(state, { ...start, type: "mood", mood: "working", eventId: "4" }, 4, true, randomPlayback, random);
+  expect(gifDisplayState(state, 4, randomPlayback)).toBe("working");
+  state = applyGifEvent(state, { ...start, type: "mood", mood: "thinking", eventId: "5" }, 5, true, randomPlayback, random);
+  // Then returning creates exactly one new selection.
+  expect(calls).toBe(2);
+  expect(gifDisplayState(state, 9000, randomPlayback)).toBe("thinking");
+});
+
+
+test.each([0.1, 0.499999, 0.5, 0.9])("selects the half-open 50/50 boundary for sample %s", (sample) => {
+  // Given a fixed sample at either side of the selection boundary.
+  // When a request starts.
+  const state = applyGifEvent(initialGifState, start, 0, true, randomPlayback, () => sample);
+  // Then display selection is stable even far beyond the v1 deadline.
+  expect(gifDisplayState(state, 100000, randomPlayback)).toBe(sample < 0.5 ? "thinking" : "working");
+});
+test("terminal, duplicate-request and stale events never consume another sample", () => {
+  // Given a cancelled random-policy request.
+  let calls = 0;
+  const random = () => { calls++; return 0.9; };
+  const active = applyGifEvent(initialGifState, start, 0, true, randomPlayback, random);
+  const cancelled = applyGifEvent(active, { ...start, type: "cancel", eventId: "2" }, 1, true, randomPlayback, random);
+  // When terminal mood, replayed start, and stale completion arrive.
+  let state = applyGifEvent(cancelled, { ...start, type: "mood", mood: "thinking", eventId: "3" }, 2, true, randomPlayback, random);
+  state = applyGifEvent(state, { ...start, eventId: "4" }, 3, true, randomPlayback, random);
+  state = applyGifEvent(state, { ...start, type: "success", requestId: "old", eventId: "5" }, 4, true, randomPlayback, random);
+  // Then cancellation stays idle and no selection is consumed.
+  expect(gifDisplayState(state, 4, randomPlayback)).toBe("idle");
+  expect(calls).toBe(1);
 });

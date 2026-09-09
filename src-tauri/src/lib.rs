@@ -21,6 +21,7 @@ mod memory;
 /// User-installable persona packs imported from local `.dmpack` archives.
 mod packs;
 mod pet_geometry;
+mod pet_input;
 mod pet_visibility;
 mod pet_visibility_recovery;
 mod pet_visibility_state;
@@ -1253,6 +1254,7 @@ pub fn run() {
             pet_visibility::get_pet_visibility,
             pet_visibility_recovery::get_pet_visibility_error,
             pet_geometry::configure_pet_geometry,
+            pet_input::pet_primary_button_down,
             open_worklog_settings,
             worklog::bridge::worklog_register_turn,
             worklog::commands::worklog_available,

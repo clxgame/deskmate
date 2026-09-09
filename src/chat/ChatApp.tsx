@@ -68,7 +68,7 @@ import { AttachmentTray } from "./AttachmentTray";
 import { ChatText } from "./ChatText";
 import { useWorklogChat } from "./useWorklogChat";
 import { WorklogReceipt, worklogChatCopy } from "./WorklogReceipt";
-import { newUserMessageId, registerWorklogTurn, WORKLOG_SYSTEM_INSTRUCTION, WORKLOG_TOOLS } from "./worklogActions";
+import { buildWorklogSystemInstruction, newUserMessageId, registerWorklogTurn, WORKLOG_TOOLS } from "./worklogActions";
 import { CcSwitchSetupCard } from "./CcSwitchSetupCard";
 import {
   CCSWITCH_PREPARE_OPENCODE_PROVIDER_TOOL,
@@ -920,7 +920,7 @@ export default function ChatApp() {
       }
       await promptAsync(sessionID, promptText, {
         messageID: userMessageId,
-        system: [system, WORKLOG_SYSTEM_INSTRUCTION].filter(Boolean).join("\n\n"),
+        system: [system, buildWorklogSystemInstruction()].filter(Boolean).join("\n\n"),
         attachments: [...prepared.fileParts],
         model:
           s?.providerId && s.modelId

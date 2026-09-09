@@ -142,38 +142,10 @@ pub(crate) fn hide_chat_impl(app: &tauri::AppHandle) -> Result<(), String> {
 }
 
 #[cfg(test)]
-mod tests {
-    #[test]
-    fn worklog_tool_integrity_failure_removes_only_owned_tools() {
-        let root =
-            std::env::temp_dir().join(format!("worklog-tool-integrity-{}", uuid::Uuid::new_v4()));
-        let tools = root.join("shipped").join("tools");
-        let data = root.join("data");
-        let runtime = data.join("workspace").join(".opencode").join("tools");
-        std::fs::create_dir_all(&tools).expect("fixture resources");
-        std::fs::create_dir_all(&runtime).expect("fixture runtime");
-        std::fs::write(tools.join("worklog_record.ts"), "corrupted").expect("corrupt fixture");
-        std::fs::write(runtime.join("worklog_record.ts"), "stale").expect("stale fixture");
-        std::fs::write(
-            runtime.join("ccswitch_prepare_opencode_provider.ts"),
-            "sentinel",
-        )
-        .expect("unrelated fixture");
-        assert_eq!(
-            super::overwrite_worklog_tools(&tools, &data)
-                .expect_err("must reject corruption")
-                .kind(),
-            std::io::ErrorKind::InvalidData
-        );
-        assert!(!runtime.join("worklog_record.ts").exists());
-        assert_eq!(
-            std::fs::read_to_string(runtime.join("ccswitch_prepare_opencode_provider.ts"))
-                .expect("read sentinel"),
-            "sentinel"
-        );
-        std::fs::remove_dir_all(root).expect("fixture cleanup");
-    }
+mod worklog_tool_tests;
 
+#[cfg(test)]
+mod tests {
     use super::{
         configure_sidecar_command, configure_sidecar_environment, migrate_legacy_xiaozhu_intro,
         overwrite_builtin_xiaozhu_persona, overwrite_yume_opencode_tool, resource_error_event,

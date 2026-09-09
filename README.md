@@ -249,10 +249,10 @@ For a public release, bump the app version, push a matching tag, publish the dra
 ### GIF character packs
 
 Schema v1 GIF packs require YUME 0.3.4 or newer with schema v1 support.
-This source tree supports both `figure2d` schemas v1 and v2. The released YUME
-0.3.4 does **not** support schema v2 and cannot import the new 1.1.0 pack; use an
-application build containing this schema v2 implementation. Pack versions are
-independent of application versions; no new application release is implied.
+YUME 0.3.5 and newer support both `figure2d` schemas v1 and v2. YUME 0.3.4
+does **not** support schema v2 and cannot import the new 1.1.0 pack; upgrade the
+application before importing it. Pack versions are independent of application
+versions.
 Existing packs without `renderType` continue to use GLB.
 
 The optional `xiaoxiongchong-1.1.0.dmpack` contains the original seven 240×240 GIFs,

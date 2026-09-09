@@ -6,9 +6,9 @@ import { spawn } from "node:child_process";
 import { expectJsonObject, HarnessError, isJsonObject } from "../ccswitch-harness/types";
 import { processGone } from "../ccswitch-harness/cleanup";
 
-export const requiredScenarios = ["record-restart", "daily-weekly", "manual-version", "schedule-catchup", "failure-retry", "cancel-late-result", "copy-export", "delete-links", "chat-tool-authorization"] as const;
+export const requiredScenarios = ["record-restart", "daily-weekly", "manual-version", "schedule-catchup", "failure-retry", "cancel-late-result", "copy-export", "delete-links", "chat-tool-authorization", "natural-readback"] as const;
 const projectRoot = resolve(import.meta.dir,"../..");
-const receiptPath = resolve(projectRoot,".omo/evidence/task10-work-journal-reports-native.json");
+const receiptPath = resolve(projectRoot,".omo/evidence/task-6-worklog-natural-recall-native.json");
 
 function check(value: unknown,message:string): asserts value { if (!value) throw new HarnessError(`full-flow: ${message}`); }
 function normalized(path:string):string { return path.replaceAll(/\\+/g,"/"); }
@@ -24,6 +24,10 @@ async function digest(path:string):Promise<string> {
   return hash.digest("hex").toUpperCase();
 }
 function text(value:unknown,label:string):string { check(typeof value==="string"&&value.length>0,`${label} missing`); return value; }
+function array(value:unknown,label:string):readonly unknown[] { check(Array.isArray(value),`${label} missing`); return value; }
+function containsText(values:readonly unknown[],needle:string,label:string):void {
+  check(values.some((value)=>typeof value==="string"&&value.includes(needle)),`${label} missing ${needle}`);
+}
 
 export function validateNativeReceipt(value:unknown):void {
   const receipt=expectJsonObject(value,"native receipt");
@@ -39,6 +43,21 @@ export function validateNativeReceipt(value:unknown):void {
     check(isJsonObject(scenario)&&scenario.status==="pass",`scenario ${id} not passed`);
     check(Array.isArray(scenario.evidence)&&scenario.evidence.length>0,`scenario ${id} has no native evidence`);
   }
+  const natural=scenarios.find(item=>isJsonObject(item)&&item.id==="natural-readback");
+  check(isJsonObject(natural),"scenario natural-readback not passed");
+  const details=expectJsonObject(natural.details,"natural-readback details");
+  check(details.exactPhrase==="昨天我做了什么","natural-readback exact phrase missing");
+  check(details.toolName==="worklog_query","natural-readback did not call worklog_query");
+  check(details.start==="2026-09-08"&&details.end==="2026-09-08","natural-readback date scope incorrect");
+  for (const key of ["sessionId","messageId","callId"]) check(typeof details[key]==="string"&&details[key].length>0,`natural-readback ${key} missing`);
+  containsText(array(details.answerFacts,"natural-readback answer facts"),"完成 2026-09-08 自然回查原生验证","natural-readback answer");
+  containsText(array(details.answerFacts,"natural-readback answer facts"),"日报正文：自然回查读取完整归档报告","natural-readback answer");
+  check(array(details.mutationEvents,"natural-readback mutation events").length===0,"natural-readback emitted mutation events");
+  check(details.emptyBehavior==="no-records"&&details.failureBehavior==="query-failed","natural-readback empty/failure distinction missing");
+  const manualQa=expectJsonObject(receipt.manualQa,"manualQa");
+  check(array(manualQa.surfaceEvidence,"manualQa surfaceEvidence").length>0,"manualQa surfaceEvidence empty");
+  check(array(manualQa.adversarialCases,"manualQa adversarialCases").length>0,"manualQa adversarialCases empty");
+  check(array(manualQa.artifactRefs,"manualQa artifactRefs").length>0,"manualQa artifactRefs empty");
   const cleanup=expectJsonObject(receipt.cleanup,"native cleanup");
   for(const key of ["appProcessesGone","providerPortClosed","ownedRootsRemoved","credentialCleanup","exportCleanup"]) check(cleanup[key]===true,`cleanup ${key} incomplete`);
 }
@@ -97,6 +116,12 @@ export async function runFullFlow():Promise<void> {
       const metadata=await stat(owned(text(value,"scenario evidence")));
       check(metadata.size>0&&metadata.mtimeMs>=created,"scenario evidence empty or predates native build");
     }
+  }
+  const manualQa=expectJsonObject(receipt.manualQa,"manualQa");
+  for(const value of array(manualQa.artifactRefs,"manualQa artifactRefs")) {
+    const artifact=expectJsonObject(value,"manualQa artifact");
+    const metadata=await stat(owned(text(artifact.path,"manualQa artifact path")));
+    check(metadata.size>0&&metadata.mtimeMs>=created,"manualQa artifact empty or predates native build");
   }
   check(typeof native.appPid==="number"&&await processGone(native.appPid),"owned native app remains alive");
   console.log(`PASS worklog full-flow: ${requiredScenarios.length} native scenarios, ${manifest.size} current source hashes, ${native.screenshots.length} native captures, owned cleanup verified`);

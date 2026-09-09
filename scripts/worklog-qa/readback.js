@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { readFile, writeFile, lstat, realpath } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
-const evidence = resolve(import.meta.dir, "../../.omo/evidence/work-journal-reports-qa");
+const evidence = resolve(import.meta.dir, "../../.omo/evidence/worklog-natural-recall-qa");
 const raw = (await readFile(join(evidence, "run-receipt.json"), "utf8")).replace(/^\uFEFF/, "");
 const receipt = JSON.parse(raw);
 if (receipt.identity !== "com.deskmate.worklogqa" || !Array.isArray(receipt.roots) || receipt.roots.length !== 2) throw new Error("Missing QA root ownership");

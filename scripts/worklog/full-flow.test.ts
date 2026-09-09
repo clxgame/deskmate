@@ -7,3 +7,23 @@ test("missing native flow cannot be promoted from synthetic tool evidence",()=> 
 test("not-run native scenario cannot pass full-flow",()=> {
   expect(()=>validateNativeReceipt({version:1,status:"pass",native:{identity:"com.deskmate.worklogqa",guardPassed:true,appPid:1,screenshots:[{},{}]},scenarios:[{id:"record-restart",status:"not_run",evidence:["fixture"]}]})).toThrow("not passed");
 });
+test("native flow requires natural readback evidence",()=> {
+  const scenarios=[
+    "record-restart",
+    "daily-weekly",
+    "manual-version",
+    "schedule-catchup",
+    "failure-retry",
+    "cancel-late-result",
+    "copy-export",
+    "delete-links",
+    "chat-tool-authorization",
+  ].map((id)=>({id,status:"pass",evidence:["fixture"]}));
+  expect(()=>validateNativeReceipt({
+    version:1,
+    status:"pass",
+    native:{identity:"com.deskmate.worklogqa",guardPassed:true,appPid:1,screenshots:[{},{}]},
+    scenarios,
+    cleanup:{appProcessesGone:true,providerPortClosed:true,ownedRootsRemoved:true,credentialCleanup:true,exportCleanup:true},
+  })).toThrow("natural-readback");
+});

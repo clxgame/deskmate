@@ -31,3 +31,5 @@ After required readback and QA provider removal, run `bun scripts/worklog-qa/run
 
 
 Report-generation fixture now parses frozen SOURCE key/JSON pairs and emits the actual ReportOutput blocks schema with exact source citations. It supports trusted REPORT_KIND daily/weekly/custom, all required headings, empty-source 待补充 placeholders, and merged blocks preserving source keys. `bun scripts/worklog-qa/verify-report.js` checks this contract; ordinary chat still uses the separate demonstration text. `bun scripts/worklog-qa/readback.js` reads only the receipt-owned QA SQLite database in read-only mode and writes timestamped persistence evidence.
+
+Natural readback fixture: set `nextTool` to `worklog_query` with `{"start":"2026-09-08","end":"2026-09-08"}` after seeding the 2026-09-08 entry and daily report in the QA app. In the real chat send exactly `昨天我做了什么`. The final receipt must include `natural-readback: pass`, the trusted session/message/call IDs, both persisted collections, no mutation receipt/event, and distinct captures for success, empty arrays, and rejected query.

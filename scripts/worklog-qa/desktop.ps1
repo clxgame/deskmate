@@ -7,7 +7,7 @@ Set-StrictMode -Version Latest
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 Set-Location -LiteralPath $repoRoot
 $identity = 'com.deskmate.worklogqa'
-$evidence = Join-Path $repoRoot '.omo/evidence/work-journal-reports-qa'
+$evidence = Join-Path $repoRoot '.omo/evidence/worklog-natural-recall-qa'
 $configPath = Join-Path $PSScriptRoot 'tauri.qa.conf.json'
 $buildReceipt = Join-Path $evidence 'build-receipt.json'
 $runReceipt = Join-Path $evidence 'run-receipt.json'

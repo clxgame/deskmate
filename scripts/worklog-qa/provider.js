@@ -1,7 +1,7 @@
 import { frozenReport } from "./report-output.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-const evidence = resolve(import.meta.dir, "../../.omo/evidence/work-journal-reports-qa");
+const evidence = resolve(import.meta.dir, "../../.omo/evidence/worklog-natural-recall-qa");
 await mkdir(evidence, { recursive: true });
 const state = { mode: "success", delayMs: 0, nextTool: null, report: "# 合成工作报告\n\n## 今日完成\n完成测试项目界面核对。\n\n## 进行中\n待补充\n\n## 问题与阻塞\n待补充\n\n## 下一步\n待补充", requests: [] };
 const permitted = new Set(["worklog_record", "worklog_query", "worklog_update", "worklog_generate_report", "worklog_schedule_report"]);
@@ -30,7 +30,7 @@ const server = Bun.serve({
     const invoke = pending && offered.includes(pending.name);
     const mode = state.mode;
     const delayMs = state.delayMs;
-    state.requests.push({ at: new Date().toISOString(), tools: offered, toolResult: Boolean(latestTool), mode, delayMs });
+    state.requests.push({ at: new Date().toISOString(), tools: offered, toolResult: Boolean(latestTool), mode, delayMs, invokedTool: invoke ? pending.name : null, invokedInput: invoke ? pending.input : null });
     if (delayMs) await Bun.sleep(delayMs);
     if (mode !== "success") return Response.json({ error: { message: "Synthetic QA provider failure", type: mode === "unauthorized" ? "authentication_error" : "server_error" } }, { status: mode === "unauthorized" ? 401 : 503 });
     if (invoke) state.nextTool = null;

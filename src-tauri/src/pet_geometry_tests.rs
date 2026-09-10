@@ -1,5 +1,44 @@
 use super::{anchored_origin, dimensions, pixel_size, GifEnvelope, PetGeometry};
 #[test]
+fn chat_ignores_gif_motion_padding() {
+    let geometry = PetGeometry {
+        scale: 0.5,
+        gif: true,
+        envelope: Some(GifEnvelope {
+            horizontal: 1.199617737003058,
+            top: 1.128440366972477,
+            bottom: 0.08256880733944971,
+        }),
+    };
+    let frame = super::chat_frame(geometry, tauri::PhysicalSize::new(480, 280), 1.25);
+    assert_eq!(
+        frame,
+        crate::window_layout::Rect {
+            x: 140,
+            y: 63,
+            width: 200,
+            height: 200
+        }
+    );
+    let glb = super::chat_frame(
+        PetGeometry {
+            gif: false,
+            ..geometry
+        },
+        tauri::PhysicalSize::new(200, 263),
+        1.25,
+    );
+    assert_eq!(
+        glb,
+        crate::window_layout::Rect {
+            x: 0,
+            y: 0,
+            width: 200,
+            height: 263
+        }
+    );
+}
+#[test]
 fn legacy_sizes_when_scale_changes() {
     let actual = [0.1, 0.5, 1.0, 2.0, 3.0].map(|scale| {
         dimensions(PetGeometry {

@@ -22,6 +22,8 @@ mod memory;
 mod packs;
 mod pet_geometry;
 mod pet_input;
+mod pet_placement;
+mod pet_startup;
 mod pet_visibility;
 mod pet_visibility_recovery;
 mod pet_visibility_state;
@@ -389,7 +391,8 @@ mod tests {
             permission.get("ccswitch_prepare_opencode_provider"),
             Some(&serde_json::json!("allow"))
         );
-        assert_eq!(permission.get("bash"), Some(&serde_json::json!("deny")));
+        assert_eq!(permission.get("bash"), Some(&serde_json::json!("allow")));
+        assert_eq!(permission.get("webfetch"), Some(&serde_json::json!("allow")));
         assert_eq!(permission.get("edit"), Some(&serde_json::json!("deny")));
         assert_eq!(permission.get("write"), Some(&serde_json::json!("deny")));
         assert_eq!(permission.get("patch"), Some(&serde_json::json!("deny")));
@@ -433,7 +436,6 @@ fn chat_target(app: &tauri::AppHandle) -> Result<tauri::PhysicalPosition<i32>, S
         .ok_or("chat window missing")?;
 
     let pet_pos = pet.outer_position().map_err(|e| e.to_string())?;
-    let pet_size = pet.outer_size().map_err(|e| e.to_string())?;
     let chat_scale = chat.scale_factor().map_err(|e| e.to_string())?;
     let chat_size = chat.outer_size().unwrap_or_else(|_| {
         tauri::PhysicalSize::new(
@@ -465,12 +467,7 @@ fn chat_target(app: &tauri::AppHandle) -> Result<tauri::PhysicalPosition<i32>, S
         )
     };
     let point = window_layout::position_chat(
-        window_layout::Rect {
-            x: i64::from(pet_pos.x),
-            y: i64::from(pet_pos.y),
-            width: i64::from(pet_size.width),
-            height: i64::from(pet_size.height),
-        },
+        pet_geometry::chat_bounds(&pet)?,
         window_layout::Size {
             width: i64::from(chat_size.width),
             height: i64::from(chat_size.height),
@@ -1372,11 +1369,7 @@ pub fn run() {
                     loaded.pet_scale,
                     packs::persona_uses_gif(&handle, &loaded.persona_id),
                 );
-                if let Some(position) = loaded.pet_position {
-                    let _ = pet.set_position(tauri::PhysicalPosition::new(position.x, position.y));
-                } else {
-                    place_pet_bottom_right(&pet);
-                }
+                pet_startup::place(&pet, &loaded.persona_id, loaded.pet_position);
             }
             app.manage(HistoryState(Mutex::new(history::load(&handle))));
             // Memory is optional infrastructure: if the database cannot open,

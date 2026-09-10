@@ -11,6 +11,8 @@ const STATES: [&str; 7] = [
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct Figure {
+    #[serde(skip)]
+    pub(super) envelope: Option<crate::pet_geometry::GifEnvelope>,
     schema_version: u32,
     canvas: Canvas,
     animations: BTreeMap<String, Animation>,

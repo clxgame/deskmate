@@ -12,6 +12,8 @@ mod gif;
 mod installation;
 mod manifest;
 mod paths;
+mod position;
+pub(crate) use position::{persona_default_position, persona_gif_envelope};
 mod runtime;
 mod thumbnail;
 
@@ -104,10 +106,12 @@ mod import_tests;
 #[cfg(test)]
 mod metadata_tests;
 #[cfg(test)]
+mod position_tests;
+#[cfg(test)]
 mod qa_tests;
 #[cfg(test)]
 mod tests;
 
+mod gif_lzw;
 #[cfg(test)]
 mod gif_lzw_tests;
-mod gif_lzw;

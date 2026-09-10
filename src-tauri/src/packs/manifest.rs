@@ -24,6 +24,8 @@ pub(super) struct PackSkill {
 pub(super) struct PackPersona {
     pub(super) id: String,
     #[serde(default)]
+    pub(super) default_position: Option<crate::pet_placement::DefaultPosition>,
+    #[serde(default)]
     pub(super) render_type: RenderType,
     #[serde(default)]
     pub(super) skills: Vec<PackSkill>,

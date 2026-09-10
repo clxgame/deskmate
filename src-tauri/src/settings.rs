@@ -280,7 +280,6 @@ const MODEL_CATALOG_DIR: &str = "model-catalogs";
 const LEGACY_MODEL_CATALOG_FILE: &str = "model-catalog.json";
 const CCSWITCH_PREPARE_OPENCODE_PROVIDER_TOOL: &str = "ccswitch_prepare_opencode_provider";
 const DENIED_OPENCODE_PERMISSIONS: &[&str] = &[
-    "bash",
     "edit",
     "write",
     "patch",
@@ -1497,7 +1496,8 @@ fn finalize_sidecar_environment(
 }
 
 /// The permission policy is global to the sidecar and independent of how many
-/// providers are injected: deny everything except YUME's dedicated tool.
+/// providers are injected: deny everything except the chat assistant's tools
+/// (shell execution and web fetching, plus YUME's dedicated tools).
 fn sidecar_permission_policy() -> serde_json::Map<String, serde_json::Value> {
     let mut permission = serde_json::Map::new();
     permission.insert("*".to_string(), serde_json::json!("deny"));
@@ -1509,6 +1509,8 @@ fn sidecar_permission_policy() -> serde_json::Map<String, serde_json::Value> {
         permission.insert((*permission_id).to_string(), serde_json::json!("deny"));
     }
     for tool in [
+        "bash",
+        "webfetch",
         "worklog_record",
         "worklog_query",
         "worklog_update",
@@ -1546,7 +1548,8 @@ pub fn apply(app: &tauri::AppHandle, old: &Settings, new: &Settings) {
         if old.always_on_top != new.always_on_top {
             let _ = pet.set_always_on_top(new.always_on_top);
         }
-        if (old.pet_scale - new.pet_scale).abs() > f64::EPSILON || old.persona_id != new.persona_id {
+        if (old.pet_scale - new.pet_scale).abs() > f64::EPSILON || old.persona_id != new.persona_id
+        {
             crate::pet_geometry::apply(
                 &pet,
                 new.pet_scale,
@@ -2188,7 +2191,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_sidecar_environment_denies_generic_opencode_tools() {
+    fn generated_sidecar_environment_allows_shell_and_web_but_denies_file_editing() {
         let catalog = ModelCatalog {
             base_url: "https://models.example.test".into(),
             api_key_fingerprint: api_key_fingerprint("secret-key"),
@@ -2205,8 +2208,9 @@ mod tests {
 
         assert_eq!(permission["*"], "deny");
         assert_eq!(permission["ccswitch_prepare_opencode_provider"], "allow");
+        assert_eq!(permission["bash"], "allow");
+        assert_eq!(permission["webfetch"], "allow");
         for denied in [
-            "bash",
             "edit",
             "write",
             "patch",
@@ -2223,7 +2227,9 @@ mod tests {
         assert_eq!(
             allowed,
             vec![
+                "bash",
                 "ccswitch_prepare_opencode_provider",
+                "webfetch",
                 "worklog_generate_report",
                 "worklog_query",
                 "worklog_record",

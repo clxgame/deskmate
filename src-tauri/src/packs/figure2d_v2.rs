@@ -26,10 +26,27 @@ pub(super) fn parse(bytes: &[u8]) -> Result<super::Figure, String> {
         return Err("figure2d v2 selection invalid".into());
     }
     let mut animations = BTreeMap::new();
+    let mut envelope = crate::pet_geometry::GifEnvelope {
+        horizontal: 1.0,
+        top: 1.0,
+        bottom: 0.0,
+    };
     for (state, value) in input.animations {
         if !super::bounded(value.offset_x, -240.0, 240.0) || !simple_polygon(&value.hit_polygon) {
             return Err(format!("figure2d v2 geometry invalid: {state}"));
         }
+        let left = (1.0 - value.scale) / 2.0 + value.offset_x / 240.0;
+        let departure = if state == "leaving" {
+            input.leaving.translate_x_ratio * value.scale
+        } else {
+            0.0
+        };
+        envelope.horizontal = envelope
+            .horizontal
+            .max(0.5 - left - departure)
+            .max(left + value.scale - 0.5);
+        envelope.top = envelope.top.max(value.scale + value.offset_y / 240.0);
+        envelope.bottom = envelope.bottom.max(-value.offset_y / 240.0);
         animations.insert(
             state,
             super::Animation {
@@ -40,6 +57,7 @@ pub(super) fn parse(bytes: &[u8]) -> Result<super::Figure, String> {
         );
     }
     Ok(super::Figure {
+        envelope: Some(envelope),
         schema_version: 2,
         canvas: input.canvas,
         animations,

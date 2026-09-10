@@ -659,7 +659,8 @@ fn batched_provenance_stays_attributed_to_its_own_memory() {
     const TOTAL: usize = 450;
     let mut ids = Vec::with_capacity(TOTAL);
     for index in 0..TOTAL {
-        let mut memory = global_preference(&format!("偏好 {index}"), Some(&format!("pref.{index}")));
+        let mut memory =
+            global_preference(&format!("偏好 {index}"), Some(&format!("pref.{index}")));
         memory.conversation_id = Some(format!("ses_{index}"));
         memory.message_id = Some(format!("msg_{index}"));
         let created = repo.create(&memory).expect("create");

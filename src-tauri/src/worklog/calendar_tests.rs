@@ -71,3 +71,31 @@ fn daylight_gap_advances_and_overlap_chooses_first_instant() {
     );
     assert!(resolve_local(local, |_| LocalResult::None).is_none());
 }
+
+#[test]
+fn business_date_switches_at_three_across_calendar_boundaries() {
+    for (instant, expected) in [
+        ("2026-09-11T02:59:59+08:00", "2026-09-10"),
+        ("2026-09-11T03:00:00+08:00", "2026-09-11"),
+        ("2026-01-01T00:00:00+08:00", "2025-12-31"),
+        ("2024-03-01T01:00:00+08:00", "2024-02-29"),
+        ("2026-09-11T02:59:59-05:00", "2026-09-10"),
+    ] {
+        let now = DateTime::parse_from_rfc3339(instant).expect("clock");
+        assert_eq!(business_date(now.naive_local()).to_string(), expected);
+    }
+}
+
+#[test]
+fn early_schedule_keeps_wall_clock_but_reports_previous_workday() {
+    let zone = FixedOffset::east_opt(8 * 3600).expect("zone");
+    let monday = NaiveDate::from_ymd_opt(2026, 9, 14).expect("date");
+    let daily = CalendarRule::parse(&[1], "02:00", false).expect("rule");
+    let occurrence = daily.on_date(monday, &zone).expect("occurrence");
+    assert_eq!(occurrence.due_at, utc("2026-09-13T18:00:00Z"));
+    assert_eq!(occurrence.period_start.to_string(), "2026-09-13");
+    let weekly = CalendarRule::parse(&[1], "02:00", true).expect("rule");
+    let occurrence = weekly.on_date(monday, &zone).expect("occurrence");
+    assert_eq!(occurrence.period_start.to_string(), "2026-09-07");
+    assert_eq!(occurrence.period_end.to_string(), "2026-09-11");
+}

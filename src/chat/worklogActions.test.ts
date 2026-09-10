@@ -16,12 +16,17 @@ describe("work journal chat trust boundary", () => {
   test("message identities match the real sidecar caller ID contract", () => {
     expect(newUserMessageId()).toMatch(/^msg_[0-9a-f]{32}$/);
   });
-  test("business dates use the received local calendar day", () => {
+  test("business dates change at 03:00 without mutating the clock", () => {
+    const early = new Date(2026, 0, 1, 2, 59, 59);
+    expect(localWorklogDate(early)).toBe("2025-12-31");
+    expect(early.getHours()).toBe(2);
+    expect(localWorklogDate(new Date(2026, 0, 1, 3))).toBe("2026-01-01");
+    expect(localWorklogDate(new Date(2024, 2, 1, 0))).toBe("2024-02-29");
     expect(localWorklogDate(new Date(2026, 8, 8, 23, 59))).toBe("2026-09-08");
   });
   test("dynamic instruction gives the model today's local date for natural readback", () => {
     const instruction = buildWorklogSystemInstruction(new Date(2026, 8, 9, 0, 30));
-    expect(instruction).toContain("2026-09-09");
+    expect(instruction).toContain("工作归属日期: 2026-09-08");
     expect(instruction).toContain("昨天我做了什么");
     expect(instruction).toContain("worklog_query");
     expect(instruction).toContain("{entries,reports}");

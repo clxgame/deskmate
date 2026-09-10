@@ -1,3 +1,4 @@
+import { localWorklogDate as today } from "../../lib/worklogDate";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dict } from "../../lib/i18n";
 import { getSettings } from "../../lib/settings";
@@ -17,7 +18,6 @@ export interface WorklogTabProps { readonly language: string; readonly t: Dict; 
 type View = "entries" | "daily" | "weekly" | "schedules";
 type Detail = { readonly kind: "entry"; readonly entry: Entry | null } | { readonly kind: "report"; readonly detail: ReportDetail | null } | null;
 type Data = { readonly entries: readonly Entry[]; readonly reports: readonly Report[]; readonly schedules: readonly Schedule[]; readonly runs: readonly Run[] };
-function today(): string { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`; }
 function thisWeek(): { readonly start: string; readonly end: string } {
   const date = new Date(`${today()}T12:00:00Z`);
   date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
@@ -125,6 +125,7 @@ export function WorklogTab({ language, t, target, targetRequestId }: WorklogTabP
   const changed = () => { void load(); };
   return <div className="worklog">
     {!detail && <div className="worklog-nav" role="group" aria-label={labels.entries}>{(["entries", "daily", "weekly", "schedules"] as const).map((item) => <button className="set-btn" type="button" key={item} aria-pressed={view === item} onClick={() => { setView(item); setClear(null); setTargetState((current) => ({ ...current, failure: null, scheduleId: null, runId: null })); if (item === "weekly" && view !== "weekly") { const week = thisWeek(); setStart(week.start); setEnd(week.end); } }}>{labels[item]}</button>)}</div>}
+    <p className="worklog-meta">{labels.dayBoundaryHint}</p>
     <WorklogFeedback error={action.error} notice={detail ? null : action.notice} />
     {detail?.kind === "entry" && <EntryEditor key={`entry:${editorEpoch}:${detail.entry?.id ?? "new"}`} entry={detail.entry} date={end} labels={labels} onBack={back} onChanged={changed} onReload={() => { void reloadDetail(); }} />}
     {detail?.kind === "report" && <ReportEditor key={`report:${editorEpoch}:${detail.detail?.report.id ?? "new"}`} detail={detail.detail} kind={view === "weekly" ? "weekly" : "daily"} start={end} end={end} labels={labels} onBack={back} onChanged={changed} onReload={() => { void reloadDetail(); }} />}

@@ -1,4 +1,15 @@
-use chrono::{DateTime, Datelike, Duration, LocalResult, NaiveDate, NaiveTime, TimeZone, Utc};
+use chrono::{
+    DateTime, Datelike, Duration, LocalResult, NaiveDate, NaiveTime, TimeZone, Timelike, Utc,
+};
+
+pub fn business_date(local: chrono::NaiveDateTime) -> NaiveDate {
+    let date = local.date();
+    if local.hour() < 3 {
+        date.pred_opt().unwrap_or(date)
+    } else {
+        date
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct CalendarRule {
@@ -38,6 +49,7 @@ impl CalendarRule {
             zone.from_local_datetime(local)
                 .map(|value| value.with_timezone(&Utc))
         })?;
+        let date = business_date(due_at.with_timezone(zone).naive_local());
         let (period_start, period_end) = if self.weekly {
             let monday = date.checked_sub_signed(Duration::days(i64::from(
                 date.weekday().num_days_from_monday(),

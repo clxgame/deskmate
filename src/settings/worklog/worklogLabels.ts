@@ -1,5 +1,5 @@
 const en = {
-  featureTitle: "Work journal",
+  featureTitle: "Work journal", dayBoundaryHint: "Workdays start at 03:00 local time. Earlier entries default to the previous day; you can choose another date.",
   entries: "Entries", daily: "Daily reports", weekly: "Weekly reports", schedules: "Schedules",
   from: "From", to: "To", project: "Project", allProjects: "All projects", add: "Add entry",
   back: "Back", save: "Save", cancel: "Cancel", edit: "Edit", remove: "Delete", confirm: "Confirm deletion",
@@ -16,7 +16,7 @@ const en = {
 } as const;
 export type WorklogLabels = { readonly [K in keyof typeof en]: string };
 const zh: WorklogLabels = {
-  featureTitle: "工作日志",
+  featureTitle: "工作日志", dayBoundaryHint: "工作日按本地时间 03:00 划分，此前的记录默认归入前一天，可手动选择日期。",
   entries: "事项", daily: "日报", weekly: "周报", schedules: "报告任务", from: "开始日期", to: "结束日期", project: "项目", allProjects: "全部项目", add: "添加事项",
   back: "返回", save: "保存", cancel: "取消", edit: "编辑", remove: "删除", confirm: "确认删除", loading: "正在加载…", empty: "这个范围内还没有工作记录。", retry: "重试", refresh: "刷新",
   content: "内容", date: "日期", title: "标题", status: "状态", done: "已完成", progress: "进行中", blocked: "受阻", planned: "计划中", saved: "已保存", failed: "操作失败，请重试。", conflict: "其他窗口已修改此项。草稿已保留，请重新加载最新版本后再保存。",
@@ -27,7 +27,7 @@ const zh: WorklogLabels = {
   noRuns: "暂无运行记录。", noSources: "无来源", working: "处理中…", dailyImport: "归档完整日报", sourceDate: "来源日期", pending: "等待运行", running: "运行中", succeeded: "已完成", runFailed: "失败", cancelled: "已取消", skipped: "已跳过", pausedHint: "应用开启时执行；重启后补执行最近一次错过的周期。",
 };
 const ja: WorklogLabels = {
-  featureTitle: "作業記録",
+  featureTitle: "作業記録", dayBoundaryHint: "作業日は現地時刻の 03:00 に切り替わります。それ以前の記録は前日扱いです。日付は変更できます。",
   entries: "作業記録", daily: "日報", weekly: "週報", schedules: "レポート予定", from: "開始日", to: "終了日", project: "プロジェクト", allProjects: "すべて", add: "記録を追加",
   back: "戻る", save: "保存", cancel: "キャンセル", edit: "編集", remove: "削除", confirm: "削除を確定", loading: "読み込み中…", empty: "この期間の作業記録はありません。", retry: "再試行", refresh: "更新",
   content: "内容", date: "日付", title: "タイトル", status: "状態", done: "完了", progress: "進行中", blocked: "保留", planned: "予定", saved: "保存しました", failed: "操作できませんでした。再試行してください。", conflict: "別の画面で更新されました。下書きは保持されています。最新版を読み込んでください。",
@@ -38,7 +38,7 @@ const ja: WorklogLabels = {
   noRuns: "実行履歴はありません。", noSources: "参照元なし", working: "処理中…", dailyImport: "完成した日報を保存", sourceDate: "参照日", pending: "待機中", running: "実行中", succeeded: "完了", runFailed: "失敗", cancelled: "取消済み", skipped: "スキップ", pausedHint: "アプリの起動中に実行し、再起動後に直近の未実行分を補完します。",
 };
 const ko: WorklogLabels = {
-  featureTitle: "업무 기록",
+  featureTitle: "업무 기록", dayBoundaryHint: "업무일은 현지 시각 03:00에 바뀝니다. 이전 기록은 전날로 저장되며 날짜를 직접 선택할 수 있습니다.",
   entries: "작업 기록", daily: "일일 보고", weekly: "주간 보고", schedules: "보고 일정", from: "시작일", to: "종료일", project: "프로젝트", allProjects: "전체 프로젝트", add: "기록 추가",
   back: "뒤로", save: "저장", cancel: "취소", edit: "편집", remove: "삭제", confirm: "삭제 확인", loading: "불러오는 중…", empty: "이 기간의 작업 기록이 없습니다.", retry: "다시 시도", refresh: "새로 고침",
   content: "내용", date: "날짜", title: "제목", status: "상태", done: "완료", progress: "진행 중", blocked: "보류", planned: "예정", saved: "저장됨", failed: "작업을 완료하지 못했습니다. 다시 시도해 주세요.", conflict: "다른 창에서 변경되었습니다. 초안은 유지됩니다. 최신 버전을 불러온 후 저장해 주세요.",

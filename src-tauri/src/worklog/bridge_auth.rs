@@ -14,7 +14,7 @@ fn grant_response(text: String, original: String, actions: BTreeSet<String>) -> 
     Grant {
         text,
         original,
-        received_date: chrono::Local::now().date_naive(),
+        received_date: crate::worklog::calendar::business_date(chrono::Local::now().naive_local()),
         actions,
         created: std::time::Instant::now(),
     }

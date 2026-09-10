@@ -75,7 +75,7 @@ fn execute(
     context: (&dyn RunnerEnvironment, &AtomicBool),
 ) -> WorklogResult<()> {
     let (environment, stop) = context;
-    let cutoff_date = chrono::Local::now().date_naive();
+    let cutoff_date = crate::worklog::calendar::business_date(chrono::Local::now().naive_local());
     if run.sources.is_empty() {
         repository.publish_run(run, ("", Utc::now()))?;
         return Ok(());

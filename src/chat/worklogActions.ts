@@ -1,11 +1,10 @@
+import { localWorklogDate } from "../lib/worklogDate";
 import { invoke } from "@tauri-apps/api/core";
 import { getOperation, type OperationReceipt } from "../lib/worklog";
 
 export const WORKLOG_TOOLS = ["worklog_record", "worklog_query", "worklog_update", "worklog_generate_report", "worklog_schedule_report"] as const;
 
-export function localWorklogDate(now = new Date()): string {
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-}
+export { localWorklogDate } from "../lib/worklogDate";
 
 export function newUserMessageId(): string {
   return `msg_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -44,7 +43,7 @@ export const openWorklog = (receipt?: OperationReceipt): Promise<void> => invoke
 export function buildWorklogSystemInstruction(now = new Date()): string {
   const today = localWorklogDate(now);
   return [
-    `工作记录、日报和周报只能通过 worklog 专用工具处理。今天的本地日期: ${today}。`,
+    `工作记录、日报和周报只能通过 worklog 专用工具处理。工作归属日期: ${today}。本地时间每天 03:00 切换工作日，03:00 前属于前一天；今天、昨天、本周、上周均以此工作归属日期计算。用户明确指定的日期直接使用。`,
     "自然的本人工作回顾请求也授权读取 worklog_query，例如“昨天我做了什么”；自然回顾只授权读取。",
     "worklog_query 的结果形状是 {entries,reports}。回答时 daily report 优先概括，entries 只补充缺失细节且不重复；entries 和 reports 两个空数组表示该日期没有保存记录。",
     "rejected/pending/unavailable 或工具不可用是查询失败，不能当成没有保存记录。",

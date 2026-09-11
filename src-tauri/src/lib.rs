@@ -1367,7 +1367,7 @@ pub fn run() {
                 pet_geometry::apply(
                     &pet,
                     loaded.pet_scale,
-                    packs::persona_uses_gif(&handle, &loaded.persona_id),
+                    &loaded.persona_id,
                 );
                 pet_startup::place(&pet, &loaded.persona_id, loaded.pet_position);
             }

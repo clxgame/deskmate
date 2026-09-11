@@ -1,4 +1,43 @@
 use super::{anchored_origin, dimensions, pixel_size, GifEnvelope, PetGeometry};
+struct NativeProbe<'a>(&'a super::PetGeometryState);
+impl NativeProbe<'_> {
+    fn callback(&self) {
+        assert!(
+            self.0 .0.try_lock().is_ok(),
+            "native callback cannot read geometry: mutex held across native operation"
+        );
+    }
+}
+impl super::NativeGeometry for NativeProbe<'_> {
+    fn position(&self) -> Option<tauri::PhysicalPosition<i32>> {
+        self.callback();
+        Some(tauri::PhysicalPosition::new(40, 50))
+    }
+    fn size(&self) -> Option<tauri::PhysicalSize<u32>> {
+        self.callback();
+        Some(tauri::PhysicalSize::new(200, 263))
+    }
+    fn factor(&self) -> Option<f64> {
+        self.callback();
+        Some(1.25)
+    }
+    fn resize(&self, _: tauri::Size) -> bool {
+        self.callback();
+        true
+    }
+    fn reposition(&self, _: tauri::LogicalPosition<f64>) -> bool {
+        self.callback();
+        true
+    }
+}
+#[test]
+fn native_callbacks_can_read_geometry_without_reentry_deadlock() {
+    let state = super::PetGeometryState::default();
+    super::apply_native(&state, &NativeProbe(&state), |old| PetGeometry {
+        scale: 0.5,
+        ..old
+    });
+}
 #[test]
 fn chat_ignores_gif_motion_padding() {
     let geometry = PetGeometry {

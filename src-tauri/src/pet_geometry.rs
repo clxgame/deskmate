@@ -11,7 +11,7 @@ impl Default for PetGeometryState {
         }))
     }
 }
-#[derive(Clone, Copy, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct GifEnvelope {
     pub(crate) horizontal: f64,
@@ -28,7 +28,7 @@ impl GifEnvelope {
             && (0.0..=1.0).contains(&self.bottom)
     }
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct PetGeometry {
     scale: f64,
     gif: bool,
@@ -81,94 +81,72 @@ fn pixel_size(size: (f64, f64), factor: f64) -> (f64, f64) {
         (size.1 / unit).ceil() * unit * factor,
     )
 }
-fn apply_geometry(pet: &tauri::WebviewWindow, next: PetGeometry) {
-    let state = pet.state::<PetGeometryState>();
-    let Ok(mut geometry) = state.0.lock() else {
-        return;
-    };
-    let (Ok(position), Ok(size), Ok(factor)) =
-        (pet.outer_position(), pet.outer_size(), pet.scale_factor())
-    else {
-        return;
-    };
-    if !factor.is_finite() || factor <= 0.0 || !(factor * 96.0).is_finite() {
+#[path = "pet_geometry_native.rs"]
+mod native;
+#[cfg(test)]
+use native::NativeGeometry;
+use native::{apply_native, drawing_anchor_native};
+fn apply_geometry(
+    pet: &tauri::WebviewWindow,
+    update: impl FnOnce(PetGeometry) -> PetGeometry + Send + 'static,
+) {
+    let window = pet.clone();
+    let (done, completed) = std::sync::mpsc::sync_channel(1);
+    // Wry executes inline on the main thread; other callers wait without state guards.
+    if let Err(error) = pet.run_on_main_thread(move || {
+        apply_native(&window.state::<PetGeometryState>(), &window, update);
+        let _ = done.send(());
+    }) {
+        eprintln!("could not dispatch pet geometry: {error}");
         return;
     }
-    let position = position.to_logical::<f64>(factor);
-    let size = size.to_logical::<f64>(factor);
-    let nominal = dimensions(next);
-    let (width, height) = if next.envelope.is_some() {
-        let physical = pixel_size(nominal, factor);
-        if pet
-            .set_size(tauri::PhysicalSize::new(physical.0, physical.1))
-            .is_err()
-        {
-            return;
-        }
-        (physical.0 / factor, physical.1 / factor)
-    } else {
-        if pet
-            .set_size(tauri::LogicalSize::new(nominal.0, nominal.1))
-            .is_err()
-        {
-            return;
-        }
-        nominal
-    };
-    let (x, y) = anchored_origin(
-        (position.x, position.y),
-        (size.width / 2.0, size.height - geometry.bottom()),
-        (width / 2.0, height - next.bottom()),
-    );
-    let _ = pet.set_position(tauri::LogicalPosition::new(x, y));
-    *geometry = next;
+    if let Err(error) = completed.recv() {
+        eprintln!("pet geometry task did not complete: {error}");
+    }
 }
-pub(crate) fn apply(pet: &tauri::WebviewWindow, scale: f64, gif: bool) {
-    let envelope = match pet.state::<PetGeometryState>().0.lock() {
-        Ok(geometry) => {
-            if gif {
-                geometry.envelope
-            } else {
-                None
-            }
-        }
-        Err(_) => return,
-    };
-    let envelope = envelope.or_else(|| {
-        if gif {
-            let state = pet.state::<crate::settings::SettingsState>();
-            let persona_id = state.0.lock().ok()?.persona_id.clone();
-            crate::packs::persona_gif_envelope(pet.app_handle(), &persona_id)
+fn target_geometry(
+    scale: f64,
+    persona_id: &str,
+    resolve: impl FnOnce(&str) -> (bool, Option<GifEnvelope>),
+) -> PetGeometry {
+    let (gif, envelope) = resolve(persona_id);
+    PetGeometry {
+        scale,
+        gif,
+        envelope: if gif { envelope } else { None },
+    }
+}
+fn scale_update(scale: f64) -> impl FnOnce(PetGeometry) -> PetGeometry {
+    move |current| PetGeometry { scale, ..current }
+}
+fn configure_update(
+    gif: bool,
+    envelope: Option<GifEnvelope>,
+) -> impl FnOnce(PetGeometry) -> PetGeometry {
+    move |current| PetGeometry {
+        scale: current.scale,
+        gif,
+        envelope: if gif {
+            envelope.or(current.envelope)
         } else {
             None
-        }
-    });
-    apply_geometry(
-        pet,
-        PetGeometry {
-            scale,
-            gif,
-            envelope,
         },
-    );
+    }
+}
+pub(crate) fn apply(pet: &tauri::WebviewWindow, scale: f64, persona_id: &str) {
+    let target = target_geometry(scale, persona_id, |id| {
+        (
+            crate::packs::persona_uses_gif(pet.app_handle(), id),
+            crate::packs::persona_gif_envelope(pet.app_handle(), id),
+        )
+    });
+    apply_geometry(pet, move |_| target);
 }
 pub(crate) fn apply_scale(pet: &tauri::WebviewWindow, scale: f64) {
-    let current = match pet.state::<PetGeometryState>().0.lock() {
-        Ok(value) => *value,
-        Err(_) => return,
-    };
-    apply_geometry(pet, PetGeometry { scale, ..current });
+    apply_geometry(pet, scale_update(scale));
 }
 pub(crate) fn drawing_anchor(pet: &tauri::WebviewWindow) -> Option<tauri::PhysicalPosition<f64>> {
-    let state = pet.state::<PetGeometryState>();
-    let geometry = state.0.lock().ok()?;
-    let size = pet.outer_size().ok()?;
-    let factor = pet.scale_factor().ok()?;
-    let frame = if geometry.gif { 320.0 } else { 420.0 } * geometry.scale();
-    Some(tauri::PhysicalPosition::new(
-        f64::from(size.width) / 2.0,
-        f64::from(size.height) - (geometry.bottom() + frame / 2.0) * factor,
-    ))
+    drawing_anchor_native(&pet.state::<PetGeometryState>(), pet)
 }
 fn chat_frame(
     geometry: PetGeometry,
@@ -222,31 +200,15 @@ pub(crate) fn configure_pet_geometry(
     if envelope.is_some_and(|value| !value.valid()) {
         return Err("Invalid GIF drawing envelope".into());
     }
-    let current = *app
-        .state::<PetGeometryState>()
-        .0
-        .lock()
-        .map_err(|error| error.to_string())?;
     if let Some(pet) = app.get_webview_window("pet") {
-        apply_geometry(
-            &pet,
-            PetGeometry {
-                scale: current.scale,
-                gif,
-                envelope: if gif {
-                    envelope.or_else(|| {
-                        let state = app.state::<crate::settings::SettingsState>();
-                        let persona_id = state.0.lock().ok()?.persona_id.clone();
-                        crate::packs::persona_gif_envelope(&app, &persona_id)
-                    })
-                } else {
-                    None
-                },
-            },
-        );
+        apply_geometry(&pet, configure_update(gif, envelope));
     }
     Ok(())
 }
 #[cfg(test)]
 #[path = "pet_geometry_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "pet_geometry_native_tests.rs"]
+mod native_tests;

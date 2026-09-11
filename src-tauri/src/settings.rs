@@ -1141,6 +1141,19 @@ pub fn get_settings(state: tauri::State<SettingsState>) -> Settings {
     state.0.lock().unwrap().clone()
 }
 
+fn apply_and_publish_settings(
+    state: &SettingsState,
+    settings: &Settings,
+    apply: impl FnOnce(),
+) -> Result<Settings, String> {
+    *state.0.lock().map_err(|error| error.to_string())? = settings.clone();
+    apply();
+    Ok(state.0.lock().map_err(|error| error.to_string())?.clone())
+}
+
+#[cfg(test)]
+#[path = "settings_geometry_tests.rs"]
+mod geometry_tests;
 #[tauri::command]
 pub fn set_settings(
     app: tauri::AppHandle,
@@ -1199,12 +1212,10 @@ pub fn set_settings(
         settings.pet_position = old.pet_position;
     }
     persist_settings_update(&AppSettingsTransactionOps { app: &app }, &old, &settings)?;
-    apply(&app, &old, &settings);
-    // SAFE-UNWRAP: a poisoned settings mutex means an earlier command panicked.
-    *state.0.lock().unwrap() = settings.clone();
+    let current = apply_and_publish_settings(&state, &settings, || apply(&app, &old, &settings))?;
     crate::pomodoro::apply_preferences(&app, settings.pomodoro)?;
     // Notify every window (pet scale, persona, model...) of the change.
-    let _ = app.emit("deskmate://settings-changed", &settings);
+    let _ = app.emit("deskmate://settings-changed", &current);
     Ok(())
 }
 
@@ -1553,7 +1564,7 @@ pub fn apply(app: &tauri::AppHandle, old: &Settings, new: &Settings) {
             crate::pet_geometry::apply(
                 &pet,
                 new.pet_scale,
-                crate::packs::persona_uses_gif(app, &new.persona_id),
+                &new.persona_id,
             );
         }
     }

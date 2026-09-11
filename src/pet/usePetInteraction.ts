@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useRef, type MouseEvent, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, type KeyboardEvent, type MouseEvent, type RefObject } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { pointInPetContent } from "./gifGeometry";
 
 const report = (error: unknown) => console.error("pet interaction failed", error instanceof Error ? error.message : String(error));
-type InteractionSurface = { readonly gif: boolean; readonly active: boolean; readonly identity: string; readonly root: RefObject<HTMLDivElement | null> };
+type InteractionSurface = { readonly onHeldChange?: (held: boolean) => void; readonly onInteract?: () => void; readonly gif: boolean; readonly active: boolean; readonly identity: string; readonly root: RefObject<HTMLDivElement | null> };
 export function usePetInteraction(surface: InteractionSurface, setLocked: (locked: boolean) => void) {
+  const callbacks = useRef(surface);
+  useLayoutEffect(() => { callbacks.current = surface; });
   const downAt = useRef<{ readonly x: number; readonly y: number; readonly t: number } | null>(null);
   const holding = useRef(false);
   const epoch = useRef(0);
-  const reset = useCallback(() => { epoch.current += 1; downAt.current = null; holding.current = false; setLocked(false); }, [setLocked]);
+  const reset = useCallback(() => { const wasHeld = holding.current || downAt.current !== null; epoch.current += 1; downAt.current = null; holding.current = false; setLocked(false); if (wasHeld) callbacks.current.onHeldChange?.(false); }, [setLocked]);
   useEffect(() => {
     reset();
     window.addEventListener("blur", reset);
@@ -20,14 +22,18 @@ export function usePetInteraction(surface: InteractionSurface, setLocked: (locke
     document.addEventListener("visibilitychange", hidden);
     return () => { reset(); window.removeEventListener("blur", reset); window.removeEventListener("pointercancel", reset); window.removeEventListener("mouseup", mouseup); document.removeEventListener("visibilitychange", hidden); };
   }, [reset, surface.active, surface.identity]);
-  const hit = (event: MouseEvent) => !surface.gif || (surface.active && surface.root.current !== null && pointInPetContent(surface.root.current, event.clientX, event.clientY));
-  const hold = () => { epoch.current += 1; holding.current = true; setLocked(true); const generation = epoch.current; return () => { if (generation === epoch.current) reset(); }; };
+  const hit = (event: MouseEvent) => surface.active && (!surface.gif || (surface.root.current !== null && pointInPetContent(surface.root.current, event.clientX, event.clientY)));
+  const hold = () => { epoch.current += 1; holding.current = true; setLocked(true); callbacks.current.onHeldChange?.(true); const generation = epoch.current; return () => { if (generation === epoch.current) reset(); }; };
   return {
     hit, hold,
+    onKeyDown: (event: KeyboardEvent) => {
+      if (!surface.active || event.repeat || (event.key !== "Enter" && event.key !== " ")) return;
+      event.preventDefault(); callbacks.current.onInteract?.(); void invoke("toggle_chat").catch(report);
+    },
     onMouseDown: (event: MouseEvent) => {
       if (event.button !== 0 || !hit(event)) return;
       downAt.current = { x: event.screenX, y: event.screenY, t: Date.now() };
-      setLocked(true);
+      setLocked(true); callbacks.current.onHeldChange?.(true);
     },
     onMouseMove: (event: MouseEvent) => {
       const start = downAt.current;

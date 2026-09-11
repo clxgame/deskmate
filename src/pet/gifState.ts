@@ -1,5 +1,5 @@
 import type { PetActivityEvent, PetMood } from "../lib/petState";
-import type { GifAnimationState } from "./figure2d";
+
 
 export interface GifState {
   readonly request: { readonly sessionId: string; readonly requestId: string } | null;
@@ -53,7 +53,7 @@ export function reduceGifState(
   }
 }
 
-export function gifDisplayState(state: GifState, now: number, timing: GifPlayback = defaultGifTiming): GifAnimationState {
+export function gifDisplayState(state: GifState, now: number, timing: GifPlayback = defaultGifTiming): PetMood | "success" {
   if (state.feedback !== null && now < state.feedback.until) return state.feedback.state;
   if (state.base === "thinking" && "thinkingSelection" in timing) return state.thinkingVariant;
   if (state.base === "thinking" && state.thinkingSince !== null && "thinkingEscalationMs" in timing && now - state.thinkingSince >= timing.thinkingEscalationMs) return "working";
@@ -75,4 +75,9 @@ export function applyGifEvent(
   if (next === state || !("thinkingSelection" in playback)) return next;
   const entered = next.base === "thinking" && (event.type === "start" || state.base !== "thinking");
   return entered ? { ...next, thinkingVariant: random() < 0.5 ? "thinking" : "working" } : next;
+}
+
+export function gifIdleEligible(state: GifState, now: number): boolean {
+  return (state.request === null || state.terminal) && state.base === "idle"
+    && (state.feedback === null || now >= state.feedback.until);
 }

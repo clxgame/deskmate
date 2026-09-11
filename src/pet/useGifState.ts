@@ -1,13 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { sleepClock, type SleepClock } from "./petSleep";
 import { onPetActivity } from "../lib/petState";
-import { applyGifEvent, defaultGifTiming, gifDisplayState, gifNextDeadline, initialGifState, type GifPlayback } from "./gifState";
+import { applyGifEvent, defaultGifTiming, gifDisplayState, gifIdleEligible, gifNextDeadline, initialGifState, type GifPlayback } from "./gifState";
 
-export function useGifState(
+export function usePetActivityState(
   visible: boolean, timing: GifPlayback = defaultGifTiming,
-  identity = "default", random: () => number = Math.random,
+  identity = "default", random: () => number = Math.random, clock: SleepClock = sleepClock,
 ) {
   const [state, setState] = useState(initialGifState);
-  const [now, setNow] = useState(Date.now);
+  const [now, setNow] = useState(clock.now);
   const current = useRef(state);
   const inputs = useRef({ visible, timing, random });
   useLayoutEffect(() => {
@@ -19,7 +20,7 @@ export function useGifState(
   useLayoutEffect(() => {
     if (previousKey.current === policyKey) return;
     previousKey.current = policyKey;
-    const timestamp = Date.now();
+    const timestamp = clock.now();
     const active = current.current;
     const { timing: policy, random: sample } = inputs.current;
     current.current = { ...active, feedback: null,
@@ -27,19 +28,19 @@ export function useGifState(
       thinkingVariant: active.base === "thinking" && "thinkingSelection" in policy && sample() >= 0.5 ? "working" : "thinking" };
     setState(current.current);
     setNow(timestamp);
-  }, [policyKey]);
+  }, [policyKey, clock]);
   useEffect(() => {
     let disposed = false;
     const unlisten = onPetActivity((event) => {
       if (disposed) return;
-      const timestamp = Date.now();
+      const timestamp = clock.now();
       const input = inputs.current;
       current.current = applyGifEvent(current.current, event, timestamp, input.visible, input.timing, input.random);
       setNow(timestamp);
       setState(current.current);
     });
     return () => { disposed = true; void unlisten.then((stop) => stop()); };
-  }, []);
+  }, [clock]);
   useLayoutEffect(() => {
     if (!visible) {
       current.current = { ...current.current, feedback: null };
@@ -47,10 +48,19 @@ export function useGifState(
     }
   }, [visible]);
   useEffect(() => {
-    const deadline = gifNextDeadline(state, Date.now(), timing);
+    const deadline = gifNextDeadline(state, clock.now(), timing);
     if (deadline === null) return;
-    const timer = window.setTimeout(() => setNow(Date.now()), Math.max(0, deadline - Date.now()));
-    return () => window.clearTimeout(timer);
-  }, [state, timing, now]);
-  return gifDisplayState(state, Math.max(now, Date.now()), timing);
+    const timer = clock.schedule(() => setNow(clock.now()), Math.max(0, deadline - clock.now()));
+    return () => clock.cancel(timer);
+  }, [state, timing, now, clock]);
+  const timestamp = Math.max(now, clock.now());
+  return { display: gifDisplayState(state, timestamp, timing), idle: gifIdleEligible(state, timestamp),
+    activityKey: state.request === null ? "" : JSON.stringify([state.request.sessionId, state.request.requestId]) };
+}
+
+export function useGifState(
+  visible: boolean, timing: GifPlayback = defaultGifTiming,
+  identity = "default", random: () => number = Math.random, clock: SleepClock = sleepClock,
+) {
+  return usePetActivityState(visible, timing, identity, random, clock).display;
 }

@@ -32,7 +32,7 @@ pub(super) fn parse(bytes: &[u8]) -> Result<super::Figure, String> {
         bottom: 0.0,
     };
     for (state, value) in input.animations {
-        if !super::bounded(value.offset_x, -240.0, 240.0) || !simple_polygon(&value.hit_polygon) {
+        if !super::bounded(value.offset_x, -240.0, 240.0) || !simple_polygon(&value.hit_polygon, 64, 240.0) {
             return Err(format!("figure2d v2 geometry invalid: {state}"));
         }
         let left = (1.0 - value.scale) / 2.0 + value.offset_x / 240.0;
@@ -89,12 +89,12 @@ fn intersects(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> bool {
         || on(c, d, a)
         || on(c, d, b)
 }
-fn simple_polygon(points: &[[f64; 2]]) -> bool {
-    if !(3..=64).contains(&points.len())
+pub(crate) fn simple_polygon(points: &[[f64; 2]], max_points: usize, max_coordinate: f64) -> bool {
+    if !(3..=max_points).contains(&points.len())
         || points
             .iter()
             .flatten()
-            .any(|v| !super::bounded(*v, 0.0, 240.0))
+            .any(|v| !super::bounded(*v, 0.0, max_coordinate))
     {
         return false;
     }

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   AI_SUBSTITUTE_PACK,
+  BAOBAO_PACK,
   AKI_PACK,
   XIAOXIONGCHONG_PACK,
   ALL_PERSONAS,
@@ -17,6 +18,12 @@ import {
 } from "./personaCatalog";
 
 describe("persona packs", () => {
+  test("offers 包包 only after its optional pack is installed", () => {
+    const installed = personaCatalog([{ packId: "baobao", personaIds: ["baobao"] }]);
+    expect(installed.find(persona => persona.id === "baobao")?.renderType).toBe("rig2d");
+    expect(personaLabel(personaById("baobao"), "zh-CN")).toBe("包包");
+    expect(personaCatalog().some(persona => persona.id === "baobao")).toBe(false);
+  });
   test("ships only the 小著 pack so the installer stays small", () => {
     expect(BUILTIN_PACKS).toHaveLength(1);
     const builtinPack = BUILTIN_PACKS[0];
@@ -48,7 +55,7 @@ describe("persona packs", () => {
   test("every known persona id is unique across packs", () => {
     const ids = ALL_PERSONAS.map((persona) => persona.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toHaveLength(29);
+    expect(ids).toHaveLength(30);
     expect(ids).toContain("xiaoxiongchong");
   });
 
@@ -131,7 +138,7 @@ describe("persona packs", () => {
     expect(packById("ai-substitute")).toBe(AI_SUBSTITUTE_PACK);
     expect(packById("missing")).toBeUndefined();
     expect(packById("xiaoxiongchong")).toBe(XIAOXIONGCHONG_PACK);
-    expect(KNOWN_PACKS).toEqual([AI_SUBSTITUTE_PACK, AKI_PACK, XIAOXIONGCHONG_PACK]);
+    expect(KNOWN_PACKS).toEqual([AI_SUBSTITUTE_PACK, AKI_PACK, XIAOXIONGCHONG_PACK, BAOBAO_PACK]);
   });
 
   test("grants the ncm skill only to 小著", () => {

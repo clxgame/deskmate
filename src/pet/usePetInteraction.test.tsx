@@ -8,17 +8,19 @@ import { originalTauriWindow, restoreTauriModuleFixture } from "../testing/tauri
 let pressed = false;
 const invoke = mock(async (command: string) => command === "pet_primary_button_down" ? pressed : undefined);
 const drag = mock(() => Promise.resolve());
+const held = mock((_value: boolean) => {});
+const activate = mock(() => {});
 const lock = mock((_value: boolean) => {});
 beforeEach(() => {
-  pressed = false; invoke.mockClear(); drag.mockClear(); lock.mockClear();
+  pressed = false; held.mockClear(); activate.mockClear(); invoke.mockClear(); drag.mockClear(); lock.mockClear();
   mock.module("@tauri-apps/api/core", () => ({ invoke }));
   mock.module("@tauri-apps/api/window", () => ({ ...originalTauriWindow, getCurrentWindow: () => ({ startDragging: drag }) }));
 });
 afterEach(() => { cleanup(); restoreTauriModuleFixture(); mock.module("@tauri-apps/api/window", () => originalTauriWindow); });
 function Surface({ active = true, gif = true, identity = "a" }) {
   const root = useRef<HTMLDivElement>(null);
-  const interaction = usePetInteraction({ root, active, gif, identity }, lock);
-  return <div ref={root}><button type="button" onMouseDown={interaction.onMouseDown} onMouseMove={interaction.onMouseMove} onMouseUp={interaction.onMouseUp} onContextMenu={(event) => { if (interaction.hit(event)) { const release = interaction.hold(); void Promise.resolve().then(release); } }}>
+  const interaction = usePetInteraction({ root, active, gif, identity, onHeldChange: held, onInteract: activate }, lock);
+  return <div ref={root}><button type="button" onKeyDown={interaction.onKeyDown} onMouseDown={interaction.onMouseDown} onMouseMove={interaction.onMouseMove} onMouseUp={interaction.onMouseUp} onContextMenu={(event) => { if (interaction.hit(event)) { const release = interaction.hold(); void Promise.resolve().then(release); } }}>
     <img alt="pet" className="gif-pet-image" ref={(element) => { if (element) { element.getBoundingClientRect = () => new DOMRect(0, 0, 240, 240); setGifHitPolygon(element, [[60,60],[180,60],[180,180],[60,180]]); } }} />
   </button></div>;
 }
@@ -84,4 +86,41 @@ test("subthreshold movement remains a click and unmount clears an active hold", 
   await act(async () => {});
   view.unmount();
   expect(lock.mock.calls.at(-1)).toEqual([false]);
+});
+
+test("hover and transparent clicks never report wake but body press reports held until release", () => {
+  // Given the real interaction hook over a polygon body.
+  const view = render(<Surface />); const button = view.getByRole("button"); held.mockClear();
+  // When hover and transparent clicks precede a body click.
+  fireEvent.mouseMove(button, body); fireEvent.mouseDown(button, blank); fireEvent.mouseUp(button, blank);
+  expect(held).toHaveBeenCalledTimes(0); expect(activate).toHaveBeenCalledTimes(0);
+  fireEvent.mouseDown(button, body); fireEvent.mouseUp(button, body);
+  // Then wake suspension accompanies the original single chat operation.
+  expect(held.mock.calls).toEqual([[true], [false]]);
+  expect(invoke.mock.calls.filter(([command]) => command === "toggle_chat")).toHaveLength(1);
+});
+test("keyboard activation wakes and performs the original operation", () => {
+  // Given a keyboard focused interaction surface.
+  const view = render(<Surface />);
+  // When Enter activates it.
+  fireEvent.keyDown(view.getByRole("button"), { key: "Enter" });
+  // Then the same activation both wakes and opens chat.
+  expect(activate).toHaveBeenCalledTimes(1); expect(invoke).toHaveBeenCalledWith("toggle_chat");
+});
+
+test("menu holds report suspension and blur releases it", () => {
+  // Given an active surface with a context menu.
+  const view = render(<Surface />); const button = view.getByRole("button"); held.mockClear();
+  // When the menu is held then the window loses focus.
+  fireEvent.contextMenu(button, body); window.dispatchEvent(new Event("blur"));
+  // Then sleep receives a balanced hold lifecycle.
+  expect(held.mock.calls).toEqual([[true], [false]]);
+});
+test("pointer cancellation releases a held body without executing a click", () => {
+  // Given a held body press.
+  const view = render(<Surface />); const button = view.getByRole("button"); held.mockClear(); fireEvent.mouseDown(button, body);
+  // When the pointer is cancelled before release.
+  window.dispatchEvent(new Event("pointercancel")); fireEvent.mouseUp(button, body);
+  // Then hold is cleared and no chat action runs.
+  expect(held.mock.calls).toEqual([[true], [false]]); expect(invoke).not.toHaveBeenCalled();
 });

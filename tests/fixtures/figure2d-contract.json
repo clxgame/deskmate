@@ -3079,7 +3079,7 @@
             ]
           ]
         },
-        "sleep": {
+        "hover": {
           "scale": 0.5,
           "file": "animations/idle.gif",
           "offsetY": 60,

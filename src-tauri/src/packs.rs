@@ -8,6 +8,7 @@ use tauri::{Emitter, Manager};
 
 mod archive;
 mod figure2d;
+mod rig2d;
 mod gif;
 mod installation;
 mod manifest;
@@ -101,6 +102,8 @@ pub fn uninstall_pack(app: tauri::AppHandle, pack_id: String) -> Result<(), Stri
 
 #[cfg(test)]
 mod gif_tests;
+#[cfg(test)]
+mod rig2d_tests;
 #[cfg(test)]
 mod import_tests;
 #[cfg(test)]

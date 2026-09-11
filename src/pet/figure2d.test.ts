@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { parseFigure2dConfig } from "./figure2d";
+import contractFixtures from "../../tests/fixtures/figure2d-contract.json";
 
 const fixture = () => ({
   schemaVersion: 1,
@@ -8,6 +9,22 @@ const fixture = () => ({
   feedback: { successMs: 1400, errorMs: 1440 },
   leaving: { durationMs: 910, translateXRatio: -0.35, positionEasing: "ease-in-out", opacityEasing: "linear" },
   thinkingEscalationMs: 8000,
+});
+
+test("accepts an optional sleep animation without changing required states", () => {
+  const input = fixture();
+  input.animations.sleep = { file: "animations/sleep.gif", scale: 1, offsetY: 0 };
+  const config = parseFigure2dConfig(input);
+  expect(Object.keys(config.animations)).toHaveLength(8);
+});
+
+test("accepts optional v2 sleep geometry and rejects its unsafe path", () => {
+  const fixture = contractFixtures.find(value => value.name === "valid-v2");
+  if (!fixture) throw new Error("Missing v2 fixture");
+  const animations = parseFigure2dConfig(fixture.config).animations;
+  const config = parseFigure2dConfig({ ...fixture.config, animations: { ...animations, sleep: animations.idle } });
+  expect(config.animations.sleep?.file).toBe(animations.idle.file);
+  expect(() => parseFigure2dConfig({ ...fixture.config, animations: { ...animations, sleep: { ...animations.idle, file: "../sleep.gif" } } })).toThrow();
 });
 
 test("parses seven animations when schema version is supported", () => {

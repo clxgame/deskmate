@@ -30,7 +30,7 @@ pub(crate) fn persona_uses_gif(app: &tauri::AppHandle, persona_id: &str) -> bool
             {
                 return match persona.render_type {
                     super::manifest::RenderType::Glb => false,
-                    super::manifest::RenderType::Gif => true,
+                    super::manifest::RenderType::Gif | super::manifest::RenderType::Rig2d => true,
                 };
             }
         }

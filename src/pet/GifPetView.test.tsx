@@ -12,6 +12,27 @@ const fixture = (prefix: string): LoadedGifPersona => ({ config: parseFigure2dCo
 } });
 const ignoreError = () => {};
 
+test("keeps the same native idle image when sleep is absent", async () => {
+  const load = async () => fixture("legacy");
+  const props = { personaId: "legacy", width: 160, leaving: false, onError: ignoreError, load };
+  const view = render(<GifPetView {...props} state="idle" />);
+  await act(async () => {});
+  const original = view.container.querySelector("img");
+  view.rerender(<GifPetView {...props} state="sleep" />);
+  expect(view.container.querySelector("img")).toBe(original);
+  expect(original?.getAttribute("src")).toBe(fixture("legacy").urls.idle);
+});
+
+test("renders the declared sleep resource when it exists", async () => {
+  const base = fixture("sleep");
+  const data = { config: parseFigure2dConfig({ ...base.config, animations: { ...base.config.animations, sleep: { file: "sleep.gif", scale: 0.5, offsetY: 12 } } }), urls: { ...base.urls, sleep: base.urls.idle + "-sleep" } };
+  const load = async () => data;
+  const view = render(<GifPetView personaId="sleep" state="sleep" width={160} leaving={false} onError={ignoreError} load={load} />);
+  await act(async () => {});
+  expect(view.container.querySelector("img")?.getAttribute("src")).toBe(data.urls.sleep);
+  expect(view.container.querySelector("img")?.style.width).toBe("80px");
+});
+
 test("renders native GIF and computes departure from displayed width", async () => {
   const load = async () => fixture("a");
   const view = render(<GifPetView personaId="a" state="idle" width={160} leaving={false} onError={ignoreError} load={load} />);

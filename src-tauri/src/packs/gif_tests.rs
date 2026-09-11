@@ -2,6 +2,18 @@ use serde_json::json;
 use std::fs;
 
 #[test]
+fn legacy_gif_v1_and_v2_accept_optional_sleep_but_keep_seven_required_states() {
+    let fixtures: serde_json::Value = serde_json::from_str(include_str!("../../../tests/fixtures/figure2d-contract.json")).unwrap();
+    for index in [0, 1] {
+        let mut config = fixtures[index]["config"].clone();
+        config["animations"]["sleep"] = config["animations"]["idle"].clone();
+        assert!(super::figure2d::parse_config(&serde_json::to_vec(&config).unwrap()).is_ok());
+        config["animations"].as_object_mut().unwrap().remove("success");
+        assert!(super::figure2d::parse_config(&serde_json::to_vec(&config).unwrap()).is_err());
+    }
+}
+
+#[test]
 fn gif_import_validates_before_replacing_existing_pack() {
     // Given: a working legacy installation and a GIF upgrade.
     let root = std::env::temp_dir().join(format!("gif-pack-{}", uuid::Uuid::new_v4()));

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { initialGifState, reduceGifState, gifDisplayState, gifNextDeadline, applyGifEvent } from "./gifState";
+import { initialGifState, reduceGifState, gifDisplayState, gifNextDeadline, applyGifEvent, gifIdleEligible } from "./gifState";
 
 const start = { type: "start", sessionId: "s", requestId: "r", eventId: "1" } as const;
 test("escalates continuous thinking only at eight seconds", () => {
@@ -106,4 +106,22 @@ test("terminal, duplicate-request and stale events never consume another sample"
   // Then cancellation stays idle and no selection is consumed.
   expect(gifDisplayState(state, 4, randomPlayback)).toBe("idle");
   expect(calls).toBe(1);
+});
+
+test("idle visual during an active request is not sleep eligible", () => {
+  // Given an active request whose visual mood became idle.
+  const active = reduceGifState(initialGifState, start, 0);
+  const idle = reduceGifState(active, { ...start, type: "mood", mood: "idle", eventId: "idle" }, 1);
+  // When checking true lifecycle eligibility.
+  // Then an idle animation does not imply completed work.
+  expect(gifIdleEligible(idle, 90000)).toBe(false);
+});
+test("feedback must expire before becoming sleep eligible", () => {
+  // Given completed work with success feedback.
+  const active = reduceGifState(initialGifState, start, 0);
+  const done = reduceGifState(active, { ...start, type: "success", eventId: "done" }, 10);
+  // When the exact feedback deadline arrives.
+  // Then eligibility begins only at that deadline.
+  expect(gifIdleEligible(done, 1409)).toBe(false);
+  expect(gifIdleEligible(done, 1410)).toBe(true);
 });

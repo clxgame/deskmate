@@ -37,6 +37,7 @@ pub(super) enum RenderType {
     #[default]
     Glb,
     Gif,
+    Rig2d,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -91,6 +92,9 @@ fn validate_manifest(manifest: &PackManifest) -> Result<(), String> {
         }
         if persona.id == "xiaoxiongchong" && !matches!(persona.render_type, RenderType::Gif) {
             return Err("xiaoxiongchong 必须声明 renderType gif".into());
+        }
+        if persona.id == "baobao" && !matches!(persona.render_type, RenderType::Rig2d) {
+            return Err("baobao 必须声明 renderType rig2d".into());
         }
         for skill in &persona.skills {
             // The file name alone is declared; the directory comes from the

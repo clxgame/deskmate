@@ -534,7 +534,7 @@ function AccountTab({ settings, patch, t }: TabProps) {
         onActivePersonaRemoved={() => patch("personaId", DEFAULT_PERSONA_ID)}
         onActivePersonaChange={(nextPersonaId) => patch("personaId", nextPersonaId)}
       />
-      {personaById(personaId).renderType !== "gif" && <>
+      {(personaById(personaId).renderType ?? "glb") === "glb" && <>
       <Row label={t.mouseFollow}>
         <Switch
           label={t.mouseFollow}

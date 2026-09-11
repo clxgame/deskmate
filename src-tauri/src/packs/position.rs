@@ -8,17 +8,27 @@ pub(crate) fn persona_gif_envelope(
     let root = app.path().app_data_dir().ok()?.join("packs");
     for pack in super::installed_packs_in(&root).ok()? {
         if pack.persona_ids.iter().any(|id| id == persona_id) {
-            let path = root
-                .join(pack.pack_id)
-                .join("personas")
-                .join(persona_id)
-                .join("figure2d.json");
+            let pack_root = root.join(pack.pack_id);
+            let manifest = super::manifest::read_manifest(&pack_root.join(super::MANIFEST_NAME)).ok()?;
+            let persona = manifest.personas.iter().find(|persona| persona.id == persona_id)?;
+            let config_name = match persona.render_type {
+                super::manifest::RenderType::Glb => return None,
+                super::manifest::RenderType::Gif => "figure2d.json",
+                super::manifest::RenderType::Rig2d => "figure-rig2d.json",
+            };
+            let path = pack_root.join("personas").join(persona_id).join(config_name);
             if std::fs::metadata(&path).ok()?.len() > super::MAX_MANIFEST_BYTES {
                 return None;
             }
-            return super::figure2d::parse_config(&std::fs::read(path).ok()?)
-                .ok()?
-                .envelope;
+            let bytes = std::fs::read(path).ok()?;
+            return match persona.render_type {
+                super::manifest::RenderType::Glb => None,
+                super::manifest::RenderType::Gif => super::figure2d::parse_config(&bytes).ok()?.envelope,
+                super::manifest::RenderType::Rig2d => {
+                    super::rig2d::parse_config(&bytes).ok()?;
+                    Some(crate::pet_geometry::GifEnvelope { horizontal: 1.0, top: 1.0, bottom: 0.0 })
+                }
+            };
         }
     }
     None

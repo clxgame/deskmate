@@ -1,5 +1,6 @@
 #[path = "figure2d_v2.rs"]
 mod v2;
+pub(super) use v2::simple_polygon;
 use super::manifest::{PackManifest, RenderType};
 use serde::Deserialize;
 use std::{collections::BTreeMap, fs, path::Path};
@@ -57,6 +58,7 @@ pub(super) fn validate_personas(root: &Path, manifest: &PackManifest) -> Result<
         match persona.render_type {
             RenderType::Glb => {}
             RenderType::Gif => validate(&root.join("personas").join(&persona.id))?,
+            RenderType::Rig2d => super::rig2d::validate(&root.join("personas").join(&persona.id))?,
         }
     }
     Ok(())
@@ -95,7 +97,8 @@ pub(super) fn parse_config(bytes: &[u8]) -> Result<Figure, String> {
     if ![1, 2].contains(&figure.schema_version)
         || figure.canvas.width != 240
         || figure.canvas.height != 240
-        || figure.animations.len() != STATES.len()
+        || figure.animations.keys().any(|state| !STATES.contains(&state.as_str()) && state != "sleep")
+        || STATES.iter().any(|state| !figure.animations.contains_key(*state))
         || !bounded(figure.feedback.success_ms, 1.0, 10_000.0)
         || !bounded(figure.feedback.error_ms, 1.0, 10_000.0)
         || !bounded(figure.thinking_escalation_ms, 1.0, 60_000.0)
@@ -106,11 +109,7 @@ pub(super) fn parse_config(bytes: &[u8]) -> Result<Figure, String> {
     {
         return Err("figure2d.json 参数越界或版本不支持".into());
     }
-    for state in STATES {
-        let animation = figure
-            .animations
-            .get(state)
-            .ok_or_else(|| format!("缺少 GIF 状态: {state}"))?;
+    for (state, animation) in &figure.animations {
         let placement_valid = match figure.schema_version {
             1 => {
                 bounded(animation.scale, 0.1, 1.0)

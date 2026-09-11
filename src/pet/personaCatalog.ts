@@ -44,7 +44,7 @@ interface PersonaBase {
   readonly skills?: readonly PersonaSkillRef[];
 }
 
-export type PersonaEntry = PersonaBase & ({ readonly renderType?: "glb" } | { readonly renderType: "gif" });
+export type PersonaEntry = PersonaBase & ({ readonly renderType?: "glb" } | { readonly renderType: "gif" | "rig2d" });
 
 export interface PackName {
   readonly zh: string;
@@ -167,6 +167,12 @@ export const XIAOXIONGCHONG_PACK: PackManifest = {
   personas: [{ id: "xiaoxiongchong", name: { zh: "小熊虫", en: "Xiaoxiongchong", ja: "小熊虫", ko: "샤오슝충" }, renderType: "gif", clips: STANDARD_CLIPS, scale: 1 }],
 };
 
+export const BAOBAO_PACK: PackManifest = {
+  packId: "baobao", version: "1.0.0", builtin: false,
+  name: { zh: "包包", en: "Baobao", ja: "包包", ko: "바오바오" },
+  personas: [{ id: "baobao", name: { zh: "包包", en: "Baobao", ja: "包包", ko: "바오바오" }, renderType: "rig2d", clips: STANDARD_CLIPS, scale: 1 }],
+};
+
 /** Packs bundled with the app; always installed, never removable. */
 export const BUILTIN_PACKS: readonly PackManifest[] = [AI_SUBSTITUTE_PACK];
 
@@ -179,6 +185,7 @@ export const KNOWN_PACKS: readonly PackManifest[] = [
   AI_SUBSTITUTE_PACK,
   AKI_PACK,
   XIAOXIONGCHONG_PACK,
+  BAOBAO_PACK,
 ];
 
 const PACK_BY_ID = new Map(KNOWN_PACKS.map((pack) => [pack.packId, pack]));

@@ -22,6 +22,15 @@ function fakeHost(): AssetHost & { converted: string[] } {
 }
 
 describe("persona asset resolution", () => {
+  test("resolves rig2d assets from the installed pack and rejects path traversal", async () => {
+    const host = fakeHost();
+    const assets = await personaAssets("baobao", host);
+    if (assets.renderType !== "rig2d") throw new Error("Expected rig2d assets");
+    await assets.textureUrl("assets/sleep-0.png");
+    expect(host.converted[0]).toEndWith("packs\\baobao\\personas\\baobao\\figure-rig2d.json");
+    expect(host.converted[1]).toEndWith("packs\\baobao\\personas\\baobao\\assets\\sleep-0.png");
+    await expect(assets.textureUrl("../outside.png")).rejects.toThrow("unsafe PNG path");
+  });
   test("serves the built-in pack from the app's own origin", async () => {
     const host = fakeHost();
     const assets = await personaAssets("xiaozhu", host);

@@ -11,7 +11,7 @@ const personasRoot = resolve(projectRoot, "public/personas");
 const skillsRoot = resolve(projectRoot, "src-tauri/resources/skills");
 
 type SkillRef = { readonly id: string; readonly file: string };
-type PersonaEntry = { readonly id: string; readonly renderType?: "gif"; readonly skills?: readonly SkillRef[]; readonly defaultPosition?: DefaultPosition };
+type PersonaEntry = { readonly id: string; readonly renderType?: "gif" | "rig2d"; readonly skills?: readonly SkillRef[]; readonly defaultPosition?: DefaultPosition };
 
 async function personaFiles(id: string): Promise<readonly string[]> {
   const root = resolve(personasRoot, id);
@@ -103,7 +103,7 @@ async function main(): Promise<void> {
         await copyFile(resolve(skillsRoot, skill.id, skill.file), target);
         fileCount += 1;
       }
-      personas.push({ id, ...(renderType === "gif" ? { renderType } : {}), ...(skills.length > 0 ? { skills } : {}), ...(defaultPosition ? { defaultPosition } : {}) });
+      personas.push({ id, ...(renderType === "glb" ? {} : { renderType }), ...(skills.length > 0 ? { skills } : {}), ...(defaultPosition ? { defaultPosition } : {}) });
     }
     await copyFile(
       resolve(import.meta.dir, "persona-packs", metadata.cover),

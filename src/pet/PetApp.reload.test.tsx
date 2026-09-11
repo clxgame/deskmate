@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { StrictMode } from "react";
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { importPack } from "../lib/packs";
 import { emit } from "@tauri-apps/api/event";
 import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { restoreTauriModuleFixture } from "../testing/tauriModuleFixture";
 import { legacySettingsFixture } from "../testing/settingsFixtures";
+import { manualClock } from "./petSleepTestClock";
 import PetApp from "./PetApp";
 import { parseFigure2dConfig } from "./figure2d";
 import type { LoadedGifPersona } from "./gifAssets";
@@ -15,9 +16,12 @@ const settings = legacySettingsFixture({ personaId: "xiaoxiongchong", petScale: 
 const receipt = { packId: "xiaoxiongchong", personaIds: ["xiaoxiongchong"], version: "1.1.0", sha256: "2".repeat(64) };
 const v2: LoadedGifPersona = { config: parseFigure2dConfig(config), urls: { idle: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7#idle", thinking: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7#thinking", working: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7#working", talking: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7#talking", success: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7#success", error: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7#error", leaving: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7#leaving" } };
 const v1: LoadedGifPersona = { ...v2, config: parseFigure2dConfig({ schemaVersion: 1, canvas: config.canvas, feedback: config.feedback, leaving: config.leaving, thinkingEscalationMs: 8000, animations: Object.fromEntries(Object.entries(config.animations).map(([state, action]) => [state, { file: action.file, scale: 1, offsetY: 0 }])) }) };
+const commands: string[] = [];
 beforeEach(() => {
+  commands.length = 0;
   restoreTauriModuleFixture(); mockWindows("pet");
   mockIPC((command) => {
+    commands.push(command);
     if (command === "import_pack") throw new Error("invalid archive");
     if (command === "get_settings") return settings;
     if (command === "get_pet_visibility") return true;
@@ -83,4 +87,36 @@ test("rapid same-pack revisions abort old loads and cannot restore stale geometr
   expect(pending.map(({ revision, signal }) => [revision, signal.aborted])).toEqual([["B".repeat(64), true], ["A".repeat(64), false]]);
   expect(view.container.querySelector("img.gif-pet-image") === current).toBe(true);
   expect(current !== null).toBe(true);
+});
+
+test("legacy GIF sleeps without replacing its image and wakes with one body click", async () => {
+  // Given a loaded legacy GIF with no optional sleep asset.
+  const time = manualClock(); const load = async () => v1;
+  const view = render(<PetApp gifLoad={load} clock={time.clock} />); await act(async () => {});
+  const image = view.container.querySelector("img.gif-pet-image");
+  if (!(image instanceof HTMLImageElement)) throw new Error("expected loaded image");
+  image.getBoundingClientRect = () => new DOMRect(0, 0, 160, 160);
+  const src = image.src; act(() => time.advance(60000));
+  expect(view.container.querySelector(".pet-root")?.getAttribute("data-sleep-state")).toBe("sleep");
+  expect(view.container.querySelector("img.gif-pet-image")).toBe(image); expect(image.src).toBe(src);
+  // When the user clicks the sleeping body once.
+  const button = view.getByRole("button", { name: "Open chat" });
+  const point = { button: 0, clientX: 80, clientY: 80, screenX: 80, screenY: 80 };
+  fireEvent.mouseDown(button, point); fireEvent.mouseUp(button, point);
+  // Then it wakes and performs that same click's chat action.
+  expect(view.container.querySelector(".pet-root")?.getAttribute("data-sleep-state")).toBe("awake");
+  expect(commands.filter(command => command === "toggle_chat")).toHaveLength(1);
+});
+test("same-persona resource revision wakes and waits for replacement assets", async () => {
+  // Given a sleeping loaded pet.
+  const time = manualClock(); let reload = false; let finish: ((data: LoadedGifPersona) => void) | undefined;
+  const load = async () => reload ? new Promise<LoadedGifPersona>(resolve => { finish = resolve; }) : v1;
+  const view = render(<PetApp gifLoad={load} clock={time.clock} />); await act(async () => {}); act(() => time.advance(60000));
+  // When a replacement pack is installed but not yet loaded.
+  reload = true; await act(async () => { await emit("deskmate://pack-imported", receipt); }); act(() => time.advance(90000));
+  // Then loading time never accrues toward sleep; completion starts a full interval.
+  expect(view.container.querySelector(".pet-root")?.getAttribute("data-sleep-state")).toBe("awake");
+  await act(async () => { finish?.(v1); }); act(() => time.advance(59999));
+  expect(view.container.querySelector(".pet-root")?.getAttribute("data-sleep-state")).toBe("awake"); act(() => time.advance(1));
+  expect(view.container.querySelector(".pet-root")?.getAttribute("data-sleep-state")).toBe("sleep");
 });

@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import type { GifAnimationState } from "./figure2d";
+import type { GifDisplayState } from "./figure2d";
 import { loadGifPersona, type LoadedGifPersona } from "./gifAssets";
 import { gifDisplayRect, gifEnvelope, setGifHitPolygon } from "./gifGeometry";
 import "./gifPet.css";
@@ -7,7 +7,7 @@ import "./gifPet.css";
 interface GifPetViewProps {
   readonly personaId: string;
   readonly revision?: string;
-  readonly state: GifAnimationState;
+  readonly state: GifDisplayState;
   readonly width: number;
   readonly leaving: boolean;
   readonly visible?: boolean;
@@ -32,7 +32,9 @@ export function GifPetView({ personaId, revision = "", state, width, leaving, vi
   }, [personaId, revision, load, onError, onLoaded]);
   if (loaded === null || loaded.id !== personaId) return null;
   const data = loaded.data;
-  const action = data.config.animations[state];
+  const displayState = state === "sleep" && (!data.config.animations.sleep || !data.urls.sleep) ? "idle" : state;
+  const action = data.config.animations[displayState] ?? data.config.animations.idle;
+  const polygon = data.config.schemaVersion === 2 ? (data.config.animations[displayState] ?? data.config.animations.idle).hitPolygon : null;
   const rect = gifDisplayRect(width, action);
   const displayWidth = rect.width;
   const departure = data.config.leaving;
@@ -44,8 +46,8 @@ export function GifPetView({ personaId, revision = "", state, width, leaving, vi
     transition: leaving ? `transform ${departure.durationMs}ms ${departure.positionEasing}, opacity ${departure.durationMs}ms ${departure.opacityEasing}` : "none",
   };
   return <span className="gif-pet-frame" style={{ width, height: width, bottom: data.config.schemaVersion === 2 ? gifEnvelope(data.config).bottom * width : 0 }}>
-    <img className="gif-pet-image" src={data.urls[state]} alt="Desktop pet" draggable={false}
-      ref={(element) => { if (element) setGifHitPolygon(element, data.config.schemaVersion === 2 ? data.config.animations[state].hitPolygon : null); }}
+    <img className="gif-pet-image" src={data.urls[displayState]} alt="Desktop pet" draggable={false}
+      ref={(element) => { if (element) setGifHitPolygon(element, polygon); }}
       data-hit-disabled={!visible || leaving} data-state={state} style={style} onError={() => { setLoaded(null); onError("GIF image unavailable"); }} />
   </span>;
 }

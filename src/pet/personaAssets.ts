@@ -1,6 +1,7 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { parseGifPath } from "./figure2d";
+import { parseRig2dPath } from "./rig2d/config";
 import { AI_SUBSTITUTE_PACK, personaById } from "./personaCatalog";
 
 /**
@@ -33,7 +34,12 @@ export interface GifPersonaAssets {
   readonly configUrl: string;
   animationUrl(file: string): Promise<string>;
 }
-export type PersonaAssets = GlbPersonaAssets | GifPersonaAssets;
+export interface Rig2dPersonaAssets {
+  readonly renderType: "rig2d";
+  readonly configUrl: string;
+  textureUrl(file: string): Promise<string>;
+}
+export type PersonaAssets = GlbPersonaAssets | GifPersonaAssets | Rig2dPersonaAssets;
 
 /** Platform calls, injectable so tests need not mock Tauri modules globally. */
 export interface AssetHost {
@@ -75,18 +81,18 @@ async function importedAssets(
     "personas",
     personaId,
   );
-  if (personaById(personaId).renderType === "gif") {
-    return { renderType: "gif", configUrl: host.convertFileSrc(await host.join(personaRoot, "figure2d.json")),
-      animationUrl: async (file) => host.convertFileSrc(await host.join(personaRoot, ...parseGifPath(file).split("/"))), };
+  switch (personaById(personaId).renderType) {
+    case "gif":
+      return { renderType: "gif", configUrl: host.convertFileSrc(await host.join(personaRoot, "figure2d.json")),
+        animationUrl: async (file) => host.convertFileSrc(await host.join(personaRoot, ...parseGifPath(file).split("/"))) };
+    case "rig2d":
+      return { renderType: "rig2d", configUrl: host.convertFileSrc(await host.join(personaRoot, "figure-rig2d.json")),
+        textureUrl: async (file) => host.convertFileSrc(await host.join(personaRoot, ...parseRig2dPath(file).split("/"))) };
+    case "glb":
+    case undefined:
+      return { renderType: "glb", modelUrl: host.convertFileSrc(await host.join(personaRoot, "figure.glb")),
+        textureUrl: async (slot) => host.convertFileSrc(await host.join(personaRoot, "textures", slot, "baseColor.png")) };
   }
-  return {
-    renderType: "glb",
-    modelUrl: host.convertFileSrc(await host.join(personaRoot, "figure.glb")),
-    textureUrl: async (slot) =>
-      host.convertFileSrc(
-        await host.join(personaRoot, "textures", slot, "baseColor.png"),
-      ),
-  };
 }
 
 /**

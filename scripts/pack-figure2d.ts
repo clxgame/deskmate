@@ -2,8 +2,14 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseFigure2dConfig } from "../src/pet/figure2d";
 import { PackAuthoringError } from "./pack-metadata";
+import { validateRig2dPersona } from "./pack-rig2d";
 
-export async function personaRenderType(root: string, files: readonly string[]): Promise<"glb" | "gif"> {
+export async function personaRenderType(root: string, files: readonly string[]): Promise<"glb" | "gif" | "rig2d"> {
+  if (files.includes("figure-rig2d.json")) {
+    if (files.includes("figure2d.json") || files.includes("figure.glb")) throw new PackAuthoringError("Persona has conflicting renderer configs");
+    await validateRig2dPersona(root, files);
+    return "rig2d";
+  }
   if (!files.includes("figure2d.json")) {
     if (files.some(file => file.endsWith(".gif"))) throw new PackAuthoringError("GIF assets require figure2d.json");
     return "glb";

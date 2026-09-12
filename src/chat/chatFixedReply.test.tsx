@@ -353,7 +353,7 @@ describe("小著固定名字由来回复", () => {
     if (!receive) throw new Error("SSE handler was not registered");
 
     await act(async () => {
-      fireEvent.change(input, { target: { value: "给我一句慢回复" } });
+      fireEvent.change(input, { target: { value: "解释 **Markdown**" } });
     });
     await waitFor(() => expect((send as HTMLButtonElement).disabled).toBe(false));
 
@@ -377,20 +377,52 @@ describe("小著固定名字由来回复", () => {
             sessionID: "ses_fixed",
             messageID: "msg-slow",
             type: "text",
-            text: "这是超过两秒才到的内容",
+            text: "这是超过两秒才到的**内容",
           },
         },
       });
       await Promise.resolve();
     });
-    expect(screen.getByText("这是超过两秒才到的内容")).toBeDefined();
+    expect(document.querySelector(".chat-msg-user .chat-bubble")?.textContent).toBe("解释 **Markdown**");
+    expect(document.querySelector(".chat-msg-user strong")).toBeNull();
+    expect(document.querySelector(".chat-msg-assistant strong")?.textContent).toBe("内容");
+    expect(document.querySelector(".chat-msg-assistant .chat-bubble")?.textContent).toBe("这是超过两秒才到的内容");
     expect(document.querySelector(".chat-typing")).not.toBeNull();
+
+    const list = document.querySelector<HTMLDivElement>(".chat-list");
+    if (!list) throw new Error("Missing chat list");
+    Object.defineProperties(list, {
+      scrollHeight: { configurable: true, value: 1000 },
+      clientHeight: { configurable: true, value: 200 },
+      scrollTop: { configurable: true, writable: true, value: 100 },
+    });
+    const scrollTo = mock(() => {});
+    list.scrollTo = scrollTo;
+    await act(async () => {
+      fireEvent.scroll(list);
+      receive({ type: "message.part.updated", properties: { part: {
+        sessionID: "ses_fixed", messageID: "msg-slow", type: "text", text: "这是超过两秒才到的**内容",
+      } } });
+      await Promise.resolve();
+    });
+    expect(scrollTo).not.toHaveBeenCalled();
+    await act(async () => {
+      list.scrollTop = 800;
+      fireEvent.scroll(list);
+      receive({ type: "message.part.updated", properties: { part: {
+        sessionID: "ses_fixed", messageID: "msg-slow", type: "text", text: "这是超过两秒才到的**内容",
+      } } });
+      await Promise.resolve();
+    });
+    expect(scrollTo).toHaveBeenCalledWith({ top: 1000 });
 
     await act(async () => {
       receive({ type: "session.idle", properties: { sessionID: "ses_fixed" } });
       await Promise.resolve();
     });
     expect(document.querySelector(".chat-typing")).toBeNull();
+    expect(document.querySelector(".chat-msg-assistant strong")).toBeNull();
+    expect(document.querySelector(".chat-msg-assistant .chat-bubble")?.textContent).toBe("这是超过两秒才到的**内容");
   });
 
   test("does not add an empty placeholder bubble next to the typing indicator", async () => {

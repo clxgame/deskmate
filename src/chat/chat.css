@@ -10,10 +10,14 @@
   --s-1: 4px;
   --s-2: 8px;
   --s-3: 12px;
+  --s-5: 20px;
   --s-8: 32px;
   --attachment-name-max-w: 210px;
   --attachment-tray-max-h: 84px;
   --t-small: 11px;
+  --t-body: 13px;
+  --t-title: 14px;
+  --t-head: 15px;
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -133,6 +137,7 @@
 }
 
 .chat-msg {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   max-width: 85%;
@@ -144,21 +149,20 @@
 }
 
 .chat-msg-assistant {
+  max-width: 92%;
   align-self: flex-start;
   align-items: flex-start;
 }
 
 .chat-bubble {
+  min-width: 0;
+  max-width: 100%;
   padding: 8px 12px;
   border-radius: 12px;
   font-size: 13px;
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-.chat-emphasis {
-  font-weight: 700;
 }
 
 .chat-msg-user .chat-bubble {

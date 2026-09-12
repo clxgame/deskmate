@@ -67,6 +67,7 @@ import {
 import { ArtifactCard } from "./ArtifactCard";
 import { AttachmentTray } from "./AttachmentTray";
 import { ChatText } from "./ChatText";
+import { ChatNavigation } from "./ChatNavigation";
 import { useWorklogChat } from "./useWorklogChat";
 import { WorklogReceipt, worklogChatCopy } from "./WorklogReceipt";
 import { buildWorklogSystemInstruction, newUserMessageId, registerWorklogTurn, WORKLOG_TOOLS } from "./worklogActions";
@@ -204,6 +205,8 @@ export default function ChatApp() {
   /** role by server messageID; used to skip user-message parts in SSE. */
   const rolesRef = useRef<Map<string, string>>(new Map());
   const listRef = useRef<HTMLDivElement>(null);
+  const followLatestRef = useRef(true);
+  const lastScrollUserRef = useRef<string | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragDepthRef = useRef(0);
   /** mirror of `messages` for persisting history outside render. */
@@ -745,10 +748,12 @@ export default function ChatApp() {
     }
   }, []);
 
-  // Auto-scroll on new content.
   useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
-  }, [messages]);
+    const lastUser = messages.filter((message) => message.role === "user").at(-1)?.id;
+    if (lastUser !== lastScrollUserRef.current) followLatestRef.current = true;
+    lastScrollUserRef.current = lastUser;
+    if (followLatestRef.current) listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+  }, [messages, view]);
 
   // Mirror messages into a ref for history persistence.
   useEffect(() => {
@@ -1254,7 +1259,11 @@ export default function ChatApp() {
         />
       ) : (
         <>
-          <div className="chat-list" ref={listRef}>
+          <div className="chat-timeline">
+          <div className="chat-list" ref={listRef} onScroll={(event) => {
+            const list = event.currentTarget;
+            followLatestRef.current = list.scrollHeight - list.clientHeight - list.scrollTop < 48;
+          }}>
             {ccSwitchSetupOpen && (
               <CcSwitchSetupCard
                 t={t}
@@ -1268,7 +1277,7 @@ export default function ChatApp() {
             )}
             {messages.length === 0 && (
               <div className="chat-empty">
-                <ChatText text={chatEmpty} />
+                <ChatText text={chatEmpty} format="plain" />
               </div>
             )}
             {messages.map((m) => {
@@ -1288,7 +1297,7 @@ export default function ChatApp() {
                 );
               }
               return (
-                <div key={m.id} className={`chat-msg chat-msg-${m.role}`}>
+                <div key={m.id} data-message-id={m.id} className={`chat-msg chat-msg-${m.role}`}>
                   {m.activity && (
                     <div className="chat-activity">
                       <AppIcon name="general" size={16} className="chat-activity-icon" />{" "}
@@ -1307,7 +1316,9 @@ export default function ChatApp() {
                   )}
                   {(m.text.trim().length > 0 || m.role === "user") && (
                     <div className="chat-bubble">
-                      <ChatText text={m.text} />
+                      <ChatText text={m.text} format={m.role === "assistant" ? "markdown" : "plain"}
+                        streaming={status === "busy" && m.role === "assistant" && m.id === messages.at(-1)?.id}
+                        lang={lang} />
                     </div>
                   )}
                   {m.text.trim().length > 0 && (
@@ -1394,6 +1405,8 @@ export default function ChatApp() {
             {worklog.operations.filter((operation) => !messages.some((message) => message.id === operation.messageId)).map((operation) => <WorklogReceipt key={operation.requestId} operation={operation} language={lang} onUndo={worklog.undo} onRefresh={worklog.refresh} />)}
           </div>
 
+          <ChatNavigation messages={messages} listRef={listRef} lang={lang} onNavigate={() => { followLatestRef.current = false; }} />
+          </div>
           {memoryNotice && (
             <div className="chat-memory-notice" role="status" aria-live="polite">
               {memoryNotice}

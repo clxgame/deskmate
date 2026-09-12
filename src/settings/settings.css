@@ -951,9 +951,17 @@ body,
 }
 
 .set-ai-provider-tab[aria-expanded="true"] {
-  background: var(--surface-raised);
-  border-color: var(--line);
-  border-bottom-color: var(--surface-raised);
+  color: var(--accent-ink);
+}
+
+.set-ai-provider-tabs .set-ai-provider-tab,
+.set-ai-provider-tabs .set-ai-provider-tab:hover:not(:disabled),
+.set-ai-provider-tabs .set-ai-provider-tab:active:not(:disabled) {
+  background: transparent;
+  border-color: transparent;
+}
+
+.set-ai-provider-tabs .set-ai-provider-tab:hover:not(:disabled) {
   color: var(--accent-ink);
 }
 

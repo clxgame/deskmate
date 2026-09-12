@@ -14,6 +14,7 @@ use tauri::{Emitter, Manager, RunEvent, State};
 mod ai_usage;
 pub mod ccswitch;
 mod chat_attachments;
+mod chat_links;
 mod history;
 mod local_ai_deploy;
 /// Local memory: storage, policy, retrieval, and the frontend command surface.
@@ -1246,6 +1247,7 @@ pub fn run() {
         .manage(pet_geometry::PetGeometryState::default())
         .manage(Arc::new(ChatMotion::default()))
         .invoke_handler(tauri::generate_handler![
+            chat_links::open_chat_link,
             pet_visibility::acknowledge_pet_visibility,
             pet_visibility::register_pet_visibility,
             pet_visibility::get_pet_visibility,

@@ -21,6 +21,17 @@
 .worklog-days { display: flex; flex-wrap: wrap; gap: var(--s-2); border: 1px solid var(--line); border-radius: var(--r-sm); padding: var(--s-2); margin: 0; }
 .worklog-days label { display: flex; align-items: center; gap: var(--s-1); }
 .worklog-preview { white-space: pre-wrap; margin: 0; font: inherit; overflow-wrap: anywhere; }
+.worklog-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); justify-content: space-between; }
+.worklog-schedule-link { color: var(--text-dim); }
+.worklog-tasks { display: flex; flex-direction: column; gap: var(--s-3); border-top: 1px solid var(--line); padding-top: var(--s-3); }
+.worklog-week-picker { --worklog-week-list-height: 176px; flex: 1; min-width: 0; }
+.worklog-week-picker > summary { cursor: pointer; color: var(--accent-ink); }
+.worklog-week-panel { display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-2); margin-top: var(--s-2); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-raised); }
+.worklog-week-options { display: flex; flex-direction: column; gap: var(--s-1); max-height: var(--worklog-week-list-height); overflow-y: auto; padding: var(--s-1); }
+.worklog-week-option { text-align: start; flex-shrink: 0; }
+.worklog-week-option[data-period="past"] { color: var(--text-dim); }
+.worklog-week-option[data-period="current"] { background: var(--accent-soft); color: var(--accent-ink); }
+.worklog-week-option[aria-pressed="true"] { border-color: var(--accent-ink); }
 @media (max-width: 600px) {
   .worklog-filters {
     display: grid;
@@ -30,4 +41,5 @@
   .worklog-filters > .worklog-field:last-child {
     grid-column: 1 / -1;
   }
+  .worklog-week-picker { grid-column: 1 / -1; }
 }

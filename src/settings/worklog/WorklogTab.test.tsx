@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, expect, mock, setSystemTime, test } from "bun:test";
 import * as core from "@tauri-apps/api/core";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Entry } from "../../lib/worklog";
 const invoke = mock<(command: string, args?: unknown) => Promise<unknown>>(() => Promise.resolve([]));
@@ -9,8 +9,8 @@ mock.module("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() =
 const { WorklogTab } = await import("./WorklogTab");
 const { dict } = await import("../../lib/i18n");
 const entry: Entry = { id: "e1", revision: 3, businessDate: "2026-09-08", project: "YUME", text: "完成登录联调", originalText: "完成登录联调", status: "done", sourceSessionId: null, sourceMessageId: null, createdAt: "2026-09-08T01:00:00Z", updatedAt: "2026-09-08T01:00:00Z" };
-beforeEach(() => { invoke.mockClear(); invoke.mockImplementation(() => Promise.resolve([])); });
-afterEach(cleanup);
+beforeEach(() => { setSystemTime(new Date("2026-09-12T12:00:00+08:00")); invoke.mockClear(); invoke.mockImplementation(() => Promise.resolve([])); });
+afterEach(() => { cleanup(); setSystemTime(); });
 test("shows empty state when no persisted records exist", async () => {
   // Given an empty host repository.
   // When the work records center opens.
@@ -69,7 +69,7 @@ test("keeps valid per-entry request IDs when a range deletion partly fails and r
     return Promise.resolve({ status: "deleted" });
   });
   render(<WorklogTab language="zh-CN" t={dict("zh-CN")} />);
-  await user.click(await screen.findByRole("button", { name: "删除筛选事项" }));
+  await user.click(await screen.findByRole("button", { name: "删除筛选任务" }));
   await user.click(screen.getByRole("button", { name: "确认删除" }));
   await screen.findByRole("alert");
   expect(records.map((record) => record.id)).toEqual(["e2"]);
@@ -78,4 +78,61 @@ test("keeps valid per-entry request IDs when a range deletion partly fails and r
   const deletes = invoke.mock.calls.filter(([command]) => command === "worklog_delete_entry");
   expect(deletes).toHaveLength(3);
   expect(deletes[1]?.[1]).toEqual(deletes[2]?.[1]);
+});
+
+test("opens daily reports with tasks below and only two primary views", async () => {
+  render(<WorklogTab language="zh-CN" t={dict("zh-CN")} />);
+  await screen.findByText("这个范围内还没有工作记录。");
+  const navigation = screen.getByRole("group", { name: "工作日志" });
+  expect(within(navigation).getAllByRole("button").map((button) => button.textContent)).toEqual(["日报", "周报"]);
+  expect(screen.getByRole("button", { name: "日报" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByLabelText("日期").getAttribute("value")).toBe("2026-09-12");
+  expect(screen.getByRole("region", { name: "任务" }).compareDocumentPosition(screen.getByText("这个时间段内还没有报告。")) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+});
+
+test("defaults weekly queries to Monday through Sunday and highlights the current week", async () => {
+  const user = userEvent.setup();
+  render(<WorklogTab language="zh-CN" t={dict("zh-CN")} />);
+  await user.click(screen.getByRole("button", { name: "周报" }));
+  await waitFor(() => expect(invoke.mock.calls.filter(([command]) => command === "worklog_query").at(-1)?.[1]).toEqual({ query: { start: "2026-09-07", end: "2026-09-13", project: null } }));
+  expect(invoke.mock.calls.filter(([command]) => command === "worklog_list_reports").at(-1)?.[1]).toEqual({ query: { start: "2026-09-07", end: "2026-09-13", project: null } });
+  const summary = screen.getByText("2026 · 第37周（9.7-9.13）");
+  expect(summary.closest("details")?.open).toBe(false);
+  await user.click(summary);
+  expect(screen.getByRole("button", { name: "第36周（8.31-9.6）" }).getAttribute("data-period")).toBe("past");
+  expect(screen.getByRole("button", { name: "第37周（9.7-9.13）" }).getAttribute("aria-current")).toBe("date");
+  expect(screen.getByRole("button", { name: "第38周（9.14-9.20）" }).getAttribute("data-period")).toBe("future");
+});
+
+test("changes both task and report queries when selecting a past or future week", async () => {
+  const user = userEvent.setup();
+  render(<WorklogTab language="zh-CN" t={dict("zh-CN")} />);
+  await user.click(screen.getByRole("button", { name: "周报" }));
+  for (const [name, start, end] of [["第36周（8.31-9.6）", "2026-08-31", "2026-09-06"], ["第38周（9.14-9.20）", "2026-09-14", "2026-09-20"]]) {
+    const summary = document.querySelector(".worklog-week-picker summary");
+    if (!(summary instanceof HTMLElement)) throw new Error("Missing week picker");
+    await user.click(summary);
+    await user.click(screen.getByRole("button", { name }));
+    await waitFor(() => expect(invoke.mock.calls.filter(([command]) => command === "worklog_query").at(-1)?.[1]).toEqual({ query: { start, end, project: null } }));
+    expect(invoke.mock.calls.filter(([command]) => command === "worklog_list_reports").at(-1)?.[1]).toEqual({ query: { start, end, project: null } });
+  }
+});
+
+test("clears old tasks when another day's query fails", async () => {
+  invoke.mockImplementation((command) => Promise.resolve(command === "worklog_query" ? [entry] : []));
+  render(<WorklogTab language="zh-CN" t={dict("zh-CN")} />);
+  await screen.findByRole("button", { name: /完成登录联调/ });
+  invoke.mockImplementation(() => Promise.reject({ code: "STORAGE_UNAVAILABLE", message: "unavailable" }));
+  fireEvent.change(screen.getByLabelText("日期"), { target: { value: "2026-09-11" } });
+  await screen.findByRole("alert");
+  expect(screen.queryByRole("button", { name: /完成登录联调/ })).toBeNull();
+  expect(screen.queryByText("这个范围内还没有工作记录。")).toBeNull();
+});
+
+test("new tasks in the current week default to today's business date rather than Sunday", async () => {
+  const user = userEvent.setup();
+  render(<WorklogTab language="zh-CN" t={dict("zh-CN")} />);
+  await user.click(screen.getByRole("button", { name: "周报" }));
+  await user.click(screen.getByRole("button", { name: "添加任务" }));
+  expect(screen.getByLabelText("日期").getAttribute("value")).toBe("2026-09-12");
 });

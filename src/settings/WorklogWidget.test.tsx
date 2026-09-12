@@ -41,16 +41,16 @@ test("shows work journal as a lazy peer widget without a separate sidebar", asyn
   expect(invoke.mock.calls.some(([command]) => command === "worklog_query")).toBe(false);
   // When the work journal is selected.
   await openLog();
-  // Then all four sections belong to its peer panel.
+  // Then report views and secondary schedule settings belong to its peer panel.
   expect(within(screen.getByRole("navigation")).queryByRole("button", { name: /工作(日志|记录)/ })).toBeNull();
   expect(within(screen.getByRole("group", { name: t.widgetSelector })).getAllByRole("button")).toHaveLength(3);
-  for (const name of ["事项", "日报", "周报", "报告任务"]) expect(screen.getByRole("button", { name })).toBeTruthy();
+  for (const name of ["日报", "周报", "报告定时设置"]) expect(screen.getByRole("button", { name })).toBeTruthy();
 });
 test("retains the entry draft and filters while another peer is selected", async () => {
   // Given a project filter and an unsaved entry.
   await openWidgets(); await openLog();
   fireEvent.change(screen.getByRole("textbox", { name: "项目" }), { target: { value: "YUME" } });
-  fireEvent.click(screen.getByRole("button", { name: "添加事项" }));
+  fireEvent.click(screen.getByRole("button", { name: "添加任务" }));
   fireEvent.change(screen.getByRole("textbox", { name: "内容" }), { target: { value: "不要丢失的草稿" } });
   // When the user visits Pomodoro and returns.
   fireEvent.click(screen.getByRole("button", { name: t.pomodoroTitle }));
@@ -74,7 +74,7 @@ test("reopens repeated entry links and clears their detail for a generic request
   expect(await screen.findByRole("textbox", { name: "内容" })).toBeTruthy();
   await emit("worklog-target", null);
   expect(screen.queryByRole("textbox", { name: "内容" })).toBeNull();
-  expect(screen.getByRole("button", { name: "添加事项" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "添加任务" })).toBeTruthy();
 });
 test("routes the legacy generic event into the work journal peer", async () => {
   // Given another selected widget.
@@ -91,7 +91,7 @@ test("does not replay a consumed entry link after returning from another peer", 
   await openWidgets(); await emit("worklog-target", { kind: "entry", id: entry.id });
   await screen.findByRole("textbox", { name: "内容" });
   fireEvent.click(screen.getByRole("button", { name: "返回" }));
-  fireEvent.click(screen.getByRole("button", { name: "添加事项" }));
+  fireEvent.click(screen.getByRole("button", { name: "添加任务" }));
   fireEvent.change(screen.getByRole("textbox", { name: "内容" }), { target: { value: "新草稿" } });
   // When the user returns from a different peer.
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: t.scheduledTasks })); });
@@ -130,15 +130,15 @@ test("opens a report from another peer and retries its actual lookup after failu
 test("reopens a repeated schedule link but does not replay it on later section selection", async () => {
   // Given a schedule receipt whose editor was dismissed.
   await openWidgets(); const target = { kind: "schedule", id: "s1" };
-  await emit("worklog-target", target); await screen.findByRole("combobox", { name: "报告任务" });
+  await emit("worklog-target", target); await screen.findByRole("combobox", { name: "报告定时设置" });
   fireEvent.click(screen.getByRole("button", { name: "取消" }));
   // When the same receipt is opened again.
   await emit("worklog-target", target);
   // Then its editor opens again, while later manual section navigation clears the target.
-  expect(await screen.findByRole("combobox", { name: "报告任务" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "事项" }));
-  fireEvent.click(screen.getByRole("button", { name: "报告任务" }));
-  expect(screen.queryByRole("combobox", { name: "报告任务" })).toBeNull();
+  expect(await screen.findByRole("combobox", { name: "报告定时设置" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "日报" }));
+  fireEvent.click(screen.getByRole("button", { name: "报告定时设置" }));
+  expect(screen.queryByRole("combobox", { name: "报告定时设置" })).toBeNull();
 });
 
 test("buffers a work journal target received before settings finishes loading", async () => {
@@ -164,7 +164,7 @@ test("cancels an obsolete report response when a generic request follows it", as
   await act(async () => { deferred.resolve(report); });
   // Then the late response cannot reopen the report.
   expect(screen.queryByRole("textbox", { name: "内容" })).toBeNull();
-  expect(screen.getByRole("button", { name: "添加事项" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "添加任务" })).toBeTruthy();
 });
 
 test("activates the work journal peer with the keyboard", async () => {
@@ -174,7 +174,7 @@ test("activates the work journal peer with the keyboard", async () => {
   // When Enter activates the native button.
   await user.keyboard("{Enter}");
   // Then the full workspace is available and the tile remains selected.
-  expect(await screen.findByRole("button", { name: "添加事项" })).toBeTruthy();
+  expect(await screen.findByRole("button", { name: "添加任务" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "工作日志" }).getAttribute("aria-pressed")).toBe("true");
 });
 

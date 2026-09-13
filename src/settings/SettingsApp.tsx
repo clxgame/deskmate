@@ -275,40 +275,6 @@ export default function SettingsApp() {
 
 // ---------------------------------------------------------------- primitives
 
-function RenderSlider({
-  label,
-  value,
-  min,
-  max,
-  step,
-  format,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  format: (value: number) => string;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <Row label={label}>
-      <input
-        className="set-slider"
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        aria-label={label}
-        onChange={(e) => onChange(Number(e.target.value))}
-      />
-      <span className="set-slider-value">{format(value)}</span>
-    </Row>
-  );
-}
-
 function ThemePicker({
   value,
   onChange,
@@ -536,6 +502,13 @@ function AccountTab({ settings, patch, t }: TabProps) {
             onChange={(value) => patch("alwaysOnTop", value)}
           />
         </Row>
+        {(personaById(personaId).renderType ?? "glb") === "glb" && <Row label={t.mouseFollow}>
+          <Switch
+            label={t.mouseFollow}
+            checked={settings.mouseFollow}
+            onChange={(value) => patch("mouseFollow", value)}
+          />
+        </Row>}
       </div>
       <Row label={t.userName} className="set-row-nickname">
         <input
@@ -555,51 +528,6 @@ function AccountTab({ settings, patch, t }: TabProps) {
         onActivePersonaRemoved={() => patch("personaId", DEFAULT_PERSONA_ID)}
         onActivePersonaChange={(nextPersonaId) => patch("personaId", nextPersonaId)}
       />
-      {(personaById(personaId).renderType ?? "glb") === "glb" && <>
-      <Row label={t.mouseFollow}>
-        <Switch
-          label={t.mouseFollow}
-          checked={settings.mouseFollow}
-          onChange={(value) => patch("mouseFollow", value)}
-        />
-      </Row>
-      <RenderSlider
-        label={t.outlineWidth}
-        value={settings.outlineWidth}
-        min={0}
-        max={0.03}
-        step={0.0001}
-        format={(value) => value.toFixed(4)}
-        onChange={(value) => patch("outlineWidth", value)}
-      />
-      <RenderSlider
-        label={t.rimWidth}
-        value={settings.rimWidth}
-        min={0}
-        max={1}
-        step={0.01}
-        format={(value) => value.toFixed(2)}
-        onChange={(value) => patch("rimWidth", value)}
-      />
-      <RenderSlider
-        label={t.rimIntensity}
-        value={settings.rimIntensity}
-        min={0}
-        max={2}
-        step={0.05}
-        format={(value) => value.toFixed(2)}
-        onChange={(value) => patch("rimIntensity", value)}
-      />
-      <RenderSlider
-        label={t.specularIntensity}
-        value={settings.specularIntensity}
-        min={0}
-        max={2}
-        step={0.05}
-        format={(value) => value.toFixed(2)}
-        onChange={(value) => patch("specularIntensity", value)}
-      />
-      </>}
     </>
   );
 }

@@ -23,8 +23,7 @@ struct KuroUsagePayload {
     period_remaining_cny: Option<f64>,
     requests: Option<u64>,
     cost_cny: Option<f64>,
-    #[serde(default)]
-    models: Vec<KuroUsageModel>,
+    models: Option<Vec<KuroUsageModel>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -98,6 +97,7 @@ fn parse_usage_payload(
     };
     let mut top_models = payload
         .models
+        .unwrap_or_default()
         .into_iter()
         .filter_map(|model| {
             let cost_cny = model
@@ -313,6 +313,26 @@ mod tests {
         assert_eq!(usage.days_until_reset, 6);
         assert_eq!(usage.top_models[0].name, "claude-opus-4.8");
         assert_eq!(usage.top_models[1].name, "gpt-5.4-mini");
+    }
+
+    #[test]
+    fn preserves_usage_summary_when_models_is_null() {
+        let payload = serde_json::json!({
+            "period_limit_cny": 30000000,
+            "period_remaining_cny": 30000000,
+            "cost_cny": 0,
+            "requests": 0,
+            "models": null
+        });
+
+        let usage = parse_usage_payload(payload, 7).expect("null models means no model breakdown");
+
+        assert_eq!(usage.remaining_cny, 30000000.0);
+        assert_eq!(usage.limit_cny, 30000000.0);
+        assert_eq!(usage.remaining_pct, 100);
+        assert_eq!(usage.today_cost_cny, 0.0);
+        assert_eq!(usage.today_requests, 0);
+        assert!(usage.top_models.is_empty());
     }
 
     #[test]

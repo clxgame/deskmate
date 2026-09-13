@@ -24,14 +24,21 @@
 .worklog-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); justify-content: space-between; }
 .worklog-schedule-link { color: var(--text-dim); }
 .worklog-tasks { display: flex; flex-direction: column; gap: var(--s-3); border-top: 1px solid var(--line); padding-top: var(--s-3); }
-.worklog-week-picker { --worklog-week-list-height: 176px; flex: 1; min-width: 0; }
+.worklog-week-picker { --worklog-week-row-height: 36px; --worklog-week-visible-rows: 5; flex: 1; min-width: 0; }
 .worklog-week-picker > summary { cursor: pointer; color: var(--accent-ink); }
 .worklog-week-panel { display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-2); margin-top: var(--s-2); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-raised); }
-.worklog-week-options { display: flex; flex-direction: column; gap: var(--s-1); max-height: var(--worklog-week-list-height); overflow-y: auto; padding: var(--s-1); }
-.worklog-week-option { text-align: start; flex-shrink: 0; }
+.worklog-week-wheel { position: relative; min-width: 0; }
+.worklog-week-band { position: absolute; top: 50%; transform: translateY(-50%); height: var(--worklog-week-row-height); width: 100%; background: var(--surface-hover); border-radius: var(--r-sm); pointer-events: none; }
+.worklog-week-options { position: relative; height: calc(var(--worklog-week-row-height) * var(--worklog-week-visible-rows)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; scroll-snap-type: y mandatory; padding-block: calc(var(--worklog-week-row-height) * (var(--worklog-week-visible-rows) - 1) / 2); box-sizing: border-box; mask-image: linear-gradient(transparent, #000 25%, #000 75%, transparent); }
+.worklog-week-options::-webkit-scrollbar { display: none; }
+.worklog-week-options[data-dragging="true"] { scroll-snap-type: none; cursor: grabbing; }
+.worklog .worklog-week-options:focus-visible { outline: none; }
+.worklog-week-wheel:has(.worklog-week-options:focus-visible) { outline: 2px solid var(--accent-ink); outline-offset: 2px; border-radius: var(--r-sm); }
+.worklog-week-option { height: var(--worklog-week-row-height); box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: var(--s-2); padding-inline: var(--s-1); scroll-snap-align: center; color: var(--text); font: inherit; font-variant-numeric: tabular-nums; white-space: nowrap; cursor: grab; user-select: none; }
+.worklog-week-option[aria-selected="true"] { font-weight: 600; }
 .worklog-week-option[data-period="past"] { color: var(--text-dim); }
-.worklog-week-option[data-period="current"] { background: var(--accent-soft); color: var(--accent-ink); }
-.worklog-week-option[aria-pressed="true"] { border-color: var(--accent-ink); }
+.worklog-week-option[data-period="current"] { color: var(--accent-ink); }
+.worklog-week-current { font-size: var(--t-small); }
 @media (max-width: 600px) {
   .worklog-filters {
     display: grid;

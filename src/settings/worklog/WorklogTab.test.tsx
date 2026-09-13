@@ -3,6 +3,7 @@ import * as core from "@tauri-apps/api/core";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Entry } from "../../lib/worklog";
+import { measureWeekWheel } from "../../testing/weekWheelGeometry";
 const invoke = mock<(command: string, args?: unknown) => Promise<unknown>>(() => Promise.resolve([]));
 mock.module("@tauri-apps/api/core", () => ({ ...core, invoke }));
 mock.module("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => {}), emit: () => Promise.resolve() }));
@@ -99,23 +100,49 @@ test("defaults weekly queries to Monday through Sunday and highlights the curren
   const summary = screen.getByText("2026 · 第37周（9.7-9.13）");
   expect(summary.closest("details")?.open).toBe(false);
   await user.click(summary);
-  expect(screen.getByRole("button", { name: "第36周（8.31-9.6）" }).getAttribute("data-period")).toBe("past");
-  expect(screen.getByRole("button", { name: "第37周（9.7-9.13）" }).getAttribute("aria-current")).toBe("date");
-  expect(screen.getByRole("button", { name: "第38周（9.14-9.20）" }).getAttribute("data-period")).toBe("future");
+  expect(screen.getByRole("option", { name: "第36周（8.31-9.6）" }).getAttribute("data-period")).toBe("past");
+  expect(screen.getByRole("option", { name: "第37周（9.7-9.13） 本周" }).getAttribute("aria-current")).toBe("date");
+  expect(screen.getByRole("option", { name: "第38周（9.14-9.20）" }).getAttribute("data-period")).toBe("future");
 });
 
 test("changes both task and report queries when selecting a past or future week", async () => {
   const user = userEvent.setup();
   render(<WorklogTab language="zh-CN" t={dict("zh-CN")} />);
   await user.click(screen.getByRole("button", { name: "周报" }));
+  const summary = document.querySelector(".worklog-week-picker summary");
+  if (!(summary instanceof HTMLElement)) throw new Error("Missing week picker");
+  await user.click(summary);
+  measureWeekWheel(screen.getByRole("listbox"));
   for (const [name, start, end] of [["第36周（8.31-9.6）", "2026-08-31", "2026-09-06"], ["第38周（9.14-9.20）", "2026-09-14", "2026-09-20"]]) {
-    const summary = document.querySelector(".worklog-week-picker summary");
-    if (!(summary instanceof HTMLElement)) throw new Error("Missing week picker");
-    await user.click(summary);
-    await user.click(screen.getByRole("button", { name }));
+    await user.click(screen.getByRole("option", { name }));
+    fireEvent(screen.getByRole("listbox"), new Event("scrollend"));
     await waitFor(() => expect(invoke.mock.calls.filter(([command]) => command === "worklog_query").at(-1)?.[1]).toEqual({ query: { start, end, project: null } }));
     expect(invoke.mock.calls.filter(([command]) => command === "worklog_list_reports").at(-1)?.[1]).toEqual({ query: { start, end, project: null } });
+    expect(summary.closest("details")?.open).toBe(true);
   }
+});
+
+test("only queries the final week after continuous scrolling and does not query again on reopening", async () => {
+  render(<WorklogTab language="zh-CN" t={dict("zh-CN")} />);
+  fireEvent.click(screen.getByRole("button", { name: "周报" }));
+  await screen.findByText("这个范围内还没有工作记录。");
+  const summary = screen.getByText("2026 · 第37周（9.7-9.13）");
+  fireEvent.click(summary);
+  const list = measureWeekWheel(screen.getByRole("listbox"));
+  const queries = () => invoke.mock.calls.filter(([command]) => command === "worklog_query");
+  const reports = () => invoke.mock.calls.filter(([command]) => command === "worklog_list_reports");
+  const before = [queries().length, reports().length];
+  for (const index of [35, 37, 38]) {
+    fireEvent.wheel(list); list.scrollTop = index * 36; fireEvent.scroll(list);
+  }
+  expect([queries().length, reports().length]).toEqual(before);
+  fireEvent(list, new Event("scrollend"));
+  await waitFor(() => expect(queries().length).toBe((before[0] ?? 0) + 1));
+  expect(reports().length).toBe((before[1] ?? 0) + 1);
+  expect(queries().at(-1)?.[1]).toEqual({ query: { start: "2026-09-21", end: "2026-09-27", project: null } });
+  expect(reports().at(-1)?.[1]).toEqual(queries().at(-1)?.[1]);
+  fireEvent.click(summary); fireEvent.click(summary);
+  expect([queries().length, reports().length]).toEqual(before.map((count) => count + 1));
 });
 
 test("clears old tasks when another day's query fails", async () => {
@@ -127,6 +154,50 @@ test("clears old tasks when another day's query fails", async () => {
   await screen.findByRole("alert");
   expect(screen.queryByRole("button", { name: /完成登录联调/ })).toBeNull();
   expect(screen.queryByText("这个范围内还没有工作记录。")).toBeNull();
+});
+
+test("a failed week query hides old records and retries the selected week", async () => {
+  invoke.mockImplementation((command) => Promise.resolve(command === "worklog_query" ? [entry] : []));
+  render(<WorklogTab language="zh-CN" t={dict("zh-CN")} />);
+  fireEvent.click(screen.getByRole("button", { name: "周报" }));
+  await screen.findByRole("button", { name: /完成登录联调/ });
+  fireEvent.click(screen.getByText("2026 · 第37周（9.7-9.13）"));
+  measureWeekWheel(screen.getByRole("listbox"));
+  invoke.mockImplementation(() => Promise.reject({ code: "STORAGE_UNAVAILABLE", message: "unavailable" }));
+  fireEvent.click(screen.getByRole("option", { name: "第36周（8.31-9.6）" }));
+  fireEvent(screen.getByRole("listbox"), new Event("scrollend"));
+  await screen.findByRole("alert");
+  expect(screen.queryByRole("button", { name: /完成登录联调/ })).toBeNull();
+  expect(screen.queryByText("这个范围内还没有工作记录。")).toBeNull();
+  invoke.mockImplementation(() => Promise.resolve([]));
+  fireEvent.click(screen.getByRole("button", { name: "重试" }));
+  await screen.findByText("这个范围内还没有工作记录。");
+  expect(invoke.mock.calls.filter(([command]) => command === "worklog_query").at(-1)?.[1]).toEqual({ query: { start: "2026-08-31", end: "2026-09-06", project: null } });
+});
+
+test("a slow older week query cannot replace the latest week's tasks", async () => {
+  let resolveOlder: (entries: readonly Entry[]) => void = () => {};
+  const older = new Promise<readonly Entry[]>((resolve) => { resolveOlder = resolve; });
+  const future = { ...entry, id: "future", text: "新周独特任务", businessDate: "2026-09-15" };
+  invoke.mockImplementation((command, args) => {
+    if (command !== "worklog_query") return Promise.resolve([]);
+    if (typeof args !== "object" || args === null || !("query" in args) || typeof args.query !== "object" || args.query === null || !("start" in args.query)) return Promise.resolve([]);
+    if (args.query.start === "2026-08-31") return older;
+    return Promise.resolve(args.query.start === "2026-09-14" ? [future] : [entry]);
+  });
+  render(<WorklogTab language="zh-CN" t={dict("zh-CN")} />);
+  fireEvent.click(screen.getByRole("button", { name: "周报" }));
+  await screen.findByRole("button", { name: /完成登录联调/ });
+  fireEvent.click(screen.getByText("2026 · 第37周（9.7-9.13）"));
+  measureWeekWheel(screen.getByRole("listbox"));
+  fireEvent.click(screen.getByRole("option", { name: "第36周（8.31-9.6）" }));
+  fireEvent(screen.getByRole("listbox"), new Event("scrollend"));
+  fireEvent.click(screen.getByRole("option", { name: "第38周（9.14-9.20）" }));
+  fireEvent(screen.getByRole("listbox"), new Event("scrollend"));
+  await screen.findByRole("button", { name: /新周独特任务/ });
+  resolveOlder([{ ...entry, id: "older", text: "旧周独特任务", businessDate: "2026-09-06" }]);
+  await waitFor(() => expect(screen.queryByRole("button", { name: /旧周独特任务/ })).toBeNull());
+  expect(screen.getByRole("button", { name: /新周独特任务/ })).toBeTruthy();
 });
 
 test("new tasks in the current week default to today's business date rather than Sunday", async () => {

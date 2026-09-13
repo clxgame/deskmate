@@ -2,6 +2,7 @@ import { AiUsage } from "./AiUsage";
 import { AiProviderList } from "./AiProviderList";
 import { CcSwitchStatus } from "./CcSwitchStatus";
 import { displayProviderLabel } from "./aiProviderModel";
+import { groupModelsByManufacturer } from "./modelManufacturer";
 import {
   Row,
   Switch,
@@ -46,18 +47,25 @@ export function AiTab({ settings, patch, replace, persist, t }: AiTabProps) {
           onChange={(e) => controller.pickModel(e.target.value)}
         >
           <option value="">{t.modelDefault}</option>
-          {controller.groups.map((g) => (
-            <optgroup key={g.providerId} label={g.label}>
-              {g.models.map((m) => (
-                <option
-                  key={`${m.sidecarId}/${m.modelId}`}
-                  value={`${m.sidecarId}/${m.modelId}`}
+          {controller.groups.flatMap((g) =>
+            groupModelsByManufacturer(g.models, t.modelOtherManufacturer).map(
+              (manufacturer) => (
+                <optgroup
+                  key={`${g.providerId}/${manufacturer.label}`}
+                  label={`${g.label} · ${manufacturer.label}`}
                 >
-                  {m.modelName}
-                </option>
-              ))}
-            </optgroup>
-          ))}
+                  {manufacturer.models.map((m) => (
+                    <option
+                      key={`${m.sidecarId}/${m.modelId}`}
+                      value={`${m.sidecarId}/${m.modelId}`}
+                    >
+                      {m.modelName}
+                    </option>
+                  ))}
+                </optgroup>
+              ),
+            ),
+          )}
         </select>
       </Row>
       {controller.failed && (

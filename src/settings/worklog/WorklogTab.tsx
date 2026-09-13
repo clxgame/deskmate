@@ -28,7 +28,6 @@ export function WorklogTab({ language, t, target, targetRequestId }: WorklogTabP
   const [week, setWeek] = useState(() => weekForDate(today()));
   const start = view === "weekly" ? week.start : day;
   const end = view === "weekly" ? week.end : day;
-  const [project, setProject] = useState("");
   const [data, setData] = useState<Data>({ entries: [], reports: [], schedules: [], runs: [] });
   const [loading, setLoading] = useState(true);
   const [loaded, setLoaded] = useState(false);
@@ -45,12 +44,12 @@ export function WorklogTab({ language, t, target, targetRequestId }: WorklogTabP
     const current = ++sequence.current;
     setLoading(true); setLoaded(false); setFailure(null);
     try {
-      const query = { start, end, project: project.trim() || null };
+      const query = { start, end, project: null };
       const [entries, reports, schedules, runs] = await Promise.all([queryEntries(query), listReports(query), listSchedules(), listRuns()]);
       if (current === sequence.current) { setData({ entries, reports, schedules, runs }); setLoaded(true); }
     } catch (error) { const code = error instanceof Error ? error.name : asWorklogError(error).code; if (current === sequence.current) setFailure(code); }
     finally { if (current === sequence.current) setLoading(false); }
-  }, [start, end, project]);
+  }, [start, end]);
   useEffect(() => { void load(); return () => { sequence.current += 1; }; }, [load]);
   useEffect(() => {
     const subscription = onWorklogChanged(() => { void load(); });
@@ -132,11 +131,10 @@ export function WorklogTab({ language, t, target, targetRequestId }: WorklogTabP
     <p className="worklog-meta">{labels.dayBoundaryHint}</p>
     <WorklogFeedback error={action.error} notice={detail ? null : action.notice} />
     {detail?.kind === "entry" && <EntryEditor key={`entry:${editorEpoch}:${detail.entry?.id ?? "new"}`} entry={detail.entry} date={taskDate} labels={labels} onBack={back} onChanged={changed} onReload={() => { void reloadDetail(); }} />}
-    {detail?.kind === "report" && <ReportEditor key={`report:${editorEpoch}:${detail.detail?.report.id ?? "new"}`} detail={detail.detail} kind={view === "weekly" ? "weekly" : "daily"} start={start} end={end} labels={labels} onBack={back} onChanged={changed} onReload={() => { void reloadDetail(); }} />}
+    {detail?.kind === "report" && <ReportEditor key={`report:${editorEpoch}:${detail.detail?.report.id ?? "new"}`} detail={detail.detail} kind={view === "weekly" ? "weekly" : "daily"} start={start} end={end} labels={labels} language={language} onBack={back} onChanged={changed} onReload={() => { void reloadDetail(); }} />}
     {!detail && <>
       {view !== "schedules" && <><div className="worklog-filters">
         {view === "weekly" ? <WeekPicker date={start} today={today()} labels={labels} onChange={(next) => { setWeek(next); setClear(null); }} /> : <label className="worklog-field">{labels.date}<input className="set-input" type="date" value={day} onChange={(event) => { if (event.target.value) { setDay(event.target.value); setClear(null); } }} /></label>}
-        <label className="worklog-field">{labels.project}<input className="set-input" value={project} placeholder={labels.allProjects} onChange={(event) => setProject(event.target.value)} /></label>
       </div><div className="worklog-actions">
           <button className="set-btn" type="button" disabled={action.busy} onClick={() => {
             const kind = view === "daily" ? "daily" : "weekly";

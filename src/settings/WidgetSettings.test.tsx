@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import * as tauriCore from "@tauri-apps/api/core";
 import * as tauriEvent from "@tauri-apps/api/event";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { dict } from "../lib/i18n";
 import { legacySettingsFixture } from "../testing/settingsFixtures";
 
@@ -12,10 +12,11 @@ const t = dict("zh-CN");
 const settings = legacySettingsFixture({ scheduledTasks: [
   { id: "daily", time: "14:25", prompt: "Take a walking break", enabled: true },
 ] });
-const invoke = mock<(command: string) => Promise<unknown>>((command) => {
+const invoke = mock<(command: string, payload?: unknown) => Promise<unknown>>((command) => {
   if (command === "get_pet_visibility_error") return Promise.resolve(null);
   if (command === "get_settings") return Promise.resolve(settings);
   if (command === "app_version") return Promise.resolve("0.2.8");
+  if (command === "installed_packs") return Promise.resolve([]);
   return Promise.resolve(undefined);
 });
 mock.module("@tauri-apps/api/core", () => ({ ...tauriCore, invoke }));
@@ -34,6 +35,34 @@ async function openWidgets() {
 }
 
 describe("scheduled widget settings", () => {
+  test("saves chat size independently from settings size", async () => {
+    invoke.mockClear();
+    render(<SettingsApp />);
+    const toggle = await screen.findByRole("checkbox", { name: t.chatLarge });
+    expect(toggle instanceof HTMLInputElement && toggle.checked).toBe(false);
+    fireEvent.click(toggle);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 450)); });
+    expect(invoke.mock.calls.find(call => call[0] === "set_settings")?.[1])
+      .toEqual({ settings: { ...settings, chatLarge: true } });
+    const settingsToggle = screen.getByRole("checkbox", { name: t.settingsLarge });
+    expect(settingsToggle instanceof HTMLInputElement && settingsToggle.checked).toBe(false);
+  });
+  test("defaults to compact and saves the large settings choice from General", async () => {
+    invoke.mockClear();
+    render(<SettingsApp />);
+    const toggle = await screen.findByRole("checkbox", { name: t.settingsLarge });
+    expect(toggle instanceof HTMLInputElement && toggle.checked).toBe(false);
+    fireEvent.click(toggle);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 450)); });
+    const saved = invoke.mock.calls.find((call) => call[0] === "set_settings");
+    expect(saved).toBeTruthy();
+    expect(saved?.[1]).toEqual({ settings: { ...settings, settingsLarge: true } });
+    fireEvent.click(screen.getByRole("button", { name: t.tabWidget }));
+    expect(screen.queryByRole("checkbox", { name: t.settingsLarge })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: t.tabGeneral }));
+    const restored = screen.getByRole("checkbox", { name: t.settingsLarge });
+    expect(restored instanceof HTMLInputElement && restored.checked).toBe(true);
+  });
   test("adds a trimmed task with the selected time when the draft is submitted", async () => {
     // Given an existing task and a filled draft.
     await openWidgets();
@@ -68,13 +97,12 @@ describe("scheduled widget settings", () => {
     expect(screen.queryByText("Take a walking break")).toBe(null);
   });
 
-  test("changes the common always-on-top setting when its switch is clicked", async () => {
-    // Given widget settings with always-on-top disabled.
+  test("controls pet always-on-top in pet settings and keeps it out of widgets", async () => {
     await openWidgets();
+    expect(screen.queryByRole("checkbox", { name: t.alwaysOnTop })).toBeNull();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: t.tabAccount })); });
     const toggle = screen.getByRole("checkbox", { name: t.alwaysOnTop });
-    // When the user enables it.
     fireEvent.click(toggle);
-    // Then its checked state updates.
     expect(toggle instanceof HTMLInputElement && toggle.checked).toBe(true);
   });
 });
@@ -104,5 +132,5 @@ test("retains the scheduled-task draft when another widget is selected", async (
   const prompt = screen.getByRole("textbox", { name: t.taskPrompt });
   expect(prompt instanceof HTMLInputElement && prompt.value).toBe("Finish my notes");
   expect(screen.getByRole("button", { name: t.scheduledTasks }).getAttribute("aria-pressed")).toBe("true");
-  expect(screen.getByRole("checkbox", { name: t.alwaysOnTop })).toBeTruthy();
+  expect(screen.queryByRole("checkbox", { name: t.alwaysOnTop })).toBeNull();
 });

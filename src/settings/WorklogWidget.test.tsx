@@ -47,9 +47,9 @@ test("shows work journal as a lazy peer widget without a separate sidebar", asyn
   for (const name of ["日报", "周报", "报告定时设置"]) expect(screen.getByRole("button", { name })).toBeTruthy();
 });
 test("retains the entry draft and filters while another peer is selected", async () => {
-  // Given a project filter and an unsaved entry.
+  // Given a selected date and an unsaved entry.
   await openWidgets(); await openLog();
-  fireEvent.change(screen.getByRole("textbox", { name: "项目" }), { target: { value: "YUME" } });
+  fireEvent.change(screen.getByLabelText("日期"), { target: { value: "2026-09-07" } });
   fireEvent.click(screen.getByRole("button", { name: "添加任务" }));
   fireEvent.change(screen.getByRole("textbox", { name: "内容" }), { target: { value: "不要丢失的草稿" } });
   // When the user visits Pomodoro and returns.
@@ -60,8 +60,9 @@ test("retains the entry draft and filters while another peer is selected", async
   const content = screen.getByRole("textbox", { name: "内容" });
   expect(content instanceof HTMLTextAreaElement && content.value).toBe("不要丢失的草稿");
   fireEvent.click(screen.getByRole("button", { name: "返回" }));
-  const project = screen.getByRole("textbox", { name: "项目" });
-  expect(project instanceof HTMLInputElement && project.value).toBe("YUME");
+  const date = screen.getByLabelText("日期");
+  expect(date instanceof HTMLInputElement && date.value).toBe("2026-09-07");
+  expect(screen.queryByRole("textbox", { name: "项目" })).toBeNull();
 });
 test("reopens repeated entry links and clears their detail for a generic request", async () => {
   // Given an entry link opened and then dismissed.
@@ -122,6 +123,7 @@ test("opens a report from another peer and retries its actual lookup after failu
   // When the user retries after host recovery.
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "重试" })); });
   // Then the archived report opens through a second lookup.
+  await userEvent.setup().click(await screen.findByRole("button", { name: "编辑" }));
   const content = await screen.findByRole("textbox", { name: "内容" });
   expect(content instanceof HTMLTextAreaElement && content.value).toBe("归档周报");
   expect(invoke.mock.calls.filter(([command]) => command === "worklog_get_report")).toHaveLength(2);
@@ -188,6 +190,7 @@ test("does not treat a hidden cancelled target lookup as consumed", async () => 
   // When the work journal becomes visible again.
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "工作日志" })); });
   // Then the interrupted target resolves on return instead of being silently lost.
+  await userEvent.setup().click(await screen.findByRole("button", { name: "编辑" }));
   const content = await screen.findByRole("textbox", { name: "内容" });
   expect(content instanceof HTMLTextAreaElement && content.value).toBe("归档周报");
   expect(invoke.mock.calls.filter(([command]) => command === "worklog_get_report")).toHaveLength(2);

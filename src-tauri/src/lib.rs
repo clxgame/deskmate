@@ -30,6 +30,7 @@ mod pet_visibility_recovery;
 mod pet_visibility_state;
 mod pomodoro;
 mod settings;
+mod settings_window;
 mod startup_settings;
 mod updater;
 mod window_layout;
@@ -600,6 +601,9 @@ pub(crate) fn show_chat(app: &tauri::AppHandle) -> Result<(), String> {
     let shown = app.state::<ChatShown>();
 
     clear_chat_motion(app);
+    let large = app.state::<SettingsState>().0.lock()
+        .map(|s| s.chat_large).map_err(|error| error.to_string())?;
+    settings_window::apply_chat(app, large).map_err(|error| error.to_string())?;
     reposition_chat(app)?;
     chat.show().map_err(|e| e.to_string())?;
     chat.set_focus().map_err(|e| e.to_string())?;
@@ -1116,7 +1120,17 @@ fn show_settings_window(app: &tauri::AppHandle) {
         return;
     };
     let _ = win.set_always_on_top(true);
-    let _ = win.center();
+    let large = app
+        .state::<SettingsState>()
+        .0
+        .lock()
+        .map(|s| s.settings_large)
+        .map_err(|error| error.to_string());
+    if let Ok(large) = large {
+        if let Err(error) = settings_window::apply(app, large) {
+            eprintln!("settings window resize failed: {error}");
+        }
+    }
     let _ = win.show();
     let _ = win.set_focus();
 }
@@ -1344,6 +1358,12 @@ pub fn run() {
             // Settings are hydrated by the startup plugin before any window exists.
             // SAFE-UNWRAP: a poisoned settings mutex means an earlier setup command panicked.
             let loaded = app.state::<SettingsState>().0.lock().unwrap().clone();
+            if let Err(error) = settings_window::apply(&handle, loaded.settings_large) {
+                eprintln!("settings window resize failed: {error}");
+            }
+            if let Err(error) = settings_window::apply_chat(&handle, loaded.chat_large) {
+                eprintln!("chat window resize failed: {error}");
+            }
             pet_visibility::initialize(&handle, loaded.pet_visible);
             pomodoro::apply_preferences(&handle, loaded.pomodoro)?;
             pomodoro::start_checker(handle.clone())?;

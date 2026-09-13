@@ -4,6 +4,7 @@
 .worklog-field { display: flex; flex-direction: column; gap: var(--s-1); min-width: 0; flex: 1; font-size: var(--t-body); }
 .worklog-field .set-input, .worklog-field .set-select { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
 .worklog-textarea { resize: vertical; line-height: 1.6; }
+.worklog-report-preview { line-break: strict; min-width: 0; }
 .worklog-textarea, .worklog-source-text { line-break: strict; word-break: normal; text-wrap: pretty; }
 .worklog-source-text { white-space: pre-wrap; }
 .worklog-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-2); }
@@ -39,14 +40,3 @@
 .worklog-week-option[data-period="past"] { color: var(--text-dim); }
 .worklog-week-option[data-period="current"] { color: var(--accent-ink); }
 .worklog-week-current { font-size: var(--t-small); }
-@media (max-width: 600px) {
-  .worklog-filters {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .worklog-filters > .worklog-field:last-child {
-    grid-column: 1 / -1;
-  }
-  .worklog-week-picker { grid-column: 1 / -1; }
-}

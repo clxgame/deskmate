@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ChatText } from "../../chat/ChatText";
 import { applyReportVersion, deleteReport, saveReport, type ReportDetail, type ReportKind, type ReportVersion } from "../../lib/worklog";
 import { DeleteConfirmation, WorklogFeedback } from "./WorklogFeedback";
 import { copyReport, exportReport } from "./reportExport";
@@ -26,13 +27,15 @@ function ReportSources({ detail, version, labels }: { readonly detail: ReportDet
   </details>;
 }
 
-export function ReportEditor({ detail, kind, start, end, labels, onBack, onChanged, onReload }: {
+export function ReportEditor({ detail, kind, start, end, labels, language = "zh-CN", onBack, onChanged, onReload }: {
   readonly detail: ReportDetail | null; readonly kind: ReportKind; readonly start: string; readonly end: string;
   readonly labels: WorklogLabels; readonly onBack: () => void; readonly onChanged: () => void; readonly onReload: () => void;
+  readonly language?: string;
 }) {
   const initial = detail?.versions.find((version) => version.id === detail.report.currentVersionId) ?? detail?.versions[0];
   const [selectedId, setSelectedId] = useState(initial?.id ?? "");
   const [body, setBody] = useState(initial?.bodyMarkdown ?? "");
+  const [preview, setPreview] = useState(Boolean(initial?.bodyMarkdown));
   const [confirm, setConfirm] = useState(false);
   const action = useWorklogAction(labels);
   const version = detail?.versions.find((item) => item.id === selectedId);
@@ -50,7 +53,11 @@ export function ReportEditor({ detail, kind, start, end, labels, onBack, onChang
       if (selected) { setSelectedId(selected.id); setBody(selected.bodyMarkdown); }
     }}>{detail.versions.map((item) => <option key={item.id} value={item.id}>{item.version} · {item.id === report?.currentVersionId ? labels.current : item.origin === "generated" ? labels.candidate : labels.edit} · {item.generatedAt}</option>)}</select></label>}
     <form className="worklog-form" onSubmit={(e) => { e.preventDefault(); void save(); }}>
-      <label className="worklog-field">{labels.content}<textarea className="set-input worklog-textarea" rows={10} value={body} maxLength={20000} required onChange={(e) => setBody(e.target.value)} /></label>
+      <div className="worklog-actions"><button className="set-btn" type="button" disabled={action.busy}
+        onClick={() => setPreview((value) => !value)}>{preview ? labels.edit : labels.preview}</button></div>
+      {preview ? <section className="worklog-report-preview worklog-item" aria-label={`${labels.content} · ${labels.preview}`}>
+        <ChatText text={body} lang={language} />
+      </section> : <label className="worklog-field">{labels.content}<textarea className="set-input worklog-textarea" rows={10} value={body} maxLength={20000} required onChange={(e) => setBody(e.target.value)} /></label>}
       <div className="worklog-actions"><button className="set-btn" type="submit" disabled={action.busy || !body.trim()}>{action.busy ? labels.working : labels.save}</button>
         {report && <button className="set-btn" type="button" disabled={action.busy} onClick={onReload}>{labels.reload}</button>}
         {report && version && version.id !== report.currentVersionId && <button className="set-btn" type="button" disabled={action.busy || edited} onClick={() => {

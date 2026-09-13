@@ -30,6 +30,8 @@ export interface Settings {
   autostart: boolean;
   language: string;
   theme: ThemeId;
+  settingsLarge?: boolean;
+  chatLarge?: boolean;
   // AI
   providerId: string;
   modelId: string;

@@ -370,6 +370,20 @@ function GeneralTab({ settings, patch, t }: TabProps) {
           ))}
         </select>
       </Row>
+      <Row label={t.settingsLarge}>
+        <Switch
+          label={t.settingsLarge}
+          checked={settings.settingsLarge ?? false}
+          onChange={(value) => patch("settingsLarge", value)}
+        />
+      </Row>
+      <Row label={t.chatLarge}>
+        <Switch
+          label={t.chatLarge}
+          checked={settings.chatLarge ?? false}
+          onChange={(value) => patch("chatLarge", value)}
+        />
+      </Row>
       <Row label={t.theme}>
         <ThemePicker
           value={settings.theme}
@@ -513,6 +527,13 @@ function AccountTab({ settings, patch, t }: TabProps) {
             label={t.petVisible}
             checked={settings.petVisible}
             onChange={(v) => patch("petVisible", v)}
+          />
+        </Row>
+        <Row label={t.alwaysOnTop}>
+          <Switch
+            label={t.alwaysOnTop}
+            checked={settings.alwaysOnTop}
+            onChange={(value) => patch("alwaysOnTop", value)}
           />
         </Row>
       </div>

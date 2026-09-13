@@ -164,11 +164,10 @@ test("outside dismissal cancels pending movement without restoring trigger focus
   expect(trigger.textContent).toContain("第37周");
 });
 
-test("year navigation keeps the week number and clamps week 53 to 52", () => {
+test("opens the correct ISO year and week for a January date", () => {
   render(<PickerFixture date="2027-01-01" />);
   fireEvent.click(screen.getByText("2026 · 第53周（12.28-1.3）"));
-  fireEvent.click(screen.getByRole("button", { name: "下一年" }));
-  expect(screen.getByText("2027 · 第52周（12.27-1.2）")).toBeTruthy();
+  expect(screen.getByRole("option", { selected: true }).textContent).toContain("第53周（12.28-1.3）");
   expect(screen.getByRole("listbox")).toBeTruthy();
 });
 

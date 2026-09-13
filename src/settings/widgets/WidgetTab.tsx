@@ -1,6 +1,6 @@
 import { Activity, useId, useState } from "react";
 import { AppIcon } from "../../ui/AppIcon";
-import { Row, Switch, type TabProps } from "../settingsPrimitives";
+import type { TabProps } from "../settingsPrimitives";
 import { PomodoroWidget } from "./PomodoroWidget";
 import { ScheduledTasksWidget, type ScheduledTaskDraft } from "./ScheduledTasksWidget";
 import { WorklogTab, type WorklogTarget } from "../worklog/WorklogTab";
@@ -25,10 +25,6 @@ export function WidgetTab({ settings, patch, t, activeWidget, onSelect, worklogR
   };
   return (
     <div className="set-widgets">
-      <Row label={t.alwaysOnTop}>
-        <Switch label={t.alwaysOnTop} checked={settings.alwaysOnTop}
-          onChange={(value) => patch("alwaysOnTop", value)} />
-      </Row>
       <div className="set-widget-selectors" role="group" aria-label={t.widgetSelector}>
         <button type="button" className="set-widget-tile" id={`${panelId}-tasks`}
           aria-pressed={activeWidget === "tasks"} aria-controls={panelId}

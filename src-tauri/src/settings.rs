@@ -192,6 +192,8 @@ pub struct Settings {
     pub autostart: bool,
     pub language: String,
     pub theme: String,
+    pub settings_large: bool,
+    pub chat_large: bool,
     // AI
     pub provider_id: String,
     pub model_id: String,
@@ -240,6 +242,8 @@ impl Default for Settings {
             autostart: false,
             language: "zh-CN".into(),
             theme: DEFAULT_THEME.into(),
+            settings_large: false,
+            chat_large: false,
             provider_id: String::new(),
             model_id: String::new(),
             yolo: false,
@@ -1535,6 +1539,17 @@ fn sidecar_permission_policy() -> serde_json::Map<String, serde_json::Value> {
 
 /// Apply side-effectful settings (autostart, shortcuts, window state).
 pub fn apply(app: &tauri::AppHandle, old: &Settings, new: &Settings) {
+    if old.chat_large != new.chat_large {
+        if let Err(error) = crate::settings_window::apply_chat(app, new.chat_large) {
+            eprintln!("chat window resize failed: {error}");
+        }
+        crate::reposition_visible_chat(app);
+    }
+    if old.settings_large != new.settings_large {
+        if let Err(error) = crate::settings_window::apply(app, new.settings_large) {
+            eprintln!("settings window resize failed: {error}");
+        }
+    }
     // Autostart.
     #[cfg(not(feature = "worklog-qa"))]
     if old.autostart != new.autostart {

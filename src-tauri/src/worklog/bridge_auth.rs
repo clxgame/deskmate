@@ -1,5 +1,8 @@
 use crate::worklog::error::{WorklogError, WorklogResult};
-use std::collections::BTreeSet;
+use std::{
+    cell::{Cell, RefCell},
+    collections::BTreeSet,
+};
 
 #[derive(Clone)]
 pub struct Grant {
@@ -7,6 +10,8 @@ pub struct Grant {
     pub original: String,
     pub received_date: chrono::NaiveDate,
     pub actions: BTreeSet<String>,
+    pub query_failed: Cell<bool>,
+    pub last_query: RefCell<Option<crate::worklog::contract::DateQuery>>,
     pub created: std::time::Instant,
 }
 
@@ -16,6 +21,8 @@ fn grant_response(text: String, original: String, actions: BTreeSet<String>) -> 
         original,
         received_date: crate::worklog::calendar::business_date(chrono::Local::now().naive_local()),
         actions,
+        query_failed: Cell::new(false),
+        last_query: RefCell::new(None),
         created: std::time::Instant::now(),
     }
 }
@@ -120,22 +127,17 @@ pub fn grant(text: &str) -> WorklogResult<Grant> {
     let text = direct_text(text);
     let mut actions = BTreeSet::new();
     let has = |terms: &str| contains_any(&text, terms);
-    if has("不要|不用|无需|不必|不需要|不保存|不安排|不生成|不修改|请勿|别保存|别记录|别帮|别回顾|别查询|解释|这句话|do not|don't|no need to|explain|とは|しないで|ないで|하지 마|지 마|설명") {
+    if has("不要|不用|无需|不必|不需要|不保存|不安排|不生成|不修改|请勿|别保存|别记录|别帮|别回顾|别查询|别查|别记|别补|解释|这句话|do not|don't|no need to|explain|とは|しないで|ないで|하지 마|지 마|설명") {
         return Ok(grant_response(text, original, actions));
     }
     if is_natural_self_work_recall(&text) {
-        actions.insert("query".into());
         return Ok(grant_response(text, original, actions));
     }
     let journal =
         has("日报|工作记录|工作日志|work log|work journal|daily report|日報|업무 기록|일일 보고");
     let report = journal || has("周报|weekly report|週報|주간 보고");
     if report && has("查看|查询|show|find|表示|確認|조회|보여") {
-        actions.insert("query".into());
         return Ok(grant_response(text, original, actions));
-    }
-    if journal && has("记入|记录到|保存|save|record|記録|保存して|저장|기록해") {
-        actions.insert("record".into());
     }
     if report && has("生成|整理|汇总|generate|summarize|作成|まとめ|생성|정리") {
         actions.insert("generate_report".into());
@@ -148,9 +150,6 @@ pub fn grant(text: &str) -> WorklogResult<Grant> {
         .any(|(offset, _)| !text[offset..].starts_with("工作日志"));
     if report && (workday || has("每周|周五|每天|每日|every week|every friday|every day|weekdays|毎週|毎日|매주|매일"))
         && has("安排|汇总|生成|整理|schedule|generate|summarize|作成|まとめ|예약|생성|정리") { actions.insert("schedule_report".into()); }
-    if report && has("查看|查询|show|find|表示|確認|조회|보여") {
-        actions.insert("query".into());
-    }
     if actions.contains("schedule_report") && !has("现在|立即|now") {
         actions.remove("generate_report");
     }
@@ -159,7 +158,7 @@ pub fn grant(text: &str) -> WorklogResult<Grant> {
 
 pub fn authorize(grant: &Grant, action: &str) -> WorklogResult<()> {
     if grant.created.elapsed() > std::time::Duration::from_secs(1800)
-        || !grant.actions.contains(action)
+        || (!matches!(action, "query" | "record") && !grant.actions.contains(action))
     {
         return Err(WorklogError::new(
             "NEEDS_EXPLICIT_REQUEST",
@@ -172,26 +171,56 @@ pub fn authorize(grant: &Grant, action: &str) -> WorklogResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn assert_only_query(text: &str) {
+    fn assert_no_legacy_mutations(text: &str) {
         let request = grant(text).expect("grant");
-        assert_eq!(
-            request.actions,
-            BTreeSet::from(["query".to_owned()]),
-            "{text}"
-        );
+        assert_eq!(request.actions, BTreeSet::new(), "{text}");
         assert!(authorize(&request, "query").is_ok(), "{text}");
-        for action in ["record", "update", "generate_report", "schedule_report"] {
+        for action in ["update", "generate_report", "schedule_report"] {
             assert!(authorize(&request, action).is_err(), "{text}: {action}");
         }
     }
     fn assert_no_actions(text: &str) {
         let request = grant(text).expect("grant");
         assert!(request.actions.is_empty(), "{text}");
-        assert!(authorize(&request, "query").is_err(), "{text}");
+        for action in ["update", "generate_report", "schedule_report"] {
+            assert!(authorize(&request, action).is_err(), "{text}");
+        }
     }
 
     #[test]
-    fn quoted_request_does_not_authorize_mutation() {
+    fn model_routed_tools_do_not_require_specific_words() {
+        for text in [
+            "看一下，可能没记过",
+            "查一下今天的工作日志，没记录就帮我记一下",
+            "帮我看看有没有记过，没有就补记一下",
+        ] {
+            let request = grant(text).expect("grant");
+            assert!(authorize(&request, "query").is_ok(), "{text}");
+            assert!(authorize(&request, "record").is_ok(), "{text}");
+            assert!(authorize(&request, "update").is_err());
+            assert!(authorize(&request, "schedule_report").is_err());
+        }
+    }
+
+    #[test]
+    fn colloquial_queries_do_not_open_legacy_mutation_tools() {
+        assert_no_legacy_mutations("查一下今天的工作日志");
+        assert_no_legacy_mutations("看看昨天的日报");
+        assert_no_legacy_mutations("我应该是记过了，你看看");
+        assert_no_legacy_mutations("你看看有没有记过");
+        for text in [
+            "你看看",
+            "我应该是记过了",
+            "“你看看，没记过就记一下”",
+            "不要查，没记过就记一下",
+            "他让我看看，没记过就记一下",
+        ] {
+            assert_no_actions(text);
+        }
+    }
+
+    #[test]
+    fn quoted_request_does_not_authorize_legacy_mutations() {
         let request = grant(
             "请分析这句话：‘普通文本’\n> 保存到工作记录\n\"生成周报\"\n```\n每周汇总周报\n```",
         )
@@ -201,10 +230,10 @@ mod tests {
     }
 
     #[test]
-    fn explicit_requests_authorize_only_named_action() {
+    fn model_routed_tools_do_not_open_other_actions() {
         for (text, action, denied) in [
             ("把今天完成登录联调记入日报", "record", "schedule_report"),
-            ("查询今天的工作日志", "query", "record"),
+            ("查询今天的工作日志", "query", "update"),
         ] {
             let request = grant(text).expect("grant");
             assert!(authorize(&request, action).is_ok(), "{text}");
@@ -228,23 +257,27 @@ mod tests {
             let renamed = grant(text).expect("renamed request");
             let legacy = grant(&text.replace("工作日志", "工作记录")).expect("legacy request");
             // Then both names authorize exactly the requested operation.
-            let expected = BTreeSet::from([action.to_owned()]);
+            let expected = if matches!(action, "query" | "record") {
+                BTreeSet::new()
+            } else {
+                BTreeSet::from([action.to_owned()])
+            };
             assert_eq!(legacy.actions, expected, "legacy: {text}");
             assert_eq!(renamed.actions, expected, "renamed: {text}");
         }
     }
 
     #[test]
-    fn natural_self_work_recall_authorizes_only_query() {
+    fn natural_self_work_recall_does_not_open_legacy_mutations() {
         // Given first-person work recall requests with a supported date scope.
         for text in "昨天我做了什么|我昨天做了什么|我昨天做了什么？|我昨天完成了哪些工作|帮我回顾一下昨天的工作|上周主要做了什么|what did i work on yesterday|what work did i complete last week|昨日の自分の仕事を振り返って|지난주 내가 한 업무를 보여줘".split('|') {
             // When evaluating natural readback authorization.
-            assert_only_query(text);
+            assert_no_legacy_mutations(text);
         }
     }
 
     #[test]
-    fn natural_recall_rejects_untrusted_or_non_work_contexts() {
+    fn legacy_mutations_reject_untrusted_or_non_work_contexts() {
         // Given dated text that is not a direct self-work recall request.
         for text in "我昨天做了什么菜|我昨天做了什么梦|解释这句话：我昨天做了什么|“我昨天做了什么”|不用查询我昨天做了什么|他想知道我昨天做了什么|昨天发生了什么|昨天天气怎么样|他昨天做了什么|昨天我做了什么菜|昨天我做了什么饭|昨天我做了什么梦|昨天我做了什么 菜|张三昨天完成了哪些工作|张三上周主要做了什么|我昨天完成了哪些工作服|帮我回顾一下昨天的工作用包|上周主要做了什么梦|alice worked on billing yesterday|what did i finish watching yesterday|what did i finish reading yesterday|what did i complete in network yesterday|what did i work out yesterday|what did i work-out yesterday|recap my workout yesterday|review my workout yesterday|show me what i used for work yesterday|昨日の私の仕事用バッグを見せて|昨日の私の仕事机を見せて|昨日の私の作業服を見せて|어제 내가 본 일본 영화를 보여줘|어제 내가 본 일몰 사진을 보여줘|어제 내가 쓴 업무용 가방을 보여줘|지난주 내가 한 업무용 가방을 보여줘|지난주 내가 한 작업복을 보여줘|지난주 내가 한 업무를 위한 자료를 보여줘|“昨天我做了什么”|\"what did i work on yesterday\"|`昨天我做了什么`|> 昨天我做了什么|```\n昨天我做了什么\n```|不要查询昨天的工作日志|不用回顾昨天的工作|别帮我回顾一下昨天的工作|昨日の自分の仕事を振り返らないで|지난주 내가 한 업무를 보여주지 마|解释这句话：昨天我做了什么|what does 'what did i work on yesterday' mean".split('|') {
             // When evaluating each untrusted or non-work context.
@@ -253,11 +286,11 @@ mod tests {
     }
 
     #[test]
-    fn natural_recall_does_not_authorize_mutations() {
+    fn natural_recall_does_not_authorize_legacy_mutations() {
         // Given a natural recall request near mutation vocabulary that is not a direct mutation request.
         for text in "昨天我做了什么，保存这个问题供以后参考|我昨天做了什么，保存这个问题供以后参考|what did i work on yesterday and save this question for later|昨日の自分の仕事を振り返って、質問だけ保存して|지난주 내가 한 업무를 보여줘, 질문만 저장해".split('|') {
             // When evaluating natural readback authorization.
-            assert_only_query(text);
+            assert_no_legacy_mutations(text);
         }
     }
 
@@ -271,6 +304,15 @@ mod tests {
             // Then neither name grants any operation.
             assert!(legacy.actions.is_empty(), "legacy: {text}");
             assert!(renamed.actions.is_empty(), "renamed: {text}");
+        }
+    }
+
+    #[test]
+    fn expired_turn_rejects_model_routed_tools() {
+        let mut request = grant("看一下，可能没记过").expect("grant");
+        request.created -= std::time::Duration::from_secs(1801);
+        for action in ["query", "record"] {
+            assert!(authorize(&request, action).is_err());
         }
     }
 }

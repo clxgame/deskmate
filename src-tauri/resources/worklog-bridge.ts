@@ -14,7 +14,7 @@ async function absentOnly(error: unknown): Promise<void> {
 export function worklogTool(action: string, description: string, properties: Record<string, unknown>) {
   return {
     description,
-    args: { input: { type: "object", properties, additionalProperties: false, description: "Work journal operation fields. Identity and authorization come only from the host." } },
+    args: { input: { type: "object", properties, required: action === "record" ? ["mode"] : [], additionalProperties: false, description: "Work journal operation fields. Session identity and execution checks come only from the host. Interpret user intent from the conversation." } },
     async execute(args: Args, context: Context): Promise<string> {
       let publishedRequest: string | undefined;
       try {

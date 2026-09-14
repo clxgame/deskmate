@@ -105,7 +105,7 @@ async function runContract(): Promise<void> {
     const info = expectJsonObject(report.info, "report info");
     check(info.role === "assistant" && info.finish === "stop" && isJsonObject(info.time) && typeof info.time.completed === "number" && !info.error, "assistant completion contract absent");
     check(reportSession.id !== session.id, "report session not isolated");
-    provider.selectTool("worklog_record",{input:{businessDate:"2026-09-08",text:"synthetic production resource invocation",status:"done"}});
+    provider.selectTool("worklog_record",{input:{mode:"direct",businessDate:"2026-09-08",text:"synthetic production resource invocation",status:"done"}});
     const toolSession=expectJsonObject(await requestJson({baseUrl,path:"/session",method:"POST",body:{title:"Production resource transport"}}),"tool session");
     const transportReply=requestJson({baseUrl,path:`/session/${toolSession.id}/message`,method:"POST",timeoutSeconds:40,body:{model:{providerID:"yume",modelID:"model-a"},parts:[{type:"text",text:"保存到工作记录"}]}});
     const transportDeadline=Date.now()+20_000;
@@ -113,6 +113,7 @@ async function runContract(): Promise<void> {
     while (!filename && Date.now()<transportDeadline) { filename=(await readdir(ipc)).find(name=>name.endsWith(".request")); if(!filename) await Bun.sleep(50); }
     check(filename,"production resource did not publish IPC request");
     const actualRequest=expectJsonObject(JSON.parse(await readFile(join(ipc,filename),"utf8")),"production request");
+    check(isJsonObject(actualRequest.args) && actualRequest.args.mode === "direct", "record execution mode was not transported");
     check(actualRequest.sessionId===toolSession.id&&actualRequest.callId==="call_worklog_contract"&&actualRequest.action==="record","production resource lost trusted context");
     const syntheticReceipt={version:1,requestId:actualRequest.requestId,status:"completed",result:{receipt:{operationId:actualRequest.requestId,entityKind:"entry",entityId:"synthetic_fixture_only",revision:1,status:"saved"}}};
     await writeFile(join(ipc,`${actualRequest.requestId}.response`),JSON.stringify(syntheticReceipt));

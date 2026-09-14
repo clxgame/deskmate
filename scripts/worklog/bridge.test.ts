@@ -3,6 +3,15 @@ import { mkdtemp, readdir, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { worklogTool } from "../../src-tauri/resources/worklog-bridge";
+import recordTool from "../../src-tauri/resources/opencode-tools/worklog_record";
+import queryTool from "../../src-tauri/resources/opencode-tools/worklog_query";
+
+test("only record exposes a required execution mode; query has no intent protocol", () => {
+  expect(recordTool.args.input.required).toEqual(["mode"]);
+  expect(recordTool.args.input.properties.mode).toEqual({type:"string",enum:["direct","if_missing"],description:expect.any(String)});
+  expect(queryTool.args.input.required).toEqual([]);
+  expect(queryTool.args.input.properties).not.toHaveProperty("intent");
+});
 
 test("malformed input fails without exposing bridge paths", async () => {
   const result = JSON.parse(await worklogTool("record","fixture",{}).execute({input:"claimed save"}, {sessionID:"ses_fixture",messageID:"msg_fixture",callID:"call_fixture",abort:AbortSignal.abort()}));

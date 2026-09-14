@@ -18,7 +18,8 @@ fn record_uses_host_source_and_replays_once() {
     let repo = Repository::new(WorklogStore::memory().expect("store"));
     let grant = auth::grant("把今天完成登录联调记入日报").expect("grant");
     let date = grant.received_date.to_string();
-    let request = request(json!({"businessDate":date,"text":"登录联调完成","status":"done"}));
+    let request =
+        request(json!({"mode":"direct","businessDate":date,"text":"登录联调完成","status":"done"}));
     let first = execute(&repo, &request, &grant, "msg_user", "fixture/model").expect("receipt");
     let replay = execute(&repo, &request, &grant, "msg_user", "fixture/model").expect("replay");
     assert_eq!(first, replay);
@@ -48,27 +49,32 @@ fn supplied_source_identity_is_rejected() {
 }
 
 #[test]
-fn quoted_save_and_cross_date_payload_do_not_write() {
+fn invalid_record_dates_do_not_write() {
     let repo = Repository::new(WorklogStore::memory().expect("store"));
-    let request = request(json!({"businessDate":"2000-01-01","text":"fake","status":"done"}));
-    for text in [
-        "不要保存到工作记录",
-        "引用：\"保存到工作记录\"",
-        "保存到工作记录",
-    ] {
+    for date in ["2026-02-30", "2026-9-9", "not-a-date"] {
+        let request =
+            request(json!({"mode":"direct","businessDate":date,"text":"fixture","status":"done"}));
         assert_eq!(
             execute(
                 &repo,
                 &request,
-                &auth::grant(text).expect("grant"),
+                &auth::grant("把刚才那件事记下来").expect("grant"),
                 "msg_user",
                 "model",
             )
             .expect_err("reject")
             .code,
-            "NEEDS_EXPLICIT_REQUEST"
+            "VALIDATION_FAILED"
         );
     }
+    assert!(repo
+        .query_entries(&DateQuery {
+            start: "2000-01-01".into(),
+            end: "2099-01-01".into(),
+            project: None
+        })
+        .expect("readback")
+        .is_empty());
 }
 
 #[test]
@@ -88,8 +94,9 @@ fn complete_daily_report_archive_keeps_user_body() {
     let body = "# 日报\n完成：登录联调\n风险：等待验收";
     let grant = auth::grant(&format!("保存今天的日报：\n{body}")).expect("grant");
     let date = grant.received_date.to_string();
-    let request =
-        request(json!({"kind":"daily","periodStart":date,"periodEnd":date,"bodyMarkdown":body}));
+    let request = request(
+        json!({"mode":"direct","kind":"daily","periodStart":date,"periodEnd":date,"bodyMarkdown":body}),
+    );
     let response = execute(&repo, &request, &grant, "msg_user", "model").expect("saved");
     let report = repo
         .get_report(response["receipt"]["entityId"].as_str().expect("id"))
@@ -98,7 +105,7 @@ fn complete_daily_report_archive_keeps_user_body() {
 }
 
 #[test]
-fn readonly_schedule_lookup_and_negative_save_do_not_mutate_database() {
+fn readonly_schedule_and_invalid_record_mode_do_not_mutate_database() {
     let repo = Repository::new(WorklogStore::memory().expect("store"));
     let grant = auth::grant("查看每周五17:00的周报").expect("grant");
     let mut schedule =
@@ -113,12 +120,13 @@ fn readonly_schedule_lookup_and_negative_save_do_not_mutate_database() {
     assert!(repo.list_schedules().expect("schedules").is_empty());
     let grant = auth::grant("不用保存日报").expect("grant");
     let date = grant.received_date.to_string();
-    let entry = request(json!({"businessDate":date,"text":"must not save","status":"done"}));
+    let entry =
+        request(json!({"mode":"read","businessDate":date,"text":"must not save","status":"done"}));
     assert_eq!(
         execute(&repo, &entry, &grant, "msg_user", "model")
-            .expect_err("negative")
+            .expect_err("invalid record mode")
             .code,
-        "NEEDS_EXPLICIT_REQUEST"
+        "VALIDATION_FAILED"
     );
     assert!(repo
         .query_entries(&DateQuery {

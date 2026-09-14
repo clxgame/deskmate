@@ -13,6 +13,9 @@ describe("work journal chat trust boundary", () => {
     expect(worklogRequestId({ requestId: "../../secret" })).toBeNull();
     expect(worklogRequestId({ receipt: { operationId: id } })).toBeNull();
   });
+  test("existing work does not advertise a pending save or offer undo", () => {
+    expect(worklogRequestId(JSON.stringify({ version: 1, requestId: id, status: "completed", result: { alreadyRecorded: true, entry: { id: "existing-entry" } } }))).toBeNull();
+  });
   test("message identities match the real sidecar caller ID contract", () => {
     expect(newUserMessageId()).toMatch(/^msg_[0-9a-f]{32}$/);
   });

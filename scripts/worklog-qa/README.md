@@ -1,5 +1,7 @@
 # Isolated desktop worklog QA
 
+Query/record routing is now decided by the chat model. Record tool inputs require `mode: "direct"` or `mode: "if_missing"`; conditional recording requires a successful unfiltered date query. Forced `nextTool` calls verify transport and host execution only. Verify prohibitions, quoted instructions, references and query-only intent with a real isolated model without forced tool selection; a synthetic provider cannot establish semantic correctness.
+
 Commands from the repository root:
 
 ```powershell
@@ -18,7 +20,7 @@ The provider is a separate owned foreground CLI process. Run through a non-UI pr
 Provider controls use POST JSON to its `controlUrl` (plain loopback only):
 
 ```json
-{"mode":"success","delayMs":0,"nextTool":{"name":"worklog_record","input":{"businessDate":"2026-09-07","project":"合成测试项目","text":"完成测试项目界面核对。","status":"done"}}}
+{"mode":"success","delayMs":0,"nextTool":{"name":"worklog_record","input":{"mode":"direct","businessDate":"2026-09-07","project":"合成测试项目","text":"完成测试项目界面核对。","status":"done"}}}
 ```
 
 Control `nextTool` is one-shot and executes only if the real sidecar offers that exact tool. It never adds permissions. Model-returned prose is deliberately only a fixture; verify host receipts and persisted UI separately. Controls: mode success/error/unauthorized; delayMs 0..310000; report exact synthetic Markdown; nextTool null or one of the five worklog tools. GET statusUrl returns request count/timestamps/offered tool names without storing prompts or headers. For cancel QA set delayMs 15000, trigger report, cancel the run, then ensure the later fixture response cannot publish. For failure/retry set error or unauthorized, then reset success before retry. Report fixture text should be explicitly set to match the selected synthetic input; defaults are demonstration text, not intelligent summaries.

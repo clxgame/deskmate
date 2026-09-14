@@ -108,6 +108,62 @@ pub fn start_worker(app: tauri::AppHandle) {
 mod tests {
     use super::*;
     #[test]
+    fn followup_keeps_current_user_source_separate_from_context() {
+        let state = WorklogBridge {
+            root: None,
+            launch: Mutex::new(None),
+            grants: Mutex::new(HashMap::new()),
+        };
+        state
+            .register(
+                "ses_test".into(),
+                "msg_first".into(),
+                "昨天完成了登录联调".into(),
+            )
+            .expect("context");
+        state
+            .register(
+                "ses_test".into(),
+                "msg_followup".into(),
+                "我应该是记过了，你看看，没记过就记一下".into(),
+            )
+            .expect("followup");
+        let grants = state.grants.lock().expect("grants");
+        let grant = &grants[&("ses_test".into(), "msg_followup".into())];
+        assert!(!grant.text.contains("昨天"));
+        assert_eq!(grant.original, "我应该是记过了，你看看，没记过就记一下");
+        assert!(!grant.query_failed.get());
+        assert!(grant.last_query.borrow().is_none());
+    }
+
+    #[test]
+    fn explicit_followup_date_overrides_previous_context() {
+        let state = WorklogBridge {
+            root: None,
+            launch: Mutex::new(None),
+            grants: Mutex::new(HashMap::new()),
+        };
+        state
+            .register(
+                "ses_test".into(),
+                "msg_first".into(),
+                "昨天完成了登录联调".into(),
+            )
+            .expect("context");
+        state
+            .register(
+                "ses_test".into(),
+                "msg_followup".into(),
+                "看看今天的工作日志，没记过就记一下".into(),
+            )
+            .expect("followup");
+        let grants = state.grants.lock().expect("grants");
+        assert!(!grants[&("ses_test".into(), "msg_followup".into())]
+            .text
+            .contains("昨天"));
+    }
+
+    #[test]
     fn new_turn_revokes_previous_session_grant() {
         let state = WorklogBridge {
             root: None,

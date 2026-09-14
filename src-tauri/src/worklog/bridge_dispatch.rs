@@ -73,6 +73,13 @@ struct Query {
     operation_id: Option<String>,
 }
 
+#[derive(Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum RecordMode {
+    Direct,
+    IfMissing,
+}
+
 pub fn execute(
     repo: &Repository,
     request: &Request,
@@ -81,30 +88,23 @@ pub fn execute(
     model: &str,
 ) -> WorklogResult<Value> {
     if request.action == "query" {
-        let query: Query = parse(request.args.clone())?;
+        authorize(grant, "query")?;
+        let query: Query = parse(request.args.clone()).inspect_err(|_| {
+            grant.query_failed.set(true);
+            grant.last_query.replace(None);
+        })?;
         if let Some(id) = query.operation_id {
-            if grant.actions.is_empty() || grant.created.elapsed().as_secs() > 1800 {
-                return Err(WorklogError::new(
-                    "NEEDS_EXPLICIT_REQUEST",
-                    "Request a journal lookup explicitly",
-                ));
-            }
-            return Ok(json!({"operation":repo.operation(&id)?}));
+            let operation = repo
+                .operation(&id)
+                .inspect_err(|_| grant.query_failed.set(true))?;
+            return Ok(json!({"operation":operation}));
         }
-        authorize(
-            grant,
-            if grant.actions.contains("update") {
-                "update"
-            } else {
-                "query"
-            },
-        )?;
+        grant.query_failed.set(true);
+        grant.last_query.replace(None);
         let start = query
             .start
             .ok_or_else(|| WorklogError::validation("start is required"))?;
         let end = query.end.unwrap_or_else(|| start.clone());
-        scoped_date(grant, &start)?;
-        scoped_date(grant, &end)?;
         let query = DateQuery {
             start,
             end,
@@ -116,7 +116,13 @@ pub fn execute(
             .filter(|report| report.period_start >= query.start && report.period_end <= query.end)
             .map(|report| repo.get_report(&report.id))
             .collect::<WorklogResult<Vec<_>>>()?;
-        return Ok(json!({"entries":repo.query_entries(&query)?,"reports":reports}));
+        let result = json!({"entries":repo.query_entries(&query)?,"reports":reports});
+        if serde_json::to_vec(&json!({"version":1,"requestId":request.request_id,"status":"completed","result":result}))?.len() > 256 * 1024 {
+            return Err(WorklogError::new("RESULT_TOO_LARGE", "Narrow the requested date range"));
+        }
+        grant.last_query.replace(Some(query));
+        grant.query_failed.set(false);
+        return Ok(result);
     }
     authorize(grant, &request.action)?;
     let mut args = request
@@ -140,10 +146,17 @@ pub fn execute(
     args.insert("requestId".into(), json!(request.request_id));
     let receipt = match request.action.as_str() {
         "record" => {
+            let mode: RecordMode = parse(args.remove("mode").ok_or_else(|| {
+                WorklogError::validation("record mode is required: direct or if_missing")
+            })?)?;
+            if grant.query_failed.get() {
+                return Err(WorklogError::new("QUERY_REQUIRED", "The previous query failed; successfully query the work records again before writing"));
+            }
             if args.contains_key("bodyMarkdown") {
+                if mode == RecordMode::IfMissing {
+                    return Err(WorklogError::validation("Conditional recording only adds missing tasks; do not overwrite a daily report"));
+                }
                 let report: SaveReport = parse(Value::Object(args))?;
-                scoped_date(grant, &report.period_start)?;
-                scoped_date(grant, &report.period_end)?;
                 if report.kind != ReportKind::Daily {
                     return Err(WorklogError::validation("Direct archive is a daily report"));
                 }
@@ -158,7 +171,51 @@ pub fn execute(
             args.insert("sourceMessageId".into(), json!(parent));
             args.insert("originalText".into(), json!(grant.original));
             let entry: RecordEntry = parse(Value::Object(args))?;
-            scoped_date(grant, &entry.business_date)?;
+            if mode == RecordMode::IfMissing {
+                if !grant.last_query.borrow().as_ref().is_some_and(|query| {
+                    query.start <= entry.business_date
+                        && query.end >= entry.business_date
+                        && query.project.is_none()
+                }) {
+                    return Err(WorklogError::new("QUERY_REQUIRED", "Successfully query entries and reports for this date without a project filter before recording; a failed query is not an empty result"));
+                }
+                if repo
+                    .operation(&entry.request_id)
+                    .inspect_err(|_| grant.query_failed.set(true))?
+                    .is_some()
+                {
+                    return Ok(json!({"receipt":repo.record_entry(&entry)?}));
+                }
+                let query = DateQuery {
+                    start: entry.business_date.clone(),
+                    end: entry.business_date.clone(),
+                    project: None,
+                };
+                grant.query_failed.set(true);
+                let entries = repo.query_entries(&query)?;
+                let reports = repo
+                    .list_reports(&query)?
+                    .into_iter()
+                    .filter(|report| report.kind == ReportKind::Daily)
+                    .map(|report| repo.get_report(&report.id))
+                    .collect::<WorklogResult<Vec<_>>>()?;
+                grant.query_failed.set(false);
+                if let Some(existing) = entries
+                    .iter()
+                    .find(|saved| saved.text.trim() == entry.text.trim())
+                {
+                    return Ok(json!({"alreadyRecorded":true,"entry":existing}));
+                }
+                if let Some(existing) = reports.iter().find(|detail| {
+                    detail.versions.iter().any(|version| {
+                        detail.report.current_version_id.as_deref() == Some(version.id.as_str())
+                            && !entry.text.trim().is_empty()
+                            && version.body_markdown.contains(entry.text.trim())
+                    })
+                }) {
+                    return Ok(json!({"alreadyRecorded":true,"report":existing}));
+                }
+            }
             repo.record_entry(&entry)?
         }
         "update" => {

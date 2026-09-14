@@ -9,8 +9,32 @@ permissions:
   contents: write
 
 jobs:
+  draft:
+    name: Prepare draft release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Check tag and app versions
+        shell: pwsh
+        run: ./scripts/check-version.ps1 -TagName "${{ github.ref_name }}"
+
+      - name: Create or reuse an unpublished draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if is_draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft); then
+            test "$is_draft" = true || { echo "Refusing to change a published release"; exit 1; }
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft --title "YUME $RELEASE_TAG" --notes "Build verification in progress."
+          fi
+
   windows:
     name: Windows signed release
+    needs: draft
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -58,3 +82,55 @@ jobs:
           $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
           ./scripts/verify-windows-icon.ps1 -BinaryPath "src-tauri/target/release/yume.exe"
           ./scripts/verify-windows-icon.ps1 -BinaryPath "src-tauri/target/release/bundle/nsis/YUME_${version}_x64-setup.exe" -ExpectedIconPath "src-tauri/nsis/installer.ico"
+
+  macos:
+    name: macOS Apple Silicon release
+    needs: draft
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Check native architecture
+        run: test "$(uname -m)" = arm64
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: 1.3.14
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: 1.94.1
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check frontend and prepare native resources
+        run: |
+          bun run typecheck
+          bun test
+          bun run prepare:sidecar
+          bun run build
+
+      - name: Test pet recovery and settings geometry
+        run: |
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --lib pet_
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --lib settings::geometry_tests
+
+      - name: Build macOS app
+        run: bun run tauri build --no-sign --bundles app --ci
+
+      - name: Package and verify macOS downloads
+        run: bash scripts/package-macos.sh src-tauri/target/release/bundle/macos/YUME.app "$RUNNER_TEMP/macos-release"
+
+      - name: Upload macOS downloads to draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+          gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/macos-release/"* --clobber

@@ -19,6 +19,9 @@ impl VisibilityError {
 }
 
 pub fn show(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    if let Err(error) = crate::pet_recovery::ensure_reachable(window) {
+        eprintln!("could not recover pet position before showing: {error}");
+    }
     window.show()?;
     let app = window.app_handle();
     match app.state::<VisibilityError>().clear() {

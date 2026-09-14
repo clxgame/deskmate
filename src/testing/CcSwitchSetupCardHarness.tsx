@@ -90,6 +90,9 @@ export const currentFiles = {
 };
 
 export function installDefaultInvoke(): void {
+  // This shared harness is cached across test files; reinstall its native mock
+  // after another file has replaced the same module.
+  mock.module("@tauri-apps/api/core", () => ({ ...tauriCore, invoke }));
   invoke.mockReset();
   invoke.mockImplementation((command: string, args?: unknown) => {
     switch (command) {

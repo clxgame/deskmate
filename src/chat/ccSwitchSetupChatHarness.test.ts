@@ -16,14 +16,17 @@ const appEventHandlers = new Map<string, (event: { payload: unknown }) => void>(
 let snapshotMessages: readonly OpenCodeMessage[] = [];
 let fetchLog: readonly string[] = [];
 
-mock.module("@tauri-apps/api/core", () => ({ ...tauriCore, invoke }));
-mock.module("@tauri-apps/api/event", () => ({
-  listen: (event: string, callback: (payload: { payload: unknown }) => void) => {
-    appEventHandlers.set(event, callback);
-    return Promise.resolve(() => appEventHandlers.delete(event));
-  },
-  emit: () => Promise.resolve(),
-}));
+function installNativeMocks(): void {
+  mock.module("@tauri-apps/api/core", () => ({ ...tauriCore, invoke }));
+  mock.module("@tauri-apps/api/event", () => ({
+    listen: (event: string, callback: (payload: { payload: unknown }) => void) => {
+      appEventHandlers.set(event, callback);
+      return Promise.resolve(() => appEventHandlers.delete(event));
+    },
+    emit: () => Promise.resolve(),
+  }));
+}
+installNativeMocks();
 
 const chatAppModule = await import("./ChatApp");
 const ChatApp = chatAppModule.default;
@@ -232,6 +235,7 @@ export async function renderChat(): Promise<void> {
 }
 
 export function resetChatHarness(): void {
+  installNativeMocks();
   chatEventHandler = null;
   appEventHandlers.clear();
   snapshotMessages = [];

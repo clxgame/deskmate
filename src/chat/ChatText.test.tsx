@@ -1,7 +1,9 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { ChatText } from "./ChatText";
+import { restoreTauriModuleFixture } from "../testing/tauriModuleFixture";
 
+beforeEach(restoreTauriModuleFixture);
 afterEach(cleanup);
 
 describe("ChatText", () => {

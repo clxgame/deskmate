@@ -2,6 +2,24 @@ use super::{apply_and_publish_settings, PetPosition, Settings, SettingsState};
 use std::sync::Mutex;
 
 #[test]
+fn stale_settings_page_cannot_restore_an_offscreen_position() {
+    let recovered = PetPosition { x: 2332, y: 658 };
+    let state = SettingsState(Mutex::new(Settings {
+        pet_position: Some(recovered),
+        ..Settings::default()
+    }));
+    let stale_page = Settings {
+        pet_position: Some(PetPosition { x: 3100, y: 1662 }),
+        pet_scale: 1.7,
+        ..Settings::default()
+    };
+    let notified = apply_and_publish_settings(&state, &stale_page, || {}).unwrap();
+    assert_eq!(notified.pet_position, Some(recovered));
+    assert_eq!(state.0.lock().unwrap().pet_position, Some(recovered));
+    assert_eq!(notified.pet_scale, 1.7);
+}
+
+#[test]
 fn native_move_during_settings_apply_survives_publication_and_notification() {
     let source = Settings {
         persona_id: "baobao".into(),

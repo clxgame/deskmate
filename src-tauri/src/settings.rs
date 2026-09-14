@@ -1150,7 +1150,14 @@ fn apply_and_publish_settings(
     settings: &Settings,
     apply: impl FnOnce(),
 ) -> Result<Settings, String> {
-    *state.0.lock().map_err(|error| error.to_string())? = settings.clone();
+    {
+        let mut current = state.0.lock().map_err(|error| error.to_string())?;
+        // Window movement is authoritative. A settings page may still contain
+        // the position from before a drag or automatic offscreen recovery.
+        let position = current.pet_position;
+        *current = settings.clone();
+        current.pet_position = position;
+    }
     apply();
     Ok(state.0.lock().map_err(|error| error.to_string())?.clone())
 }
@@ -1212,9 +1219,8 @@ pub fn set_settings(
             provider.api_key = key;
         }
     }
-    if settings.pet_position.is_none() {
-        settings.pet_position = old.pet_position;
-    }
+    // This command edits preferences, not native window coordinates.
+    settings.pet_position = old.pet_position;
     persist_settings_update(&AppSettingsTransactionOps { app: &app }, &old, &settings)?;
     let current = apply_and_publish_settings(&state, &settings, || apply(&app, &old, &settings))?;
     crate::pomodoro::apply_preferences(&app, settings.pomodoro)?;

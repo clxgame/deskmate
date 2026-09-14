@@ -131,6 +131,12 @@ bun run tauri build --no-sign
 The macOS build enables Tauri's private transparency API for the frameless pet
 window, so it is intended for direct distribution rather than the Mac App Store.
 
+If a pet is lost after changing displays or scaling, use **找回桌宠** (Find pet)
+in the tray menu to show it on the primary display. Startup and settled display
+or pet-size changes automatically recover out-of-bounds positions within about
+two seconds once the app has initialized. Valid positions are preserved; ordinary dragging is not constrained.
+Use the [macOS runtime checks](docs/macos-runtime-checks.md) before distributing a build.
+
 ## Memory
 
 The companion can remember things about you. Memory is a local, inspectable
@@ -220,6 +226,7 @@ Before tagging, keep these versions identical:
 
 - `package.json`
 - `src-tauri/Cargo.toml`
+- the `yume` package entry in `src-tauri/Cargo.lock`
 - `src-tauri/tauri.conf.json`
 
 Check the release version locally:
@@ -242,7 +249,9 @@ Local draft publish for already-built artifacts:
 powershell -ExecutionPolicy Bypass -File scripts\publish.ps1 -Tag v0.1.1
 ```
 
-The GitHub Actions release workflow runs on `v*` tags. It checks the tag against the app version, builds the signed Windows NSIS installer, uploads updater signatures and `latest.json`, and creates a draft GitHub Release first. Inspect the draft assets before publishing the release.
+The GitHub Actions release workflow runs on `v*` tags. It checks the tag against the app version and creates a draft GitHub Release first, then builds Windows and macOS in parallel. Windows uploads the signed NSIS updater installer, signatures, and `latest.json`. macOS runs frontend and pet-geometry regression tests, builds a native Apple Silicon app, and uploads a verified DMG, app ZIP, and `SHA256SUMS-macos.txt`. Both jobs must pass before publishing the draft.
+
+macOS downloads are not Developer ID signed or notarized and do not participate in the Windows updater feed. They are for manual installation on Apple Silicon Macs; Intel Mac packages are not provided. CI packages the app using `bash scripts/package-macos.sh path/to/YUME.app output-directory`, without Finder automation.
 
 For a public release, bump the app version, push a matching tag, publish the draft GitHub Release with the installer, signature, and `latest.json`, then verify a real installed older build can update to the new release from `clxgame/deskmate`.
 

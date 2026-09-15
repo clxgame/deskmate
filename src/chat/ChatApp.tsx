@@ -73,6 +73,7 @@ import { ChatNavigation } from "./ChatNavigation";
 import { useWorklogChat } from "./useWorklogChat";
 import { WorklogReceipt, worklogChatCopy } from "./WorklogReceipt";
 import { buildWorklogSystemInstruction, newUserMessageId, registerWorklogTurn, WORKLOG_TOOLS } from "./worklogActions";
+import { buildCurrentInformationInstruction } from "./currentInformation";
 import { CcSwitchSetupCard } from "./CcSwitchSetupCard";
 import {
   CCSWITCH_PREPARE_OPENCODE_PROVIDER_TOOL,
@@ -945,7 +946,7 @@ export default function ChatApp() {
       if (!petActivity.isCurrent(petScope)) return false;
       await promptAsync(sessionID, promptText, {
         messageID: userMessageId,
-        system: [system, buildWorklogSystemInstruction()].filter(Boolean).join("\n\n"),
+        system: [system, buildCurrentInformationInstruction(), buildWorklogSystemInstruction()].filter(Boolean).join("\n\n"),
         attachments: [...prepared.fileParts],
         model:
           s?.providerId && s.modelId

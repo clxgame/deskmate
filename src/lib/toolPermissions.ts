@@ -31,7 +31,7 @@ export function permissionKey(tool: string): keyof ToolPermissions | null {
   switch (tool) {
     case "worklog_query": return "worklogRead";
     case "worklog_record": case "worklog_update": case "worklog_generate_report": case "worklog_schedule_report": return "worklogWrite";
-    case "webfetch": return "web";
+    case "webfetch": case "websearch": return "web";
     case "bash": case "shell": return "shell";
     default: return null;
   }

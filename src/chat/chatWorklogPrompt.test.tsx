@@ -87,6 +87,9 @@ test("ChatApp sends dynamic local-date worklog guidance with each prompt", async
 
   await waitFor(() => expect(promptRequests).toHaveLength(1));
   const system = promptRequests[0]?.system ?? "";
+  expect(system).toContain("当前真实本地日期");
+  expect(system).toContain("时区:");
+  expect(system).toContain("websearch");
   expect(system).toContain("工作归属日期");
   expect(system).toContain("worklog_query");
   expect(system).toContain("昨天我做了什么");

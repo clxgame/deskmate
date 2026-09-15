@@ -74,6 +74,8 @@ fn policy_covers_only_supported_tools() {
     ] {
         assert_eq!(policy.mode(tool), Mode::Allow);
     }
+    assert_eq!(policy.mode("webfetch"), Mode::Allow);
+    assert_eq!(policy.mode("websearch"), Mode::Allow);
     for tool in ["write", "external_directory", "unknown", "worklog_delete"] {
         assert_eq!(policy.mode(tool), Mode::Deny);
     }
@@ -84,9 +86,11 @@ fn auto_allow_and_deny_reply_once_while_ask_remains_pending() {
         json!([
             request("p1", "worklog_query", "ses_a"),
             request("p2", "webfetch", "ses_a"),
-            request("p3", "bash", "ses_a"),
-            request("p4", "worklog_query", "ses_other")
+            request("p3", "websearch", "ses_a"),
+            request("p4", "bash", "ses_a"),
+            request("p5", "worklog_query", "ses_other")
         ]),
+        json!(true),
         json!(true),
         json!(true),
     ]);
@@ -100,11 +104,12 @@ fn auto_allow_and_deny_reply_once_while_ask_remains_pending() {
     )
     .expect("resolve");
     assert_eq!(waiting.len(), 1);
-    assert_eq!(waiting[0].id, "p3");
+    assert_eq!(waiting[0].id, "p4");
     let calls = server.join().expect("fixture finished");
     assert!(calls[1].starts_with("POST /permission/p1/reply"));
     assert!(calls[1].contains("\"reply\":\"once\""));
     assert!(calls[2].contains("\"reply\":\"reject\""));
+    assert!(calls[3].contains("\"reply\":\"reject\""));
 }
 #[test]
 fn changed_deny_policy_overrides_a_late_allow_click() {

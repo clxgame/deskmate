@@ -25,7 +25,12 @@ await copyFile(resolve("src-tauri/resources/worklog-bridge.ts"),join(workspace,"
 await copyFile(resolve("src-tauri/resources/opencode-tools/worklog_query.ts"),join(workspace,".opencode/tools/worklog_query.ts"));
 const env = childEnv({root,providerBaseUrl:provider.baseUrl,runtimeCanary:randomUUID()});
 env.YUME_WORKLOG_IPC_DIR=ipc;
-env.OPENCODE_CONFIG_CONTENT=JSON.stringify({...buildSidecarConfig(provider.baseUrl),permission:{"*":"deny",bash:"ask",webfetch:"ask",worklog_query:"ask"}});
+env.OPENCODE_ENABLE_EXA="1";
+env.OPENCODE_WEBSEARCH_PROVIDER="exa";
+delete env.EXA_API_KEY;
+delete env.PARALLEL_API_KEY;
+delete env.OPENCODE_ENABLE_PARALLEL;
+env.OPENCODE_CONFIG_CONTENT=JSON.stringify({...buildSidecarConfig(provider.baseUrl),permission:{"*":"deny",bash:"ask",webfetch:"ask",websearch:"ask",worklog_query:"ask"}});
 const child=spawn(binary,["--pure","serve","--port",String(port),"--hostname","127.0.0.1","--print-logs"],{cwd:workspace,env,stdio:["ignore","pipe","pipe"],windowsHide:true});
 let output="";
 let spawnError: string | undefined;
@@ -33,6 +38,7 @@ child.on("error", (error: Error) => { spawnError=error.message; });
 child.stdout.on("data",(chunk:Buffer)=>{output=(output+chunk.toString()).slice(-10000);});
 child.stderr.on("data",(chunk:Buffer)=>{output=(output+chunk.toString()).slice(-10000);});
 const evidence:Record<string,unknown>={};
+const actualSearch = process.argv.includes("--actual-search");
 let nativeTest: ReturnType<typeof Bun.spawn> | undefined;
 const eventAbort = new AbortController();
 const observedPermissions = new Map<string, Record<string, unknown>>();
@@ -76,7 +82,9 @@ async function start(tool:string,args:object) {
 async function reply(id:string,decision:string) { await requestJson({baseUrl,path:`/permission/${id}/reply`,method:"POST",body:{reply:decision}}); }
 try {
  await waitForHealth(baseUrl,()=>({output,exit:spawnError ?? (child.exitCode===null?undefined:String(child.exitCode))}));
- await requestJson({baseUrl,path:"/experimental/tool/ids",timeoutSeconds:120});
+ const toolIds=await requestJson({baseUrl,path:"/experimental/tool/ids",timeoutSeconds:120});
+ check(Array.isArray(toolIds)&&toolIds.includes("webfetch"),"webfetch missing from sidecar tools");
+ check(Array.isArray(toolIds)&&toolIds.includes("websearch"),"websearch missing from sidecar tools");
  const events=await fetch(`${baseUrl}/event`,{signal:eventAbort.signal});
  void readEvents(events);
  if(!process.argv.includes("--web-only")) {
@@ -118,6 +126,30 @@ try {
  if(nativeTest) {
   const readyDeadline=Date.now()+180000;
   while(!(await Bun.file(nativeReady).exists())) {check(Date.now()<readyDeadline,"native stream readiness timeout");await Bun.sleep(100);}
+ }
+ const search=await start("websearch",{query:"OpenAI current models pricing"});
+ const searchPermission=await waitPermission(search);
+ check(searchPermission.permission==="websearch","wrong websearch permission");
+ await reply(expectString(searchPermission.id,"websearch permission"),"reject");
+ evidence.websearch_reject="pass";
+ await requestRaw({baseUrl,path:`/session/${search}/abort`,method:"POST"});
+ if(actualSearch){
+  provider.setCompletionText("ACTUAL_WEBSEARCH_DONE");
+  const actual=await start("websearch",{query:"OpenAI current models pricing official site:openai.com"});
+  const actualPermission=await waitPermission(actual);
+  check(actualPermission.permission==="websearch","wrong actual websearch permission");
+  await reply(expectString(actualPermission.id,"actual websearch permission"),"once");
+  const deadline=Date.now()+60000;
+  let toolText="";
+  while(Date.now()<deadline&&toolText.length===0){
+   const observation=provider.observations.find((item)=>item.toolResult&&item.toolText.length>0);
+   toolText=observation?.toolText ?? "";
+   if(toolText.length===0)await Bun.sleep(100);
+  }
+  evidence.actual_websearch_tool_text=toolText.slice(0,3000);
+  check(/https?:\/\//i.test(toolText),"actual websearch returned no source URL");
+  evidence.actual_websearch="pass";
+  await requestRaw({baseUrl,path:`/session/${actual}/abort`,method:"POST"});
  }
  const web=await start("webfetch",{url:provider.baseUrl+"/models",format:"text"});
  if(nativeTest) {

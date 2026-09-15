@@ -34,7 +34,7 @@ impl ToolPermissions {
             | "worklog_update"
             | "worklog_generate_report"
             | "worklog_schedule_report" => self.worklog_write,
-            "webfetch" => self.web,
+            "webfetch" | "websearch" => self.web,
             "bash" | "shell" => self.shell,
             _ => Mode::Deny,
         }
@@ -44,6 +44,7 @@ impl ToolPermissions {
 pub const CONTROLLED_TOOLS: &[&str] = &[
     "bash",
     "webfetch",
+    "websearch",
     "worklog_record",
     "worklog_query",
     "worklog_update",

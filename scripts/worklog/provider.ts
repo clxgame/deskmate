@@ -15,7 +15,10 @@ function messageText(messages: readonly unknown[], role: string): string {
   return messages
     .flatMap((message) => {
       if (!isJsonObject(message) || message.role !== role) return [];
-      return typeof message.content === "string" ? [message.content] : [];
+      if (typeof message.content === "string") return [message.content];
+      if (!Array.isArray(message.content)) return [];
+      return message.content.flatMap((part) =>
+        isJsonObject(part) && typeof part.text === "string" ? [part.text] : []);
     })
     .join("\n");
 }

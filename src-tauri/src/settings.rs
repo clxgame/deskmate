@@ -2236,6 +2236,7 @@ mod tests {
         assert_eq!(permission["ccswitch_prepare_opencode_provider"], "allow");
         assert_eq!(permission["bash"], "ask");
         assert_eq!(permission["webfetch"], "ask");
+        assert_eq!(permission["websearch"], "ask");
         for denied in [
             "edit",
             "write",

@@ -249,6 +249,22 @@ mod tests {
         assert!(envs.iter().any(|(key, value)| {
             *key == OsStr::new("OPENCODE_AUTH_CONTENT") && value.is_none()
         }));
+        assert!(envs.iter().any(|(key, value)| {
+            *key == OsStr::new("OPENCODE_ENABLE_EXA") && *value == Some(OsStr::new("1"))
+        }));
+        assert!(envs.iter().any(|(key, value)| {
+            *key == OsStr::new("OPENCODE_WEBSEARCH_PROVIDER")
+                && *value == Some(OsStr::new("exa"))
+        }));
+        assert!(envs.iter().any(|(key, value)| {
+            *key == OsStr::new("EXA_API_KEY") && value.is_none()
+        }));
+        assert!(envs.iter().any(|(key, value)| {
+            *key == OsStr::new("PARALLEL_API_KEY") && value.is_none()
+        }));
+        assert!(envs.iter().any(|(key, value)| {
+            *key == OsStr::new("OPENCODE_ENABLE_PARALLEL") && value.is_none()
+        }));
 
         std::fs::remove_dir_all(root).expect("remove test directory");
     }
@@ -998,8 +1014,13 @@ fn configure_sidecar_environment(cmd: &mut Command, data_dir: &Path) {
         .env("XDG_CONFIG_HOME", sidecar_home.join("xdg-config"))
         .env("XDG_DATA_HOME", sidecar_home.join("xdg-data"))
         .env("XDG_CACHE_HOME", sidecar_home.join("xdg-cache"))
+        .env("OPENCODE_ENABLE_EXA", "1")
+        .env("OPENCODE_WEBSEARCH_PROVIDER", "exa")
         .env_remove("OPENCODE_CONFIG_CONTENT")
-        .env_remove("OPENCODE_AUTH_CONTENT");
+        .env_remove("OPENCODE_AUTH_CONTENT")
+        .env_remove("EXA_API_KEY")
+        .env_remove("PARALLEL_API_KEY")
+        .env_remove("OPENCODE_ENABLE_PARALLEL");
 }
 
 fn resource_error_event(reason: String) -> (&'static str, String) {

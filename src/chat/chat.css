@@ -18,6 +18,14 @@
   --t-body: 13px;
   --t-title: 14px;
   --t-head: 15px;
+  --motion-search-breathe: 1.8s ease-in-out;
+  --motion-search-sites: 11s linear;
+  --search-activity-gap: 4px;
+  --search-activity-opacity: 0.82;
+  --search-activity-active-opacity: 0.98;
+  --search-sites-gap: 18px;
+  --search-sites-max-width: min(220px, 45vw);
+  --search-sites-opacity: 0.72;
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -188,6 +196,76 @@
   vertical-align: middle;
 }
 
+.chat-activity-websearch {
+  display: flex;
+  align-items: center;
+  gap: var(--search-activity-gap);
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: var(--t-body);
+  line-height: 20px;
+  opacity: var(--search-activity-opacity);
+}
+
+.chat-activity-websearch.chat-activity-running {
+  animation: chat-websearch-breathe var(--motion-search-breathe) infinite;
+}
+
+.chat-websearch-divider,
+.chat-websearch-sites {
+  color: var(--text-dim);
+  opacity: var(--search-sites-opacity);
+}
+
+.chat-websearch-divider {
+  flex: none;
+}
+
+.chat-websearch-sites {
+  min-width: 0;
+  max-width: var(--search-sites-max-width);
+  overflow: hidden;
+  white-space: nowrap;
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    black 8px,
+    black calc(100% - 8px),
+    transparent
+  );
+}
+
+.chat-websearch-sites-track {
+  display: flex;
+  width: max-content;
+}
+
+.chat-websearch-sites-group {
+  flex: none;
+  padding-right: var(--search-sites-gap);
+}
+
+.chat-websearch-sites-scrolling .chat-websearch-sites-track {
+  animation: chat-websearch-sites-scroll var(--motion-search-sites) infinite;
+}
+
+@keyframes chat-websearch-breathe {
+  0%,
+  100% {
+    opacity: var(--search-activity-opacity);
+  }
+
+  50% {
+    opacity: var(--search-activity-active-opacity);
+  }
+}
+
+@keyframes chat-websearch-sites-scroll {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
 .chat-typing {
   align-self: flex-start;
   padding: 7px 10px;
@@ -215,7 +293,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-typing {
+  .chat-typing,
+  .chat-activity-websearch.chat-activity-running,
+  .chat-websearch-sites-scrolling .chat-websearch-sites-track {
     animation: none;
   }
 }

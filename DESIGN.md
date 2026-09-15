@@ -204,6 +204,8 @@ Explicit GIF departure lasts 910ms: translate left by 50% of the displayed image
 
 Use `--ease` for control transitions and `--tooltip-delay` (`420ms`) for persona-pack tooltip reveals. Tooltip depth uses `--shadow-tooltip`. Persona changes are stateful but not animated in the settings surface; the pet renderer fades through a model swap only if a future transition is added. Mouse-follow rotation eases at a bounded rate and returns to neutral when disabled. Respect reduced-motion preferences for any future model transition.
 
+Web search activity in chat uses the shared 16px network icon, body-size type and a localized `网页搜索` label. Its gap, resting opacity and active opacity come from chat-local search activity tokens. Pending and running searches use `--motion-search-breathe` for a restrained opacity breath; completed searches remain visible without that motion. When the tool supplies real domains in its query or result URLs, a masked ticker follows the fixed label and scrolls the deduplicated domains using `--motion-search-sites`; no inferred or placeholder site is shown. Reduced-motion mode disables both animations.
+
 ## 7. Depth & Surface
 
 Strategy: mixed tonal layers with subtle borders. The settings shell uses `--surface`, raised titlebar/sidebar layers, sunken controls, and low-contrast divider lines; it avoids heavy drop shadows so the translucent desktop pet remains visually separate from the UI.

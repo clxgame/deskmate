@@ -74,6 +74,7 @@ import { useWorklogChat } from "./useWorklogChat";
 import { WorklogReceipt, worklogChatCopy } from "./WorklogReceipt";
 import { buildWorklogSystemInstruction, newUserMessageId, registerWorklogTurn, WORKLOG_TOOLS } from "./worklogActions";
 import { buildCurrentInformationInstruction } from "./currentInformation";
+import { webSearchSites } from "./webSearchSites";
 import { CcSwitchSetupCard } from "./CcSwitchSetupCard";
 import {
   CCSWITCH_PREPARE_OPENCODE_PROVIDER_TOOL,
@@ -91,8 +92,7 @@ interface TextChatMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
-  /** live tool activity line, e.g. "bash: npm test" */
-  activity?: string;
+  activity?: ToolActivity;
   attachments?: ModelReadyAttachment[];
 }
 
@@ -108,6 +108,14 @@ interface CcSwitchSetupRequestPayload {
 }
 
 type ChatMessage = TextChatMessage | ArtifactChatMessage;
+
+type WebSearchActivity = {
+  readonly kind: "websearch";
+  readonly running: boolean;
+  readonly sites: readonly string[];
+};
+
+type ToolActivity = string | WebSearchActivity;
 
 export function containsCcSwitchApiKey(text: string): boolean {
   if (!/(cc\s*switch|opencode)/iu.test(text)) return false;
@@ -152,7 +160,7 @@ interface BufferedAssistantUpdate {
   messageID: string;
   hasText: boolean;
   text?: string;
-  activity?: string;
+  activity?: ToolActivity;
 }
 
 interface ReplyPacing {
@@ -167,6 +175,14 @@ function waitForDelay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => {
     globalThis.setTimeout(resolve, milliseconds);
   });
+}
+
+function settleToolActivity(activity: ToolActivity | undefined): ToolActivity | undefined {
+  return typeof activity === "object" ? { ...activity, running: false } : undefined;
+}
+
+function preserveWebSearchActivity(activity: ToolActivity | undefined): ToolActivity | undefined {
+  return typeof activity === "object" ? activity : undefined;
 }
 
 export default function ChatApp() {
@@ -269,7 +285,7 @@ export default function ChatApp() {
     setMessages((prev) =>
       prev.map((message) =>
         isTextChatMessage(message) && message.activity
-          ? { ...message, activity: undefined }
+          ? { ...message, activity: settleToolActivity(message.activity) }
           : message,
       ),
     );
@@ -330,20 +346,21 @@ export default function ChatApp() {
         upsertAssistant(prev, messageID, (message) => ({
           ...message,
           text,
-          activity: undefined,
+          activity: preserveWebSearchActivity(message.activity),
         })),
       );
       return;
     }
+    const current = pacing.pendingUpdates.get(messageID);
     pacing.pendingUpdates.set(messageID, {
       messageID,
       hasText: true,
       text,
-      activity: undefined,
+      activity: preserveWebSearchActivity(current?.activity),
     });
   };
 
-  const queueAssistantTool = (messageID: string, activity: string) => {
+  const queueAssistantTool = (messageID: string, activity: ToolActivity) => {
     const pacing = replyPacingRef.current;
     if (!pacing || pacing.released) {
       setMessages((prev) =>
@@ -395,7 +412,7 @@ export default function ChatApp() {
       setMessages((prev) =>
         prev.map((message) =>
           isTextChatMessage(message) && message.activity
-            ? { ...message, activity: undefined }
+            ? { ...message, activity: settleToolActivity(message.activity) }
             : message,
         ),
       );
@@ -699,6 +716,17 @@ export default function ChatApp() {
             }
             broadcastMood("working");
             queueAssistantTool(part.messageID, part.state?.title || part.tool || "tool");
+            return;
+          }
+          if (toolPart.tool === "websearch") {
+            const running =
+              toolPart.state.status === "pending" || toolPart.state.status === "running";
+            if (running) broadcastMood("working");
+            queueAssistantTool(toolPart.messageID, {
+              kind: "websearch",
+              running,
+              sites: webSearchSites(toolPart),
+            });
             return;
           }
           applyCcSwitchToolResult(
@@ -1303,9 +1331,51 @@ export default function ChatApp() {
               return (
                 <div key={m.id} data-message-id={m.id} className={`chat-msg chat-msg-${m.role}`}>
                   {m.activity && (
-                    <div className="chat-activity">
-                      <AppIcon name="general" size={16} className="chat-activity-icon" />{" "}
-                      {m.activity}
+                    <div
+                      className={`chat-activity${typeof m.activity === "object" ? ` chat-activity-websearch${m.activity.running ? " chat-activity-running" : ""}` : ""}`}
+                      role={typeof m.activity === "object" ? "status" : undefined}
+                      aria-live={typeof m.activity === "object" ? "polite" : undefined}
+                    >
+                      {typeof m.activity === "object" ? (
+                        <>
+                          <AppIcon
+                            name="network"
+                            size={16}
+                            className="chat-activity-icon app-icon-network"
+                          />
+                          <span>{t.chatWebSearch}</span>
+                          {m.activity.sites.length > 0 && (
+                            <>
+                              <span className="chat-websearch-divider" aria-hidden="true">
+                                ·
+                              </span>
+                              <span
+                                className={`chat-websearch-sites${m.activity.sites.length > 1 ? " chat-websearch-sites-scrolling" : ""}`}
+                                title={m.activity.sites.join(" · ")}
+                              >
+                                <span className="chat-websearch-sites-track">
+                                  <span className="chat-websearch-sites-group">
+                                    {m.activity.sites.join(" · ")}
+                                  </span>
+                                  {m.activity.sites.length > 1 && (
+                                    <span
+                                      className="chat-websearch-sites-group"
+                                      aria-hidden="true"
+                                    >
+                                      {m.activity.sites.join(" · ")}
+                                    </span>
+                                  )}
+                                </span>
+                              </span>
+                            </>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <AppIcon name="general" size={16} className="chat-activity-icon" />{" "}
+                          {m.activity}
+                        </>
+                      )}
                     </div>
                   )}
                   {m.attachments && m.attachments.length > 0 && (

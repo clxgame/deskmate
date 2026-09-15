@@ -476,10 +476,113 @@ describe("小著固定名字由来回复", () => {
     });
 
     expect(screen.getByText("正文已经到达")).toBeDefined();
-    expect(document.querySelector(".chat-activity")?.textContent).toContain("读取文件");
+    const ordinaryActivity = document.querySelector(".chat-activity");
+    expect(ordinaryActivity?.textContent).toContain("读取文件");
+    expect(ordinaryActivity?.classList.contains("chat-activity-websearch")).toBe(false);
+    expect(ordinaryActivity?.querySelector(".chat-activity-icon")).not.toBeNull();
+    expect(ordinaryActivity?.querySelector(".app-icon-network")).toBeNull();
     expect(document.querySelectorAll(".chat-msg-assistant .chat-bubble")).toHaveLength(1);
     expect(screen.getByText("正在思考..")).toBeDefined();
     expect(screen.getAllByText("正在输入..")).toHaveLength(1);
     expect(document.querySelector(".chat-typing")).not.toBeNull();
+  });
+
+  test("shows web search as a breathing network activity that settles when completed", async () => {
+    render(<ChatApp />);
+    const input = await screen.findByPlaceholderText("输入消息,Enter 发送");
+    const send = screen.getByRole("button", { name: "发送" });
+    await waitFor(() => expect(eventHandler).not.toBeNull());
+    const receive = eventHandler;
+    if (!receive) throw new Error("SSE handler was not registered");
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "搜索最新资料" } });
+    });
+    await waitFor(() => expect((send as HTMLButtonElement).disabled).toBe(false));
+
+    jest.useFakeTimers();
+    await act(async () => {
+      fireEvent.click(send);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      jest.advanceTimersByTime(2000);
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      receive({
+        type: "message.part.updated",
+        properties: {
+          part: {
+            id: "part-websearch",
+            sessionID: "ses_fixed",
+            messageID: "msg-websearch",
+            type: "tool",
+            callID: "call-websearch",
+            tool: "websearch",
+            state: {
+              status: "running",
+              title: "Exa Web Search: latest models",
+              input: { query: "latest models platform.openai.com" },
+            },
+          },
+        },
+      });
+      receive({
+        type: "message.part.updated",
+        properties: {
+          part: {
+            sessionID: "ses_fixed",
+            messageID: "msg-websearch",
+            type: "text",
+            text: "正在核对来源",
+          },
+        },
+      });
+      await Promise.resolve();
+    });
+
+    const running = screen.getByText("网页搜索").closest(".chat-activity");
+    expect(running?.classList.contains("chat-activity-running")).toBe(true);
+    expect(running?.textContent).not.toContain("Exa Web Search");
+    expect(running?.querySelector(".app-icon-network")).not.toBeNull();
+    expect(running?.textContent).toContain("platform.openai.com");
+
+    await act(async () => {
+      receive({
+        type: "message.part.updated",
+        properties: {
+          part: {
+            id: "part-websearch",
+            sessionID: "ses_fixed",
+            messageID: "msg-websearch",
+            type: "tool",
+            callID: "call-websearch",
+            tool: "websearch",
+            state: {
+              status: "completed",
+              input: { query: "latest models platform.openai.com" },
+              output:
+                "URL: https://developers.openai.com/api/docs/models\nURL: https://github.com/openai/openai-node\nURL: https://www.github.com/openai/openai-python",
+            },
+          },
+        },
+      });
+      receive({ type: "session.idle", properties: { sessionID: "ses_fixed" } });
+      await Promise.resolve();
+    });
+
+    const completed = screen.getByText("网页搜索").closest(".chat-activity");
+    expect(completed?.classList.contains("chat-activity-running")).toBe(false);
+    const sites = completed?.querySelector(".chat-websearch-sites");
+    expect(sites?.classList.contains("chat-websearch-sites-scrolling")).toBe(true);
+    expect(sites?.textContent).toContain("platform.openai.com");
+    expect(sites?.textContent).toContain("developers.openai.com");
+    expect(sites?.textContent).toContain("github.com");
+    expect(sites?.textContent).not.toContain("https://");
+    expect(sites?.getAttribute("title")).toBe(
+      "platform.openai.com · developers.openai.com · github.com",
+    );
   });
 });

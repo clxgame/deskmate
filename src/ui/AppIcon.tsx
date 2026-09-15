@@ -4,6 +4,7 @@ import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { ClockIcon } from "@phosphor-icons/react/dist/csr/Clock";
 import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ClockCounterClockwise";
 import { GearSixIcon } from "@phosphor-icons/react/dist/csr/GearSix";
+import { GlobeSimpleIcon } from "@phosphor-icons/react/dist/csr/GlobeSimple";
 import { InfoIcon } from "@phosphor-icons/react/dist/csr/Info";
 import { KeyboardIcon } from "@phosphor-icons/react/dist/csr/Keyboard";
 import { PackageIcon } from "@phosphor-icons/react/dist/csr/Package";
@@ -22,6 +23,7 @@ import "./icons.css";
 
 const ICONS = {
   general: GearSixIcon,
+  network: GlobeSimpleIcon,
   ai: SparkleIcon,
   permissions: ShieldCheckIcon,
   widget: SquaresFourIcon,

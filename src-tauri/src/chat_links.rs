@@ -1,4 +1,4 @@
-const CREATOR_CONTACT_URL: &str = "https://www.feishu.cn/invitation/page/add_contact/?token=113i0ecc-12c0-4e90-ae6b-4016815bfdcc";
+const CREATOR_CONTACT_URL: &str = "https://applink.feishu.cn/client/chat/open?openId=ou_a210f858d830187b119d691364a3d628";
 
 fn external_url(raw: &str) -> Result<url::Url, String> {
     let url = url::Url::parse(raw).map_err(|_| "Invalid link".to_string())?;

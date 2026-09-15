@@ -544,7 +544,7 @@ function AccountTab({ settings, patch, t }: TabProps) {
 function AboutTab({ t }: TabProps) {
   const [version, setVersion] = useState("");
   const [contactFailed, setContactFailed] = useState(false);
-  const contactUrl = "https://www.feishu.cn/invitation/page/add_contact/?token=113i0ecc-12c0-4e90-ae6b-4016815bfdcc";
+  const contactUrl = "https://applink.feishu.cn/client/chat/open?openId=ou_a210f858d830187b119d691364a3d628";
 
   useEffect(() => {
     let closed = false;

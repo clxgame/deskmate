@@ -5,7 +5,6 @@ import { displayProviderLabel } from "./aiProviderModel";
 import { groupModelsByManufacturer } from "./modelManufacturer";
 import {
   Row,
-  Switch,
   type PersistSettings,
   type ReplaceSettings,
   type TabProps,
@@ -17,7 +16,7 @@ type AiTabProps = TabProps & {
   readonly persist: PersistSettings;
 };
 
-export function AiTab({ settings, patch, replace, persist, t }: AiTabProps) {
+export function AiTab({ settings, replace, persist, t }: AiTabProps) {
   const controller = useAiTabController({ settings, replace, persist, t });
   const activeProvider =
     settings.providers.find(
@@ -72,14 +71,6 @@ export function AiTab({ settings, patch, replace, persist, t }: AiTabProps) {
         <p className="set-note set-note-error">{t.aiUnreachable}</p>
       )}
 
-      <Row label={t.yolo}>
-        <Switch
-          label={t.yolo}
-          checked={settings.yolo}
-          onChange={(v) => patch("yolo", v)}
-        />
-      </Row>
-      <p className="set-note set-note-warn">{t.yoloWarn}</p>
       <CcSwitchStatus
         status={controller.ccSwitchStatus}
         deployment={controller.deploymentFor(activeProvider?.id ?? "")}

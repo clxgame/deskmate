@@ -8,6 +8,8 @@ import {
   type ClipboardEvent,
   type DragEvent,
 } from "react";
+import { ToolApprovalCards } from "./ToolApprovalCards";
+import { useToolPermissions } from "./useToolPermissions";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -196,6 +198,7 @@ export default function ChatApp() {
   const tRef = useRef(t);
   tRef.current = t;
   const sessionRef = useRef<string | null>(null);
+  const permissions = useToolPermissions(currentSessionId, status === "busy");
   const [petActivity] = useState(() => createChatPetActivity(broadcastPetActivity));
   const personaRef = useRef<PersonaData | null>(null);
   const activePersonaIdRef = useRef(DEFAULT_PERSONA_ID);
@@ -1413,6 +1416,7 @@ export default function ChatApp() {
             </div>
           )}
 
+          <ToolApprovalCards requests={permissions.requests} error={permissions.error} onReply={permissions.reply} t={t} />
           <footer className="chat-input-row">
             <input
               ref={fileInputRef}

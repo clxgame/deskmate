@@ -39,6 +39,8 @@ Rules: filled interactive accents use `--accent`, while accent copy, icons, and 
 
 Theme scope: `.set-root` and `.chat-root` receive the same palette from `src/theme.css` through their shared `data-theme` value. Settings-only tokens extend that palette locally; conversation/history surfaces therefore use the exact same semantic surface, text, accent, border, focus, disabled, and destructive colors as the settings window.
 
+About creator contact: only “小著” is an underlined external link, using `--accent-ink`, `--text` on hover, and the existing visible focus outline. Opening failures appear inline in `--danger` with an alert role; the creator prefix and other About copy keep their existing typography and spacing.
+
 ## 3. Typography
 
 Primary font: `"Segoe UI", "Microsoft YaHei", system-ui, sans-serif`.
@@ -208,3 +210,8 @@ Strategy: mixed tonal layers with subtle borders. The settings shell uses `--sur
 
 小著（三代目）保留素材内嵌的 PBR 材质与七套独立骨骼、表情贴图；每帧仅显示当前动作的模型。普通五状态对应等待、思考、打招呼、跳舞、哭。右键‘戳’按 60% / 20% / 20% 选择打招呼、开心、争辩，单次播放结束恢复最新普通状态。角色选择沿用现有角色包卡片和选择控件。
 GIF schema v2 uses a fixed per-action source-space scale and XY calibration; display and silhouette hit testing share that transform. A 3 CSS pixel edge tolerance applies to body polygons, with independent rectangular timer/error targets. Images never receive pointer events directly. Departure adds a negative half-width translation to the calibrated left position; loading or switching personas removes the old image and silhouette immediately. A fixed per-persona envelope includes all seven full images and the leaving endpoint; the transparent native host expands symmetrically in X with a shared bottom inset when needed, preserving the canonical bottom-center screen anchor and existing idle size. Frame layout and the native envelope use identical ratios; changing action never resizes the native host. Drag holds remain active through physical primary-button release, including swapped Windows buttons.
+
+## Tool permissions
+- Settings navigation places Tool permissions immediately after AI, at the same level, using the shield icon. It groups existing AI tools into work journal, network and system; manual widget operations stay independent.
+- Native select controls use existing row, spacing, heading and focus tokens. Defaults: query/write/web allow, shell ask. All modes are persisted globally and evaluated by the host at execution time.
+- Chat approvals show the requested operation and complete scrollable parameters, with Allow once and Cancel actions. Error state uses --danger; disabled actions prevent repeat submission. Unknown tools are denied; no inactive future capability controls are shown.

@@ -422,16 +422,15 @@ describe("CC Switch entry in AI settings", () => {
     ]);
   });
 
-  test("places CC Switch below YOLO warning and above AI usage", async () => {
+  test("places CC Switch above AI usage without an inert YOLO switch", async () => {
     await openAiSettings();
 
     await waitFor(() => {
       expect(screen.getByLabelText("CC Switch")).toBeDefined();
     });
     const panelText = document.querySelector(".set-panel")?.textContent ?? "";
-    expect(panelText.indexOf("允许 AI 直接执行命令,谨慎开启")).toBeLessThan(
-      panelText.indexOf("CC Switch"),
-    );
+    expect(panelText).not.toContain("YOLO");
+    expect(panelText).not.toContain("允许 AI 直接执行命令,谨慎开启");
     expect(panelText.indexOf("CC Switch")).toBeLessThan(panelText.indexOf("AI 用量"));
   });
 

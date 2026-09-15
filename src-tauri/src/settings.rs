@@ -198,6 +198,7 @@ pub struct Settings {
     pub provider_id: String,
     pub model_id: String,
     pub yolo: bool,
+    pub tool_permissions: crate::tool_permissions::ToolPermissions,
     pub base_url: String,
     pub api_key: String,
     /// Configured gateways; the first is the legacy-migrated one.
@@ -247,6 +248,7 @@ impl Default for Settings {
             provider_id: String::new(),
             model_id: String::new(),
             yolo: false,
+            tool_permissions: crate::tool_permissions::ToolPermissions::default(),
             base_url: DEFAULT_AI_BASE_URL.into(),
             api_key: String::new(),
             providers: Vec::new(),
@@ -1519,7 +1521,7 @@ fn finalize_sidecar_environment(
 /// The permission policy is global to the sidecar and independent of how many
 /// providers are injected: deny everything except the chat assistant's tools
 /// (shell execution and web fetching, plus YUME's dedicated tools).
-fn sidecar_permission_policy() -> serde_json::Map<String, serde_json::Value> {
+pub(crate) fn sidecar_permission_policy() -> serde_json::Map<String, serde_json::Value> {
     let mut permission = serde_json::Map::new();
     permission.insert("*".to_string(), serde_json::json!("deny"));
     permission.insert(
@@ -1529,16 +1531,8 @@ fn sidecar_permission_policy() -> serde_json::Map<String, serde_json::Value> {
     for permission_id in DENIED_OPENCODE_PERMISSIONS {
         permission.insert((*permission_id).to_string(), serde_json::json!("deny"));
     }
-    for tool in [
-        "bash",
-        "webfetch",
-        "worklog_record",
-        "worklog_query",
-        "worklog_update",
-        "worklog_generate_report",
-        "worklog_schedule_report",
-    ] {
-        permission.insert(tool.to_string(), serde_json::json!("allow"));
+    for tool in crate::tool_permissions::CONTROLLED_TOOLS {
+        permission.insert((*tool).to_owned(), serde_json::json!("ask"));
     }
     permission
 }
@@ -2240,8 +2234,8 @@ mod tests {
 
         assert_eq!(permission["*"], "deny");
         assert_eq!(permission["ccswitch_prepare_opencode_provider"], "allow");
-        assert_eq!(permission["bash"], "allow");
-        assert_eq!(permission["webfetch"], "allow");
+        assert_eq!(permission["bash"], "ask");
+        assert_eq!(permission["webfetch"], "ask");
         for denied in [
             "edit",
             "write",
@@ -2256,19 +2250,10 @@ mod tests {
             .filter(|(_, value)| **value == "allow")
             .map(|(tool, _)| tool.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(
-            allowed,
-            vec![
-                "bash",
-                "ccswitch_prepare_opencode_provider",
-                "webfetch",
-                "worklog_generate_report",
-                "worklog_query",
-                "worklog_record",
-                "worklog_schedule_report",
-                "worklog_update"
-            ]
-        );
+        assert_eq!(allowed, vec!["ccswitch_prepare_opencode_provider"]);
+        for tool in crate::tool_permissions::CONTROLLED_TOOLS {
+            assert_eq!(permission[*tool], "ask");
+        }
     }
 
     #[test]

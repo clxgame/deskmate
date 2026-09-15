@@ -17,11 +17,13 @@ import { SquaresFourIcon } from "@phosphor-icons/react/dist/csr/SquaresFour";
 import { TimerIcon } from "@phosphor-icons/react/dist/csr/Timer";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
+import { ShieldCheckIcon } from "@phosphor-icons/react/dist/csr/ShieldCheck";
 import "./icons.css";
 
 const ICONS = {
   general: GearSixIcon,
   ai: SparkleIcon,
+  permissions: ShieldCheckIcon,
   widget: SquaresFourIcon,
   shortcuts: KeyboardIcon,
   pet: PawPrintIcon,

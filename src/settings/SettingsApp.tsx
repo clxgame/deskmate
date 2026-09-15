@@ -15,10 +15,12 @@ import {
   type Settings,
 } from "../lib/settings";
 import { listen } from "@tauri-apps/api/event";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { getPetVisibilityError, onPetVisibilityError } from "../lib/petVisibility";
 import { dict, LANGS, type Dict } from "../lib/i18n";
 import { UpdateFooter } from "./UpdateFooter";
 import { AiTab } from "./AiTab";
+import { ToolPermissionsTab } from "./ToolPermissionsTab";
 import { MemoryTab } from "./MemoryTab";
 import { type WorklogTarget } from "./worklog/WorklogTab";
 import { WidgetTab, type WidgetId } from "./widgets/WidgetTab";
@@ -37,6 +39,7 @@ type TabId =
   | "general"
   | "ai"
   | "widget"
+  | "permissions"
   | "shortcuts"
   | "account"
   | "memory"
@@ -45,6 +48,7 @@ type TabId =
 const TAB_ICONS = [
   { id: "general", icon: "general" },
   { id: "ai", icon: "ai" },
+  { id: "permissions", icon: "permissions" },
   { id: "widget", icon: "widget" },
   { id: "shortcuts", icon: "shortcuts" },
   { id: "account", icon: "pet" },
@@ -58,6 +62,8 @@ function tabLabel(t: Dict, id: TabId): string {
       return t.tabGeneral;
     case "ai":
       return t.tabAi;
+    case "permissions":
+      return t.tabPermissions;
     case "widget":
       return t.tabWidget;
     case "shortcuts":
@@ -239,6 +245,7 @@ export default function SettingsApp() {
                 t={t}
               />
             )}
+            {tab === "permissions" && <ToolPermissionsTab settings={settings} patch={patch} t={t} />}
             {tab === "widget" && (
               <WidgetTab settings={settings} patch={patch} t={t} activeWidget={activeWidget} onSelect={setActiveWidget} worklogRequest={worklogRequest} />
             )}
@@ -536,6 +543,8 @@ function AccountTab({ settings, patch, t }: TabProps) {
 
 function AboutTab({ t }: TabProps) {
   const [version, setVersion] = useState("");
+  const [contactFailed, setContactFailed] = useState(false);
+  const contactUrl = "https://www.feishu.cn/invitation/page/add_contact/?token=113i0ecc-12c0-4e90-ae6b-4016815bfdcc";
 
   useEffect(() => {
     let closed = false;
@@ -559,7 +568,25 @@ function AboutTab({ t }: TabProps) {
       <p className="set-about-name">YUME</p>
       <p className="set-about-version">{version ? `v${version}` : "…"}</p>
       <p className="set-about-desc">{t.aboutDesc}</p>
-      <p className="set-about-credits">{t.aboutCredits}</p>
+      <p className="set-about-credits">
+        {t.aboutCredits}
+        <a
+          href={contactUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(event) => {
+            if (!isTauri()) return;
+            event.preventDefault();
+            setContactFailed(false);
+            void invoke("open_chat_link", { url: contactUrl }).catch(() =>
+              setContactFailed(true),
+            );
+          }}
+        >
+          小著
+        </a>
+        {contactFailed && <span className="set-about-error" role="alert"> {t.aboutContactError}</span>}
+      </p>
     </>
   );
 }

@@ -1,3 +1,5 @@
+const CREATOR_CONTACT_URL: &str = "https://www.feishu.cn/invitation/page/add_contact/?token=113i0ecc-12c0-4e90-ae6b-4016815bfdcc";
+
 fn external_url(raw: &str) -> Result<url::Url, String> {
     let url = url::Url::parse(raw).map_err(|_| "Invalid link".to_string())?;
     if !matches!(url.scheme(), "https" | "http" | "mailto") {
@@ -6,12 +8,16 @@ fn external_url(raw: &str) -> Result<url::Url, String> {
     Ok(url)
 }
 
+fn window_link(label: &str, raw: &str) -> Result<url::Url, String> {
+    if label != "chat" && !(label == "settings" && raw == CREATOR_CONTACT_URL) {
+        return Err("This window cannot open this link".to_string());
+    }
+    external_url(raw)
+}
+
 #[tauri::command]
 pub async fn open_chat_link(window: tauri::WebviewWindow, url: String) -> Result<(), String> {
-    if window.label() != "chat" {
-        return Err("Only the chat window can open chat links".to_string());
-    }
-    let url = external_url(&url)?;
+    let url = window_link(window.label(), &url)?;
     tauri::async_runtime::spawn_blocking(move || open_system_link(url.as_str()))
         .await
         .map_err(|_| "Could not open link".to_string())?
@@ -50,7 +56,16 @@ fn open_system_link(url: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::external_url;
+    use super::{external_url, window_link, CREATOR_CONTACT_URL};
+
+    #[test]
+    fn settings_can_only_open_the_creator_contact() {
+        assert!(window_link("settings", CREATOR_CONTACT_URL).is_ok());
+        assert!(window_link("settings", "https://example.com").is_err());
+        assert!(window_link("pet", CREATOR_CONTACT_URL).is_err());
+        assert!(window_link("chat", "https://example.com").is_ok());
+        assert!(window_link("chat", "javascript:alert(1)").is_err());
+    }
 
     #[test]
     fn accepts_only_external_web_and_email_links() {

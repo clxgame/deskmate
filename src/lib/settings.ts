@@ -36,6 +36,7 @@ export interface Settings {
   providerId: string;
   modelId: string;
   yolo: boolean;
+  readonly toolPermissions?: import("./toolPermissions").ToolPermissions;
   baseUrl: string;
   apiKey: string;
   readonly providers: readonly AiProvider[];

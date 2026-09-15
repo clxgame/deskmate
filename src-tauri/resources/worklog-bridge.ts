@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { lstat, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-type Context = { readonly sessionID: string; readonly messageID: string; readonly callID: string; readonly abort: AbortSignal };
+type Context = { readonly sessionID: string; readonly messageID: string; readonly callID: string; readonly abort: AbortSignal; readonly ask: (request: { readonly permission: string; readonly patterns: string[]; readonly always: string[]; readonly metadata: Record<string, unknown> }) => Promise<void> };
 type Args = { readonly input: unknown };
 class BridgeError extends Error {}
 
@@ -19,6 +19,12 @@ export function worklogTool(action: string, description: string, properties: Rec
       let publishedRequest: string | undefined;
       try {
       if (!object(args.input)) throw new BridgeError("Work journal input must be an object");
+      try {
+        await context.ask({ permission: `worklog_${action}`, patterns: [action], always: [], metadata: { input: args.input } });
+      } catch (error: unknown) {
+        return JSON.stringify({ version: 1, status: "rejected", error: { code: "TOOL_PERMISSION_REJECTED", message: "Tool permission was declined or cancelled; do not retry through another tool. No work journal operation was performed." } });
+      }
+      if (context.abort.aborted) return JSON.stringify({ version: 1, status: "rejected", error: { code: "TOOL_CANCELLED", message: "Cancelled before execution; no work journal operation was performed" } });
       const directory = process.env.YUME_WORKLOG_IPC_DIR;
       if (!directory) return JSON.stringify({ version: 1, status: "rejected", error: { code: "BRIDGE_UNAVAILABLE", message: "Work records are unavailable" } });
       const metadata = await lstat(directory);

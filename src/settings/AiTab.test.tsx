@@ -140,7 +140,6 @@ describe("AI settings tab extraction", () => {
       t.apiKey,
       t.verify,
       t.model,
-      t.yolo,
       t.ccSwitchStatusTitle,
       t.aiUsageTitle,
     ];

@@ -556,6 +556,24 @@ body,
   font-size: var(--t-small);
 }
 
+.set-about-credits a {
+  color: var(--accent-ink);
+  text-underline-offset: 0.2em;
+}
+
+.set-about-credits a:hover {
+  color: var(--text);
+}
+
+.set-about-credits a:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 1px;
+}
+
+.set-about-error {
+  color: var(--danger);
+}
+
 /* ---------- loading ---------- */
 
 .set-loading {
@@ -1390,4 +1408,11 @@ body,
     grid-row: auto;
     justify-self: stretch;
   }
+}
+
+.set-permission-heading {
+  margin: var(--s-5) 0 var(--s-2);
+  color: var(--text);
+  font-size: var(--t-head);
+  font-weight: 600;
 }

@@ -36,6 +36,7 @@ mod startup_settings;
 mod updater;
 mod window_layout;
 mod worklog;
+mod tool_permissions;
 use ai_usage::fetch_ai_usage;
 use chat_attachments::AttachmentStore;
 use history::HistoryState;
@@ -394,8 +395,8 @@ mod tests {
             permission.get("ccswitch_prepare_opencode_provider"),
             Some(&serde_json::json!("allow"))
         );
-        assert_eq!(permission.get("bash"), Some(&serde_json::json!("allow")));
-        assert_eq!(permission.get("webfetch"), Some(&serde_json::json!("allow")));
+        assert_eq!(permission.get("bash"), Some(&serde_json::json!("ask")));
+        assert_eq!(permission.get("webfetch"), Some(&serde_json::json!("ask")));
         assert_eq!(permission.get("edit"), Some(&serde_json::json!("deny")));
         assert_eq!(permission.get("write"), Some(&serde_json::json!("deny")));
         assert_eq!(permission.get("patch"), Some(&serde_json::json!("deny")));
@@ -1040,6 +1041,10 @@ fn spawn_sidecar(app: &tauri::AppHandle, port: u16) -> std::io::Result<Child> {
     if let Some((config, auth)) = settings::sidecar_environment(app) {
         cmd.env("OPENCODE_CONFIG_CONTENT", config)
             .env("OPENCODE_AUTH_CONTENT", auth);
+    } else {
+        cmd.env("OPENCODE_CONFIG_CONTENT", serde_json::json!({
+            "permission": settings::sidecar_permission_policy()
+        }).to_string());
     }
 
     #[cfg(windows)]
@@ -1266,6 +1271,9 @@ pub fn run() {
         .manage(Arc::new(ChatMotion::default()))
         .invoke_handler(tauri::generate_handler![
             chat_links::open_chat_link,
+            tool_permissions::runtime::tool_permission_pending,
+            tool_permissions::runtime::tool_permission_reply,
+            tool_permissions::runtime::tool_permission_cancel,
             pet_visibility::acknowledge_pet_visibility,
             pet_visibility::register_pet_visibility,
             pet_visibility::get_pet_visibility,
@@ -1417,6 +1425,7 @@ pub fn run() {
                     eprintln!("failed to spawn opencode sidecar: {e}");
                 }
             }
+            app.manage(tool_permissions::events::PermissionEvents::start(format!("http://127.0.0.1:{port}")));
             worklog::runner_runtime::start(handle.clone());
             pet_recovery::start(handle.clone())?;
             Ok(())
@@ -1426,6 +1435,7 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             if let RunEvent::Exit = event {
+                app.state::<tool_permissions::events::PermissionEvents>().stop();
                 pet_recovery::stop(app);
                 worklog::runner_runtime::stop(app);
                 pomodoro::stop_checker(app);

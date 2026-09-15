@@ -215,6 +215,13 @@ and chat keep working normally.
 
 The public updater repository is `clxgame/deskmate`. The app checks GitHub Releases in that repository for signed Windows updater artifacts.
 
+On macOS, **Check for updates** queries GitHub's latest stable release directly.
+It compares semantic versions and offers **Download installer** for a matching
+DMG (or app ZIP). After downloading, quit YUME and replace it in Applications.
+Mac checks do not require a macOS entry in the Windows-only `latest.json` feed.
+Missing Mac installers, network failures, and API rate limits have separate
+messages, and opening the download does not claim an update was installed.
+
 Release prerequisites:
 
 - `TAURI_SIGNING_PRIVATE_KEY`

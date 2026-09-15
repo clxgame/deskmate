@@ -23,7 +23,7 @@ pub async fn open_chat_link(window: tauri::WebviewWindow, url: String) -> Result
         .map_err(|_| "Could not open link".to_string())?
 }
 
-fn open_system_link(url: &str) -> Result<(), String> {
+pub(crate) fn open_system_link(url: &str) -> Result<(), String> {
     #[cfg(windows)]
     let mut command = {
         use std::os::windows::process::CommandExt;

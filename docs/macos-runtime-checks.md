@@ -9,6 +9,7 @@ Run these checks against the packaged `YUME.app`, not only a browser preview.
 bun run typecheck
 bun test
 cargo test --manifest-path src-tauri/Cargo.toml --lib pet_
+cargo test --locked --manifest-path src-tauri/Cargo.toml --lib updater::
 ```
 
 The native tests cover the reported Retina position `(3100, 1662)` at 170% pet
@@ -41,3 +42,25 @@ start a temporary server on `127.0.0.1`; allow local listening when running them
 Keep separate records for automated checks, observed application behavior, and
 hardware scenarios that were not exercised. Do not change system display/security
 settings just to make a build appear to pass.
+
+## Update checks
+
+Mac releases use manual DMG/ZIP installation. The settings footer checks the
+GitHub release API, compares versions and offers an installer for the running
+architecture; it does not attempt to install Windows updater artifacts.
+
+Regression tests cover newer/equal/older versions, absent Mac assets, incomplete
+uploads, Intel vs Apple Silicon, universal/ZIP fallback, download URL validation,
+HTTP errors and retry behavior. With network access, run the opt-in API check:
+
+```sh
+cargo test --locked --manifest-path src-tauri/Cargo.toml --lib \
+  updater::macos::tests::live_public_mac_release_check -- --ignored --exact
+```
+
+For packaged-app verification, check from an older version, confirm the version
+and installer button, then open the download. The UI should retain the manual
+installation instructions and allow a retry if opening the browser fails.
+Check again from the latest version and confirm that no download is offered.
+This feature requires installing a build containing the fix; existing installed
+versions cannot acquire it through the previously broken Mac updater.

@@ -1,6 +1,13 @@
 export type UpdateState =
   | { readonly kind: "idle" }
   | { readonly kind: "checking" }
+  | {
+      readonly kind: "available";
+      readonly version: string;
+      readonly downloadUrl: string;
+      readonly opening: boolean;
+      readonly openError: string | null;
+    }
   | { readonly kind: "downloading"; readonly percent: number | null }
   | { readonly kind: "installing" }
   | { readonly kind: "uptodate" }
@@ -8,6 +15,10 @@ export type UpdateState =
 
 export type UpdateAction =
   | { readonly type: "check" }
+  | { readonly type: "available"; readonly version: string; readonly downloadUrl: string }
+  | { readonly type: "openDownload" }
+  | { readonly type: "downloadOpened" }
+  | { readonly type: "downloadFailed"; readonly message: string }
   | { readonly type: "downloadStarted"; readonly contentLength: number | null }
   | {
       readonly type: "downloadProgress";
@@ -21,12 +32,22 @@ export type UpdateAction =
 export const initialUpdateState: UpdateState = { kind: "idle" };
 
 export function reduceUpdateState(
-  _state: UpdateState,
+  state: UpdateState,
   action: UpdateAction,
 ): UpdateState {
   switch (action.type) {
     case "check":
       return { kind: "checking" };
+    case "available":
+      return { kind: "available", version: action.version, downloadUrl: action.downloadUrl,
+        opening: false, openError: null };
+    case "openDownload":
+      return state.kind === "available" ? { ...state, opening: true, openError: null } : state;
+    case "downloadOpened":
+      return state.kind === "available" ? { ...state, opening: false } : state;
+    case "downloadFailed":
+      return state.kind === "available"
+        ? { ...state, opening: false, openError: action.message } : state;
     case "downloadStarted":
       return {
         kind: "downloading",

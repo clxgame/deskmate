@@ -22,6 +22,7 @@ export type UpdateEvent =
     };
 
 export type UpdateOutcome =
+  | { readonly status: "available"; readonly version: string; readonly downloadUrl: string }
   | { readonly status: "upToDate"; readonly currentVersion: string }
   | { readonly status: "installed"; readonly version: string };
 
@@ -31,4 +32,8 @@ export function updateApp(
 ): Promise<UpdateOutcome> {
   const channel = new Channel<UpdateEvent>(onEvent);
   return invoke<UpdateOutcome>("update_app", { repo, onEvent: channel });
+}
+
+export function openUpdateDownload(repo: string, url: string): Promise<void> {
+  return invoke<void>("open_update_download", { repo, url });
 }

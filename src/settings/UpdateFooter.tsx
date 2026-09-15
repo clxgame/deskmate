@@ -1,31 +1,30 @@
 import { useEffect, useRef, useState } from "react";
 import { getAppVersion } from "../lib/settings";
-import { updateApp, type UpdateEvent } from "../lib/updater";
+import { openUpdateDownload, updateApp, type UpdateEvent } from "../lib/updater";
 import type { Dict } from "../lib/i18n";
+import { updateErrorMessage } from "./updateErrors";
 import {
   initialUpdateState,
   reduceUpdateState,
   type UpdateAction,
 } from "./updateState";
 
-function updateErrorMessage(t: Dict, error: Error | string): string {
-  const raw = error instanceof Error ? error.message : error;
-  const code = raw.replace(/^Error:?\s*/i, "");
-  return code === "invalid_repo" || code === "placeholder"
-    ? t.updateNeedRepo
-    : t.updateError;
-}
+const defaultServices = { getAppVersion, updateApp, openUpdateDownload };
 
-export function UpdateFooter({ repo, t }: { readonly repo: string; readonly t: Dict }) {
+export function UpdateFooter({ repo, t, services = defaultServices }: {
+  readonly repo: string;
+  readonly t: Dict;
+  readonly services?: typeof defaultServices;
+}) {
   const [version, setVersion] = useState("");
   const [state, setState] = useState(initialUpdateState);
   const updateInFlight = useRef(false);
 
   useEffect(() => {
-    void getAppVersion().then(setVersion, (error: unknown) => {
+    void services.getAppVersion().then(setVersion, (error: unknown) => {
       console.error("failed to load app version", error);
     });
-  }, []);
+  }, [services]);
 
   const dispatch = (action: UpdateAction): void => {
     setState((current) => reduceUpdateState(current, action));
@@ -70,8 +69,11 @@ export function UpdateFooter({ repo, t }: { readonly repo: string; readonly t: D
     updateInFlight.current = true;
     dispatch({ type: "check" });
     try {
-      const outcome = await updateApp(repo, onEvent);
+      const outcome = await services.updateApp(repo, onEvent);
       switch (outcome.status) {
+        case "available":
+          dispatch({ type: "available", version: outcome.version, downloadUrl: outcome.downloadUrl });
+          return;
         case "upToDate":
           dispatch({ type: "uptodate" });
           return;
@@ -84,11 +86,21 @@ export function UpdateFooter({ repo, t }: { readonly repo: string; readonly t: D
         }
       }
     } catch (error: unknown) {
-      if (error instanceof Error || typeof error === "string") {
-        dispatch({ type: "fail", message: updateErrorMessage(t, error) });
-        return;
-      }
-      dispatch({ type: "fail", message: t.updateError });
+      dispatch({ type: "fail", message: updateErrorMessage(t, error) });
+    } finally {
+      updateInFlight.current = false;
+    }
+  };
+
+  const onDownload = async (): Promise<void> => {
+    if (state.kind !== "available" || updateInFlight.current) return;
+    updateInFlight.current = true;
+    dispatch({ type: "openDownload" });
+    try {
+      await services.openUpdateDownload(repo, state.downloadUrl);
+      dispatch({ type: "downloadOpened" });
+    } catch {
+      dispatch({ type: "downloadFailed", message: t.updateOpenFailed });
     } finally {
       updateInFlight.current = false;
     }
@@ -101,6 +113,10 @@ export function UpdateFooter({ repo, t }: { readonly repo: string; readonly t: D
       break;
     case "checking":
       status = t.updateChecking;
+      break;
+    case "available":
+      status = state.openError ?? `${t.updateAvailable(state.version)} · ${t.updateManualInstall}`;
+      if (state.openError) statusClass += " set-footer-error";
       break;
     case "downloading":
       status = `${t.updateUpdating}${state.percent === null ? "" : ` ${state.percent}%`}`;
@@ -122,15 +138,21 @@ export function UpdateFooter({ repo, t }: { readonly repo: string; readonly t: D
   }
 
   const isBusy =
-    state.kind === "checking" || state.kind === "downloading" || state.kind === "installing";
+    state.kind === "checking" || state.kind === "downloading" || state.kind === "installing"
+    || (state.kind === "available" && state.opening);
 
   return (
-    <footer className="set-footer">
+    <footer className={`set-footer${state.kind === "available" ? " set-footer-available" : ""}`}>
       <span className="set-footer-version">{version ? `v${version}` : ""}</span>
       <button className="set-footer-btn" disabled={isBusy} onClick={() => void onUpdate()}>
         {t.updateCheck}
       </button>
-      {status && <span className={statusClass} title={status}>{status}</span>}
+      {state.kind === "available" && (
+        <button className="set-footer-btn set-footer-btn-accent" disabled={state.opening} onClick={() => void onDownload()}>
+          {t.updateDownload}
+        </button>
+      )}
+      {status && <span className={statusClass} title={status} role="status">{status}</span>}
     </footer>
   );
 }

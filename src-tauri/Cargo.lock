@@ -5816,6 +5816,7 @@ dependencies = [
  "keyring",
  "png 0.17.16",
  "rusqlite",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

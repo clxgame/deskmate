@@ -5,7 +5,11 @@ use std::{
 
 use serde::{Serialize, Serializer};
 use tauri::{ipc::Channel, AppHandle};
-use tauri_plugin_updater::{Error as TauriUpdaterError, UpdaterExt};
+use tauri_plugin_updater::Error as TauriUpdaterError;
+#[cfg(not(target_os = "macos"))]
+use tauri_plugin_updater::UpdaterExt;
+
+mod macos;
 
 static UPDATE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
@@ -44,6 +48,9 @@ impl Repository {
             Ok(parsed) => {
                 if parsed.scheme() != "https"
                     || parsed.host_str() != Some("github.com")
+                    || !parsed.username().is_empty()
+                    || parsed.password().is_some()
+                    || parsed.port().is_some()
                     || parsed.query().is_some()
                     || parsed.fragment().is_some()
                 {
@@ -105,6 +112,10 @@ pub enum UpdateError {
     InvalidRepository,
     PlaceholderRepository,
     ManifestNotFound,
+    PlatformNotAvailable,
+    InvalidManifest,
+    RateLimited,
+    OpenFailed,
     Network,
     InvalidSignature,
     UpdateFailed,
@@ -117,6 +128,10 @@ impl UpdateError {
             Self::InvalidRepository => "invalid_repo",
             Self::PlaceholderRepository => "placeholder",
             Self::ManifestNotFound => "manifest_not_found",
+            Self::PlatformNotAvailable => "platform_not_available",
+            Self::InvalidManifest => "invalid_manifest",
+            Self::RateLimited => "rate_limited",
+            Self::OpenFailed => "open_failed",
             Self::Network => "network",
             Self::InvalidSignature => "invalid_signature",
             Self::UpdateFailed => "update_failed",
@@ -144,9 +159,10 @@ impl Serialize for UpdateError {
 impl From<TauriUpdaterError> for UpdateError {
     fn from(error: TauriUpdaterError) -> Self {
         match error {
-            TauriUpdaterError::ReleaseNotFound
-            | TauriUpdaterError::TargetNotFound(_)
-            | TauriUpdaterError::TargetsNotFound(_) => Self::ManifestNotFound,
+            TauriUpdaterError::ReleaseNotFound => Self::ManifestNotFound,
+            TauriUpdaterError::TargetNotFound(_) | TauriUpdaterError::TargetsNotFound(_) => {
+                Self::PlatformNotAvailable
+            }
             TauriUpdaterError::Reqwest(_) | TauriUpdaterError::Network(_) => Self::Network,
             TauriUpdaterError::Minisign(_)
             | TauriUpdaterError::Base64(_)
@@ -180,6 +196,11 @@ pub enum UpdateEvent {
 #[serde(tag = "status", rename_all = "camelCase")]
 pub enum UpdateOutcome {
     #[serde(rename_all = "camelCase")]
+    Available {
+        version: String,
+        download_url: String,
+    },
+    #[serde(rename_all = "camelCase")]
     UpToDate {
         current_version: String,
     },
@@ -201,9 +222,29 @@ pub async fn update_app(
     on_event: Channel<UpdateEvent>,
 ) -> Result<UpdateOutcome, UpdateError> {
     let _guard = UpdateGuard::acquire()?;
-    let endpoint = Repository::parse(&repo)?.endpoint()?;
+    let repository = Repository::parse(&repo)?;
     send_event(&on_event, UpdateEvent::Checking);
 
+    #[cfg(target_os = "macos")]
+    {
+        let current_version = app.package_info().version.to_string();
+        tauri::async_runtime::spawn_blocking(move || {
+            macos::check(&repository, &current_version, std::env::consts::ARCH)
+        })
+        .await
+        .map_err(|_| UpdateError::UpdateFailed)?
+    }
+    #[cfg(not(target_os = "macos"))]
+    automatic_update(app, repository, on_event).await
+}
+
+#[cfg(not(target_os = "macos"))]
+async fn automatic_update(
+    app: AppHandle,
+    repository: Repository,
+    on_event: Channel<UpdateEvent>,
+) -> Result<UpdateOutcome, UpdateError> {
+    let endpoint = repository.endpoint()?;
     let update = app
         .updater_builder()
         .endpoints(vec![endpoint])
@@ -271,6 +312,23 @@ pub async fn update_app(
 
     #[cfg(windows)]
     Ok(UpdateOutcome::Installed { version })
+}
+
+#[tauri::command]
+pub async fn open_update_download(
+    window: tauri::WebviewWindow,
+    repo: String,
+    url: String,
+) -> Result<(), UpdateError> {
+    if window.label() != "settings" {
+        return Err(UpdateError::OpenFailed);
+    }
+    let repository = Repository::parse(&repo)?;
+    macos::validate_download_url(&repository, &url, std::env::consts::ARCH)?;
+    tauri::async_runtime::spawn_blocking(move || crate::chat_links::open_system_link(&url))
+        .await
+        .map_err(|_| UpdateError::OpenFailed)?
+        .map_err(|_| UpdateError::OpenFailed)
 }
 
 #[cfg(test)]

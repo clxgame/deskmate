@@ -1380,7 +1380,8 @@ pub fn run() {
             memory::commands::memory_link_task,
             memory::commands::memory_unlink_task,
             memory::commands::memory_unlink_deleted_task,
-            updater::update_app
+            updater::update_app,
+            updater::open_update_download
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

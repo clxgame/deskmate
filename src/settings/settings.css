@@ -1283,6 +1283,15 @@ body,
   font-size: var(--t-small);
 }
 
+.set-footer-available {
+  flex-wrap: wrap;
+}
+
+.set-footer-available .set-footer-status {
+  flex-basis: 100%;
+  white-space: normal;
+}
+
 .set-footer-btn {
   flex-shrink: 0;
   white-space: nowrap;

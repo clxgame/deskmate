@@ -6,6 +6,10 @@ import type { PermissionRequest } from "../lib/toolPermissions";
 
 afterEach(cleanup);
 const request: PermissionRequest={id:"p1",sessionID:"ses_a",permission:"bash",patterns:["echo fixture"],metadata:{command:"echo fixture"}};
+test("renders an empty approval list when an older caller omits requests",()=>{
+  const ui=render(<ToolApprovalCards error={false} onReply={async()=>{}} t={dict("zh-CN")} />);
+  expect(ui.queryByRole("button",{name:"允许这一次"})).toBeNull();
+});
 test("allow and cancel target only the requested call", async()=>{
   const calls:unknown[]=[];
   const ui=render(<ToolApprovalCards requests={[request]} error={false} onReply={async(item,reply)=>{calls.push({item,reply});}} t={dict("zh-CN")} />);

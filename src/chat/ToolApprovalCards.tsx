@@ -4,7 +4,7 @@ import { permissionKey, type PermissionReply, type PermissionRequest } from "../
 import "./toolPermissions.css";
 
 type Props = {
-  readonly requests: readonly PermissionRequest[];
+  readonly requests?: readonly PermissionRequest[];
   readonly error: boolean;
   readonly onReply: (request: PermissionRequest, reply: PermissionReply) => Promise<void>;
   readonly t: Dict;
@@ -39,7 +39,7 @@ function ApprovalCard({ request, onReply, t }: { readonly request: PermissionReq
     </div>
   </section>;
 }
-export function ToolApprovalCards({ requests, error, onReply, t }: Props) {
+export function ToolApprovalCards({ requests = [], error, onReply, t }: Props) {
   return <div className="chat-tool-approvals" aria-live="polite">
     {error && <p role="alert">{t.permissionFailed}</p>}
     {requests.map((request) => <ApprovalCard key={request.id} request={request} onReply={onReply} t={t} />)}

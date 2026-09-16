@@ -84,7 +84,7 @@ jobs:
           ./scripts/verify-windows-icon.ps1 -BinaryPath "src-tauri/target/release/bundle/nsis/YUME_${version}_x64-setup.exe" -ExpectedIconPath "src-tauri/nsis/installer.ico"
 
   macos:
-    name: macOS Apple Silicon release
+    name: macOS unsigned candidate (local signing required)
     needs: draft
     runs-on: macos-15
     timeout-minutes: 60
@@ -123,14 +123,25 @@ jobs:
       - name: Build macOS app
         run: bun run tauri build --no-sign --bundles app --ci
 
-      - name: Package and verify macOS downloads
-        run: bash scripts/package-macos.sh src-tauri/target/release/bundle/macos/YUME.app "$RUNNER_TEMP/macos-release"
-
-      - name: Upload macOS downloads to draft
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
+      # Developer ID keys stay on the maintainer's Mac. An unsigned candidate
+      # must never be attached to Releases or named like an installable download.
+      - name: Archive unsigned candidate (NOT a release download)
         run: |
-          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
-          gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/macos-release/"* --clobber
+          ditto -c -k --sequesterRsrc --keepParent \
+            src-tauri/target/release/bundle/macos/YUME.app \
+            "$RUNNER_TEMP/YUME.unsigned.app.zip"
+          unzip -tq "$RUNNER_TEMP/YUME.unsigned.app.zip"
+
+      - name: Store candidate for local signing, never upload to Releases
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: macos-unsigned-${{ github.sha }}
+          path: ${{ runner.temp }}/YUME.unsigned.app.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Record mandatory local release gate
+        run: |
+          echo '### macOS is NOT release-ready' >> "$GITHUB_STEP_SUMMARY"
+          echo 'The Actions artifact is an unsigned build candidate, not a user download.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Run scripts/release-macos.sh locally, then scripts/publish-macos.sh. See docs/macos-release.md. Do not publish the draft until those checks pass.' >> "$GITHUB_STEP_SUMMARY"

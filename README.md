@@ -122,10 +122,10 @@ Build the signed Windows installer and updater artifacts:
 bun run tauri build
 ```
 
-Build an unsigned local macOS app and DMG:
+Build an unsigned local macOS app (development only, not for distribution):
 
 ```bash
-bun run tauri build --no-sign
+bun run tauri build --no-sign --bundles app
 ```
 
 The macOS build enables Tauri's private transparency API for the frameless pet
@@ -227,7 +227,7 @@ Release prerequisites:
 - `TAURI_SIGNING_PRIVATE_KEY`
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
 
-Keep signing keys in the local environment or GitHub Actions secrets only. Never commit or publish the private signing key, password, tokens, or `.env` files.
+Keep Windows updater signing keys in the local environment or GitHub Actions secrets only. Apple Developer ID keys stay in the maintainer's local keychain. Never commit or publish private signing keys, passwords, tokens, or `.env` files.
 
 Before tagging, keep these versions identical:
 
@@ -256,11 +256,11 @@ Local draft publish for already-built artifacts:
 powershell -ExecutionPolicy Bypass -File scripts\publish.ps1 -Tag v0.1.1
 ```
 
-The GitHub Actions release workflow runs on `v*` tags. It checks the tag against the app version and creates a draft GitHub Release first, then builds Windows and macOS in parallel. Windows uploads the signed NSIS updater installer, signatures, and `latest.json`. macOS runs frontend and pet-geometry regression tests, builds a native Apple Silicon app, and uploads a verified DMG, app ZIP, and `SHA256SUMS-macos.txt`. Both jobs must pass before publishing the draft.
+The GitHub Actions release workflow runs on `v*` tags. It checks the tag against the app version and creates a draft GitHub Release first, then builds Windows and macOS in parallel. Windows uploads the signed NSIS updater installer, signatures, and `latest.json`. macOS runs regression tests and stores an explicitly **unsigned build candidate as an Actions artifact**, never as a Release download. A green CI run does not mean macOS is ready to publish.
 
-macOS downloads are not Developer ID signed or notarized and do not participate in the Windows updater feed. They are for manual installation on Apple Silicon Macs; Intel Mac packages are not provided. CI packages the app using `bash scripts/package-macos.sh path/to/YUME.app output-directory`, without Finder automation.
+On the maintainer's Mac, `scripts/release-macos.sh` bundles portable dependencies, signs with Developer ID, notarizes/staples the App and DMG, and verifies both DMG and app ZIP before `scripts/publish-macos.sh` can attach them to the draft. Apple keys stay in the local keychain. Follow the [macOS release guide](docs/macos-release.md); unsigned or unnotarized Apps are rejected by the public packaging script. Both CI jobs **and the local macOS release gate** must pass before publishing the draft. Mac downloads are for manual installation on Apple Silicon and do not participate in the Windows updater feed; Intel packages are not provided.
 
-For a public release, bump the app version, push a matching tag, publish the draft GitHub Release with the installer, signature, and `latest.json`, then verify a real installed older build can update to the new release from `clxgame/deskmate`.
+For a public release, bump the app version and push a matching tag. Complete the local macOS release gate before publishing the draft with the Windows installer, signature, `latest.json`, and verified Mac DMG/ZIP/checksums. Then verify a real installed older build can find the new release from `clxgame/deskmate`.
 
 ### GIF character packs
 

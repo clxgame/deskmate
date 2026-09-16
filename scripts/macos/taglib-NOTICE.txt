@@ -1,0 +1,9 @@
+TagLib 2.1.1 is distributed under the Mozilla Public License 1.1 (COPYING.MPL).
+The complete, unmodified corresponding source is included as taglib-2.1.1.tar.gz.
+Source: https://github.com/taglib/taglib/releases/download/v2.1.1/taglib-2.1.1.tar.gz
+SHA-256: 3716d31f7c83cbf17b67c8cf44dd82b2a2f17e6780472287a16823e70305ddba
+Bundled utfcpp has a separate license in utfcpp-LICENSE.
+
+Built with CMake 3.31.10 and Apple Clang, Release, shared library, arm64,
+macOS deployment target 11.0, system zlib, tests and bindings disabled.
+Reproduction: scripts/prepare-macos-dependencies.sh in the YUME repository.

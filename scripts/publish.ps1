@@ -95,5 +95,6 @@ if ($LASTEXITCODE -eq 0) {
 }
 
 Write-Host ""
-Write-Host "==> 草稿发布已准备好" -ForegroundColor Green
-Write-Host "检查草稿 release 资产后再手动发布；老用户点「检查更新」即可收到 v$version 更新。"
+Write-Host "==> Windows 草稿资产已准备好" -ForegroundColor Green
+Write-Host "还需在 Mac 上运行 scripts/release-macos.sh 和 scripts/publish-macos.sh，完成签名、公证及 Mac 资产校验（见 docs/macos-release.md）。"
+Write-Host "确认 Windows 和 Mac 资产均就绪后再手动发布；老用户点「检查更新」即可收到 v$version 更新。"

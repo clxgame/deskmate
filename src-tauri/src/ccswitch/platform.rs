@@ -9,10 +9,10 @@ use windows::{
     build_url_open_command, detect_installation_from_registry_output, parse_registered_executable,
     trusted_system_url_open_command_from_root, CC_SWITCH_EXE, WINDOWS_FILE_PROTOCOL_HANDLER_ARG,
 };
-#[cfg(all(test, windows))]
-use windows::{read_packaged_version, read_packaged_version_with_product_reader};
 #[cfg(windows)]
 use windows::{detect_system_installation, open_system_url, prepare_system_import};
+#[cfg(all(test, windows))]
+use windows::{read_packaged_version, read_packaged_version_with_product_reader};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CcSwitchInstallation {

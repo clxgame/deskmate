@@ -1,9 +1,9 @@
 #[path = "figure2d_v2.rs"]
 mod v2;
-pub(super) use v2::simple_polygon;
 use super::manifest::{PackManifest, RenderType};
 use serde::Deserialize;
 use std::{collections::BTreeMap, fs, path::Path};
+pub(super) use v2::simple_polygon;
 
 const STATES: [&str; 7] = [
     "idle", "thinking", "working", "talking", "success", "error", "leaving",
@@ -97,8 +97,13 @@ pub(super) fn parse_config(bytes: &[u8]) -> Result<Figure, String> {
     if ![1, 2].contains(&figure.schema_version)
         || figure.canvas.width != 240
         || figure.canvas.height != 240
-        || figure.animations.keys().any(|state| !STATES.contains(&state.as_str()) && state != "sleep")
-        || STATES.iter().any(|state| !figure.animations.contains_key(*state))
+        || figure
+            .animations
+            .keys()
+            .any(|state| !STATES.contains(&state.as_str()) && state != "sleep")
+        || STATES
+            .iter()
+            .any(|state| !figure.animations.contains_key(*state))
         || !bounded(figure.feedback.success_ms, 1.0, 10_000.0)
         || !bounded(figure.feedback.error_ms, 1.0, 10_000.0)
         || !bounded(figure.thinking_escalation_ms, 1.0, 60_000.0)

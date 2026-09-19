@@ -32,7 +32,9 @@ pub(super) fn parse(bytes: &[u8]) -> Result<super::Figure, String> {
         bottom: 0.0,
     };
     for (state, value) in input.animations {
-        if !super::bounded(value.offset_x, -240.0, 240.0) || !simple_polygon(&value.hit_polygon, 64, 240.0) {
+        if !super::bounded(value.offset_x, -240.0, 240.0)
+            || !simple_polygon(&value.hit_polygon, 64, 240.0)
+        {
             return Err(format!("figure2d v2 geometry invalid: {state}"));
         }
         let left = (1.0 - value.scale) / 2.0 + value.offset_x / 240.0;

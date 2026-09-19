@@ -8,12 +8,12 @@ use tauri::{Emitter, Manager};
 
 mod archive;
 mod figure2d;
-mod rig2d;
 mod gif;
 mod installation;
 mod manifest;
 mod paths;
 mod position;
+mod rig2d;
 pub(crate) use position::{persona_default_position, persona_gif_envelope};
 mod runtime;
 mod thumbnail;
@@ -103,8 +103,6 @@ pub fn uninstall_pack(app: tauri::AppHandle, pack_id: String) -> Result<(), Stri
 #[cfg(test)]
 mod gif_tests;
 #[cfg(test)]
-mod rig2d_tests;
-#[cfg(test)]
 mod import_tests;
 #[cfg(test)]
 mod metadata_tests;
@@ -112,6 +110,8 @@ mod metadata_tests;
 mod position_tests;
 #[cfg(test)]
 mod qa_tests;
+#[cfg(test)]
+mod rig2d_tests;
 #[cfg(test)]
 mod tests;
 

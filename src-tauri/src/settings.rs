@@ -285,13 +285,8 @@ const MODEL_CATALOG_DIR: &str = "model-catalogs";
 /// Legacy single-file catalog path; used only to migrate into per-provider files.
 const LEGACY_MODEL_CATALOG_FILE: &str = "model-catalog.json";
 const CCSWITCH_PREPARE_OPENCODE_PROVIDER_TOOL: &str = "ccswitch_prepare_opencode_provider";
-const DENIED_OPENCODE_PERMISSIONS: &[&str] = &[
-    "edit",
-    "write",
-    "patch",
-    "external_directory",
-    "task",
-];
+const DENIED_OPENCODE_PERMISSIONS: &[&str] =
+    &["edit", "write", "patch", "external_directory", "task"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1576,11 +1571,7 @@ pub fn apply(app: &tauri::AppHandle, old: &Settings, new: &Settings) {
         }
         if (old.pet_scale - new.pet_scale).abs() > f64::EPSILON || old.persona_id != new.persona_id
         {
-            crate::pet_geometry::apply(
-                &pet,
-                new.pet_scale,
-                &new.persona_id,
-            );
+            crate::pet_geometry::apply(&pet, new.pet_scale, &new.persona_id);
         }
     }
 
@@ -1706,9 +1697,8 @@ pub fn verify_api_key(
     Ok(Some(models.len()))
 }
 
-/// Spawn the scheduler loop: every 20s, fire enabled tasks whose HH:MM
-/// matches the current local minute. Firing = show chat + emit event with
-/// the prompt; the chat window sends it to the AI like a user message.
+/// Spawn the scheduler loop: every 20s, execute enabled tasks whose HH:MM
+/// matches the current local minute through the host-owned Agent lifecycle.
 fn scheduled_minute_key(local: chrono::NaiveDateTime) -> String {
     local.format("%Y-%m-%d %H:%M").to_string()
 }
@@ -1741,9 +1731,7 @@ pub fn start_scheduler(app: tauri::AppHandle) {
                     continue;
                 }
                 last_fired.insert(task.id.clone(), occurrence.clone());
-                // Bring the chat window up, then hand the prompt to it.
-                let _ = crate::show_chat(&app);
-                let _ = app.emit("deskmate://scheduled-task", &task);
+                crate::agent::scheduled::execute(&app, &task, &occurrence);
             }
         }
     });
@@ -2237,13 +2225,7 @@ mod tests {
         assert_eq!(permission["bash"], "ask");
         assert_eq!(permission["webfetch"], "ask");
         assert_eq!(permission["websearch"], "ask");
-        for denied in [
-            "edit",
-            "write",
-            "patch",
-            "external_directory",
-            "task",
-        ] {
+        for denied in ["edit", "write", "patch", "external_directory", "task"] {
             assert_eq!(permission[denied], "deny");
         }
         let allowed = permission

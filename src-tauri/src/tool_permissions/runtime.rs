@@ -1,9 +1,11 @@
 use super::{Mode, ToolPermissions};
-use crate::{settings::SettingsState, Sidecar};
+use crate::{agent::AgentPermissionState as AgentPermissions, settings::SettingsState, Sidecar};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::time::Duration;
 use tauri::Manager;
+
+pub(crate) use super::scoped::{pending_scoped, respond_scoped};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,8 +31,11 @@ fn client() -> ureq::Agent {
         .build()
 }
 fn pending(base: &str) -> Result<Vec<PermissionRequest>, String> {
+    pending_url(&format!("{base}/permission"))
+}
+pub(super) fn pending_url(url: &str) -> Result<Vec<PermissionRequest>, String> {
     client()
-        .get(&format!("{base}/permission"))
+        .get(url)
         .call()
         .map_err(|error| match error {
             ureq::Error::Status(400, _) => "permission_invalid_metadata".to_owned(),
@@ -39,7 +44,18 @@ fn pending(base: &str) -> Result<Vec<PermissionRequest>, String> {
         .into_json()
         .map_err(|_| "permission_invalid_response".to_owned())
 }
-fn respond(base: &str, request: &PermissionRequest, reply: Reply) -> Result<(), String> {
+pub(crate) fn respond(base: &str, request: &PermissionRequest, reply: Reply) -> Result<(), String> {
+    respond_url(
+        &format!("{base}/permission/{}/reply", request.id),
+        request,
+        reply,
+    )
+}
+pub(super) fn respond_url(
+    url: &str,
+    request: &PermissionRequest,
+    reply: Reply,
+) -> Result<(), String> {
     if !crate::worklog::bridge::safe_id(&request.id) {
         return Err("permission_invalid_id".into());
     }
@@ -48,15 +64,15 @@ fn respond(base: &str, request: &PermissionRequest, reply: Reply) -> Result<(), 
         Reply::Reject => "reject",
     };
     client()
-        .post(&format!("{base}/permission/{}/reply", request.id))
+        .post(url)
         .send_json(json!({"reply":reply}))
         .map_err(|_| "permission_reply_failed".to_owned())?;
     Ok(())
 }
-fn endpoint(app: &tauri::AppHandle) -> String {
+pub(crate) fn endpoint(app: &tauri::AppHandle) -> String {
     format!("http://127.0.0.1:{}", app.state::<Sidecar>().port)
 }
-fn require_chat(window: &tauri::WebviewWindow) -> Result<(), String> {
+pub(crate) fn require_chat(window: &tauri::WebviewWindow) -> Result<(), String> {
     if window.label() == "chat" {
         Ok(())
     } else {
@@ -101,6 +117,8 @@ pub async fn tool_permission_pending(
 ) -> Result<Vec<PermissionRequest>, String> {
     require_chat(&window)?;
     tauri::async_runtime::spawn_blocking(move || {
+        app.state::<AgentPermissions>()
+            .reject_legacy_session(&session_id)?;
         let base = endpoint(&app);
         let requests = pending_live(&app, &base)?;
         let state = app.state::<SettingsState>();
@@ -154,6 +172,8 @@ pub async fn tool_permission_reply(
 ) -> Result<(), String> {
     require_chat(&window)?;
     tauri::async_runtime::spawn_blocking(move || {
+        app.state::<AgentPermissions>()
+            .reject_legacy_session(&session_id)?;
         let base = endpoint(&app);
         let requests = pending_live(&app, &base)?;
         let state = app.state::<SettingsState>();
@@ -181,6 +201,8 @@ pub async fn tool_permission_cancel(
 ) -> Result<(), String> {
     require_chat(&window)?;
     tauri::async_runtime::spawn_blocking(move || {
+        app.state::<AgentPermissions>()
+            .reject_legacy_session(&session_id)?;
         let base = endpoint(&app);
         for request in pending_live(&app, &base)?
             .into_iter()
@@ -194,7 +216,10 @@ pub async fn tool_permission_cancel(
     .map_err(|_| "permission_unavailable".to_owned())?
 }
 
-fn pending_live(app: &tauri::AppHandle, base: &str) -> Result<Vec<PermissionRequest>, String> {
+pub(crate) fn pending_live(
+    app: &tauri::AppHandle,
+    base: &str,
+) -> Result<Vec<PermissionRequest>, String> {
     pending_with_events(base, &app.state::<super::events::PermissionEvents>())
 }
 

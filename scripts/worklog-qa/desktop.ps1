@@ -1,5 +1,5 @@
 param(
-  [ValidateSet('preflight','build','launch','status','stop','purge')][string]$Action = 'preflight',
+  [ValidateSet('preflight','build','launch','status','stop','purge','test-receipt-time')][string]$Action = 'preflight',
   [string]$FixtureBaseUrl = ''
 )
 $ErrorActionPreference = 'Stop'
@@ -16,6 +16,7 @@ $roots = @((Join-Path ([Environment]::GetFolderPath('ApplicationData')) $identit
 function Save-Json($path, $value) { $value | ConvertTo-Json -Depth 15 | Set-Content -LiteralPath $path -Encoding UTF8 }
 function Read-Json($path) { Get-Content -LiteralPath $path -Raw | ConvertFrom-Json }
 function File-Hash($path) { $stream = [IO.File]::OpenRead([IO.Path]::GetFullPath($path)); $hash = [Security.Cryptography.SHA256]::Create(); try { [BitConverter]::ToString($hash.ComputeHash($stream)).Replace('-','') } finally { $stream.Dispose(); $hash.Dispose() } }
+function Same-CreationTime($left, $right) { [math]::Abs(($left.ToUniversalTime() - $right.ToUniversalTime()).Ticks) -le 10 }
 function Source-Hashes {
   $paths = @(& rg --files --no-ignore src src-tauri/src src-tauri/resources public scripts/worklog-qa)
   $paths += @('src-tauri/Cargo.toml','src-tauri/Cargo.lock','src-tauri/tauri.conf.json','package.json','bun.lock','vite.config.ts','tsconfig.json','pet.html','chat.html','settings.html')
@@ -37,7 +38,7 @@ function Owned-Processes($receipt) {
   $owned = @($receipt.processes)
   foreach ($known in $owned) {
     $current = $all | Where-Object { $_.ProcessId -eq $known.pid }
-    if ($current -and $current.CreationDate.ToUniversalTime() -ne ([datetime]$known.created).ToUniversalTime()) { throw "PID reused: $($known.pid)" }
+    if ($current -and ($current.ExecutablePath -ne $known.executable -or -not (Same-CreationTime $current.CreationDate ([datetime]$known.created)))) { throw "PID reused: $($known.pid)" }
   }
   $changed = $true
   while ($changed) {
@@ -55,6 +56,12 @@ function Owned-Processes($receipt) {
 }
 New-Item -ItemType Directory -Path $evidence -Force | Out-Null
 switch ($Action) {
+  'test-receipt-time' {
+    $base = [datetime]'2026-09-17T05:29:48.3304840+08:00'
+    if (-not (Same-CreationTime $base $base.AddTicks(9))) { throw 'CIM precision tolerance rejected 9 ticks.' }
+    if (Same-CreationTime $base $base.AddTicks(11)) { throw 'PID reuse guard accepted more than one microsecond.' }
+    Write-Output 'Receipt creation-time tolerance passed: <=10 ticks accepted; >10 ticks rejected.'
+  }
   'preflight' {
     Assert-Guards
     Save-Json (Join-Path $evidence 'preflight-hashes.json') (Source-Hashes | ConvertFrom-Json)
@@ -86,9 +93,9 @@ switch ($Action) {
     $receipt = [ordered]@{ identity=$identity; roots=$roots; fixtureBaseUrl=$FixtureBaseUrl; fixtureOwnership='external probe worker'; buildSha256=$build.sha256; processes=@(); started=[DateTime]::UtcNow.ToString('o'); runtimeDataRetained=$true }
     Save-Json $runReceipt $receipt
     $app = Start-Process -FilePath $binaryPath -WorkingDirectory (Split-Path $binaryPath) -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $evidence 'app.stdout.log') -RedirectStandardError (Join-Path $evidence 'app.stderr.log')
-    $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $($app.Id)"
-    if (-not $processInfo) { throw 'QA application exited before process registration; inspect stderr.' }
-    $receipt.processes = @(@{pid=$app.Id;created=$processInfo.CreationDate.ToUniversalTime().ToString('o');executable=$processInfo.ExecutablePath})
+    $app.Refresh()
+    if ($app.HasExited) { throw 'QA application exited before process registration; inspect stderr.' }
+    $receipt.processes = @(@{pid=$app.Id;created=$app.StartTime.ToUniversalTime().ToString('o');executable=$app.Path})
     Save-Json $runReceipt $receipt
     Write-Output "QA PID $($app.Id) launched. Configure only synthetic model-a at $FixtureBaseUrl through QA UI. Run status before and after each scenario."
   }
@@ -120,7 +127,7 @@ switch ($Action) {
     foreach ($owned in @($receipt.processes | Sort-Object created -Descending)) {
       $current = Get-CimInstance Win32_Process -Filter "ProcessId = $($owned.pid)"
       if ($current) {
-        if ($current.CreationDate.ToUniversalTime() -ne ([datetime]$owned.created).ToUniversalTime()) { throw 'Refusing reused PID.' }
+        if ($current.ExecutablePath -ne $owned.executable -or -not (Same-CreationTime $current.CreationDate ([datetime]$owned.created))) { throw 'Refusing reused PID.' }
         Stop-Process -Id $owned.pid -Force
       }
     }

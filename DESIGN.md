@@ -186,6 +186,11 @@ Widget selection uses `--widget-tile-size` at `88px`, with `--s-3` gaps and `--s
 - States: staging uses dashed `--accent` on `--accent-soft`; ready uses the normal sunken surface; failed uses `--danger`; NCM awaiting confirmation uses a `--warn` bordered alert dialog; processing is a polite status with a retryable failure path. Remove, Convert, Cancel, and Retry controls use the shared button/focus treatment and never rely on symbol-only text.
 - Accessibility: the tray is a polite live region; NCM confirmation is `role="alertdialog"` with labelled Convert and Cancel buttons; failed items expose their error message and Retry by accessible name; every action has a visible `:focus-visible` ring and survives the 320px chat width without horizontal overflow.
 
+### Workspace task (chat)
+- Structure: `.workspace-task` is a compact card above the composer. It shows the selected folder, the host-owned active or latest run, Stop, and native tool approval cards without adding a second navigation surface.
+- States: no folder, folder selected, active, approval pending, recent result, and recoverable host error. The folder stays fixed while active; cancelling the picker changes nothing.
+- Accessibility: folder selection, clearing, stopping, and approval choices are native labelled buttons. Failures use an alert, long paths wrap inside the card, and keyboard focus uses the existing chat control treatment.
+
 ### Generated artifact card (chat)
 - Structure: `.chat-artifact-row` is a dedicated local conversation row for generated files. `.chat-artifact-card` contains filename, formatted byte size, native audio controls for MP3/FLAC previews, an explicit Download button, and inline export feedback.
 - States: idle, exporting, exported, and export failed. Exported uses a polite status naming the saved filename; failed uses an alert and leaves Retry available. Rendering or conversion success never writes to Downloads; only the user-activated Download or Retry action may call export.

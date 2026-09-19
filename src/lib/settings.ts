@@ -132,15 +132,6 @@ export function previewPetScale(scale: number): Promise<void> {
   return invoke("preview_pet_scale", { scale });
 }
 
-/** Fires (from the Rust scheduler) when a scheduled task is due. */
-export function onScheduledTask(
-  cb: (task: ScheduledTask) => void,
-): Promise<UnlistenFn> {
-  return listen<ScheduledTask>("deskmate://scheduled-task", (e) =>
-    cb(e.payload),
-  );
-}
-
 /**
  * Fires when bundled personas/skills could not be copied into the app data
  * dir. Without this the failure only shows up as an unexplained empty persona
@@ -172,9 +163,9 @@ export function modelsMatchVerification(
 export async function listModels(): Promise<ProviderModel[]> {
   const base = await invoke<string>("sidecar_base_url");
   let lastError: Error | null = null;
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
     try {
-      const res = await fetch(`${base}/config/providers`);
+      const res = await fetch(`${base}/config/providers`, { signal: AbortSignal.timeout(500) });
       if (!res.ok) throw new Error(`providers -> ${res.status}`);
       const data = (await res.json()) as {
         providers?: {
@@ -198,7 +189,7 @@ export async function listModels(): Promise<ProviderModel[]> {
     } catch (error) {
       lastError =
         error instanceof Error ? error : new Error(String(error));
-      if (attempt < 19) {
+      if (attempt < 7) {
         await new Promise((resolve) => window.setTimeout(resolve, 250));
       }
     }

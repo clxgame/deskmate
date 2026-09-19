@@ -35,15 +35,15 @@
         "dragDropEnabled": false,
         "width": 420,
         "height": 560,
-        "x": -10000,
-        "y": -10000,
+        "x": 540,
+        "y": 100,
         "transparent": true,
         "decorations": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "resizable": false,
         "shadow": false,
-        "visible": false,
+        "visible": true,
         "focus": false
       },
       {
@@ -53,15 +53,15 @@
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=55883",
         "width": 720,
         "height": 520,
-        "x": -10000,
-        "y": -10000,
+        "x": 50,
+        "y": 100,
         "decorations": false,
         "transparent": true,
         "resizable": false,
         "shadow": false,
         "skipTaskbar": false,
-        "visible": false,
-        "focus": false
+        "visible": true,
+        "focus": true
       }
     ],
     "security": {

@@ -105,6 +105,26 @@ describe("provider-aware settings IPC", () => {
       },
     ]);
   });
+
+  test("rejects within a bounded window when every provider request hangs", async () => {
+    invoke.mockImplementation((command) => command === "sidecar_base_url" ? Promise.resolve("http://127.0.0.1:48111") : Promise.resolve(undefined));
+    globalThis.fetch = Object.assign(mock((_url: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("timed out", "AbortError")), { once: true });
+    })), { preconnect: originalFetch.preconnect });
+    const started = performance.now();
+    await expect(listModels()).rejects.toThrow();
+    expect(performance.now() - started).toBeLessThan(7_000);
+  }, 8_000);
+
+  test("returns models after a transient provider failure", async () => {
+    invoke.mockImplementation((command) => command === "sidecar_base_url" ? Promise.resolve("http://127.0.0.1:48111") : Promise.resolve(undefined));
+    let calls = 0;
+    globalThis.fetch = Object.assign(mock(() => ++calls === 1
+      ? Promise.reject(new Error("starting"))
+      : Promise.resolve(new Response(JSON.stringify({ providers: [{ id: "yume", name: "YUME", models: { m: { name: "Model" } } }] }), { status: 200 }))), { preconnect: originalFetch.preconnect });
+    expect(await listModels()).toHaveLength(1);
+    expect(calls).toBe(2);
+  });
 });
 
 describe("verified model catalog", () => {

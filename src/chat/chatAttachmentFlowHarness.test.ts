@@ -115,6 +115,8 @@ function handleInvoke(command: string, args?: unknown): Promise<unknown> {
       return Promise.resolve({ memories: [], promptBlock: "" });
     case "history_list":
       return Promise.resolve([]);
+    case "agent_run_read":
+      return Promise.resolve({ active: null, recent: [], artifacts: [] });
     case "stage_chat_attachment":
       return Promise.resolve(stageResponse(args));
     case "read_chat_attachment":

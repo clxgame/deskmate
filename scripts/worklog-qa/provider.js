@@ -3,18 +3,41 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 const evidence = resolve(import.meta.dir, "../../.omo/evidence/worklog-natural-recall-qa");
 await mkdir(evidence, { recursive: true });
-const state = { mode: "success", delayMs: 0, nextTool: null, report: "# 合成工作报告\n\n## 今日完成\n完成测试项目界面核对。\n\n## 进行中\n待补充\n\n## 问题与阻塞\n待补充\n\n## 下一步\n待补充", requests: [] };
+const state = { mode: "success", delayMs: 0, nextTool: null, report: "# 合成工作报告\n\n## 今日完成\n完成测试项目界面核对。\n\n## 进行中\n待补充\n\n## 问题与阻塞\n待补充\n\n## 下一步\n待补充", requests: [], modelRequests: [] };
 const permitted = new Set(["worklog_record", "worklog_query", "worklog_update", "worklog_generate_report", "worklog_schedule_report"]);
+function flowTool(messages) {
+  const text = JSON.stringify(messages);
+  const results = messages.filter(message => message?.role === "tool").length;
+  if (text.includes("QA_READ_EDIT")) {
+    if (results === 0) return { name: "read", input: { filePath: "same.txt" } };
+    if (results === 1) return { name: "edit", input: { filePath: "same.txt", oldString: "ORIGINAL_A", newString: "UPDATED_A" } };
+  }
+  if (text.includes("FLOW_DOCUMENT")) {
+    if (results === 0) return { name: "read", input: { filePath: "notes.txt" } };
+    if (results === 1) return { name: "write", input: { filePath: "summary.md", content: "## 已完成\n- 完成需求梳理\n- 确认接口方案\n\n## 待办\n- 补充边界测试\n" } };
+  }
+  if (text.includes("FLOW_CODE")) {
+    if (results === 0) return { name: "bash", input: { command: "bun test sum.test.ts", description: "Run failing test" } };
+    if (results === 1) return { name: "edit", input: { filePath: "sum.ts", oldString: "a - b", newString: "a + b" } };
+    if (results === 2) return { name: "bash", input: { command: "bun test sum.test.ts", description: "Run fixed test" } };
+  }
+  return null;
+}
 const server = Bun.serve({
   hostname: "127.0.0.1", port: 0,
   async fetch(request) {
     const url = new URL(request.url);
-    if (request.method === "GET" && url.pathname === "/v1/models") return Response.json({ object: "list", data: [{ id: "model-a", object: "model", owned_by: "synthetic-qa" }] });
-    if (request.method === "GET" && url.pathname === "/qa/status") return Response.json({ mode: state.mode, delayMs: state.delayMs, pendingTool: state.nextTool?.name ?? null, requests: state.requests });
+    if (request.method === "GET" && url.pathname === "/v1/models") {
+      const record = { arrivedAt: new Date().toISOString(), status: 200, completedAt: null };
+      state.modelRequests.push(record);
+      record.completedAt = new Date().toISOString();
+      return Response.json({ object: "list", data: [{ id: "model-a", object: "model", owned_by: "synthetic-qa" }] });
+    }
+    if (request.method === "GET" && url.pathname === "/qa/status") return Response.json({ mode: state.mode, delayMs: state.delayMs, pendingTool: state.nextTool?.name ?? null, requests: state.requests, modelRequests: state.modelRequests });
     if (request.method === "POST" && url.pathname === "/qa/control") {
       const input = await request.json();
       if (!input || typeof input !== "object") return new Response("Invalid control", { status: 400 });
-      if (input.mode !== undefined && !["success", "error", "unauthorized"].includes(input.mode)) return new Response("Invalid mode", { status: 400 });
+      if (input.mode !== undefined && !["success", "error", "unauthorized", "stream_malformed"].includes(input.mode)) return new Response("Invalid mode", { status: 400 });
       if (input.delayMs !== undefined && (!Number.isInteger(input.delayMs) || input.delayMs < 0 || input.delayMs > 310000)) return new Response("Invalid delay", { status: 400 });
       if (input.nextTool !== undefined && input.nextTool !== null && (!permitted.has(input.nextTool.name) || !input.nextTool.input || typeof input.nextTool.input !== "object")) return new Response("Invalid tool", { status: 400 });
       if (input.report !== undefined && (typeof input.report !== "string" || input.report.length > 30000)) return new Response("Invalid report", { status: 400 });
@@ -26,16 +49,21 @@ const server = Bun.serve({
     const offered = (body.tools ?? []).flatMap(tool => typeof tool?.function?.name === "string" ? [tool.function.name] : []);
     const messages = body.messages ?? [];
     const latestTool = messages.findLast(message => message.role === "tool");
-    const pending = state.nextTool;
+    const pending = flowTool(messages) ?? state.nextTool;
     const invoke = pending && offered.includes(pending.name);
     const mode = state.mode;
     const delayMs = state.delayMs;
     state.requests.push({ at: new Date().toISOString(), tools: offered, toolResult: Boolean(latestTool), mode, delayMs, invokedTool: invoke ? pending.name : null, invokedInput: invoke ? pending.input : null });
     if (delayMs) await Bun.sleep(delayMs);
+    if (mode === "stream_malformed") {
+      const base = { id: `chatcmpl-${crypto.randomUUID()}`, created: Math.floor(Date.now() / 1000), model: "model-a", object: "chat.completion.chunk" };
+      const first = `data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: "partial" }, finish_reason: null }] })}\n\n`;
+      return new Response(`${first}data: {"malformed"\n\n`, { headers: { "Content-Type": "text/event-stream" } });
+    }
     if (mode !== "success") return Response.json({ error: { message: "Synthetic QA provider failure", type: mode === "unauthorized" ? "authentication_error" : "server_error" } }, { status: mode === "unauthorized" ? 401 : 503 });
-    if (invoke) state.nextTool = null;
+    if (invoke && pending === state.nextTool) state.nextTool = null;
     const content = latestTool ? `合成模型工具回执：${typeof latestTool.content === "string" ? latestTool.content : JSON.stringify(latestTool.content)}` : (frozenReport(messages) ?? state.report);
-    const toolCalls = invoke ? [{ index: 0, id: `call_qa_${crypto.randomUUID().replaceAll("-", "")}`, type: "function", function: { name: pending.name, arguments: JSON.stringify({ input: pending.input }) } }] : undefined;
+    const toolCalls = invoke ? [{ index: 0, id: `call_qa_${crypto.randomUUID().replaceAll("-", "")}`, type: "function", function: { name: pending.name, arguments: JSON.stringify(pending.input) } }] : undefined;
     const message = invoke ? { role: "assistant", tool_calls: toolCalls } : { role: "assistant", content };
     const finishReason = invoke ? "tool_calls" : "stop";
     const base = { id: `chatcmpl-${crypto.randomUUID()}`, created: Math.floor(Date.now() / 1000), model: "model-a" };

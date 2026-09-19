@@ -93,9 +93,12 @@ describe("opencode transport helpers", () => {
         new Response(
           JSON.stringify([
             {
-              id: "msg-1",
-              sessionID: "ses-1",
-              role: "assistant",
+              info: {
+                id: "msg-1",
+                sessionID: "ses-1",
+                role: "assistant",
+                parentID: "msg-user",
+              },
               parts: [],
             },
           ]),
@@ -113,12 +116,71 @@ describe("opencode transport helpers", () => {
       const messages = await getSessionMessages("ses-1");
 
       expect(fetchMock).toHaveBeenCalledWith(
-        "http://127.0.0.1:48888/session/ses-1/message?order=asc&limit=200",
+        "http://127.0.0.1:48888/session/ses-1/message?order=asc",
         expect.objectContaining({ method: "GET" }),
       );
       expect(messages).toEqual([
-        { id: "msg-1", sessionID: "ses-1", role: "assistant", parts: [] },
+        {
+          info: {
+            id: "msg-1",
+            sessionID: "ses-1",
+            role: "assistant",
+            parentID: "msg-user",
+          },
+          parts: [],
+        },
       ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("preserves native message and tool identifiers from the wire envelope", async () => {
+    const payload = [{
+      info: { id: "msg-assistant", sessionID: "ses-1", role: "assistant", parentID: "msg-caller" },
+      parts: [{
+        id: "part-tool", messageID: "msg-assistant", sessionID: "ses-1", type: "tool",
+        callID: "call-tool", tool: "bash", state: { status: "error", output: "SUCCESS text", error: { message: "failed" } },
+      }],
+    }];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = Object.assign(mock(() => Promise.resolve(Response.json(payload))), { preconnect: originalFetch.preconnect });
+    try {
+      const [message] = await getSessionMessages("ses-1");
+      expect(message?.info).toEqual(payload[0]?.info);
+      expect(message?.parts[0]).toEqual(payload[0]?.parts[0]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("rejects malformed message envelopes at the transport boundary", async () => {
+    const originalFetch = globalThis.fetch;
+    try {
+      const malformed = [
+        { wrong: "top-level object" },
+        [{ info: { id: "msg" }, parts: [] }],
+        [{ info: { id: "msg", sessionID: "ses-1", role: "assistant" }, parts: {} }],
+        [{ info: { id: "msg", sessionID: "ses-1", role: "assistant" }, parts: [{ id: "part", messageID: "msg", sessionID: "ses-1", type: "tool", callID: "call", tool: "bash", state: { status: "success" } }] }],
+      ];
+      for (const payload of malformed) {
+        globalThis.fetch = Object.assign(mock(() => Promise.resolve(Response.json(payload))), { preconnect: originalFetch.preconnect });
+        await expect(getSessionMessages("ses-1")).rejects.toMatchObject({ name: "OpenCodeWireError", code: "INVALID_MESSAGE_ENVELOPE" });
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("keeps aborted snapshots non-terminal when completion is absent", async () => {
+    const payload = [{ info: { id: "msg-aborted", sessionID: "ses-1", role: "assistant", parentID: "msg-user", error: { name: "MessageAbortedError" } }, parts: [] }];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = Object.assign(mock(() => Promise.resolve(Response.json(payload))), { preconnect: originalFetch.preconnect });
+    try {
+      const [message] = await getSessionMessages("ses-1");
+      expect(message?.info.error).toEqual({ name: "MessageAbortedError" });
+      expect(message?.info.time?.completed).toBeUndefined();
+      expect(message?.info.finish).toBeUndefined();
     } finally {
       globalThis.fetch = originalFetch;
     }

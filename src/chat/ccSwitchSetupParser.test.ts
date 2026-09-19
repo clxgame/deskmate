@@ -40,11 +40,13 @@ function assistantMessage(
   created?: number,
 ): OpenCodeMessage {
   return {
-    id,
-    sessionID: "ses-1",
-    role: "assistant",
+    info: {
+      id,
+      sessionID: "ses-1",
+      role: "assistant",
+      time: created === undefined ? undefined : { created },
+    },
     parts,
-    time: created === undefined ? undefined : { created },
   };
 }
 
@@ -236,8 +238,7 @@ describe("CC Switch setup tool parser", () => {
         ...assistantMessage([
           completedTool(VALID_DRAFT_OUTPUT),
         ]),
-        id: "msg-2",
-        role: "user",
+        info: { id: "msg-2", sessionID: "ses-1", role: "user" },
       },
     ];
 

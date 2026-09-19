@@ -54,5 +54,6 @@ pub const CONTROLLED_TOOLS: &[&str] = &[
 
 pub mod events;
 pub mod runtime;
+mod scoped;
 #[cfg(test)]
 mod tests;

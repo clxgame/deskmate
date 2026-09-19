@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { OpenCodeFilePart } from "../chat/attachments";
+import { parseSessionMessages } from "./opencodeMessages";
+export { OpenCodeWireError } from "./opencodeMessages";
 
 /** Minimal OpenCode server client (v1.17.x HTTP API). */
 
@@ -103,14 +105,21 @@ export interface OpenCodeEvent {
   properties?: Record<string, unknown>;
 }
 
-export interface OpenCodeMessage {
+export interface OpenCodeMessageInfo {
   readonly id: string;
   readonly sessionID: string;
   readonly role: string;
-  readonly parts?: readonly Part[];
+  readonly parentID?: string;
+  readonly finish?: string;
+  readonly error?: unknown;
   readonly time?: OpenCodeChronology;
   readonly createdAt?: string;
   readonly updatedAt?: string;
+}
+
+export interface OpenCodeMessage {
+  readonly info: OpenCodeMessageInfo;
+  readonly parts: readonly Part[];
 }
 
 let baseUrlPromise: Promise<string> | null = null;
@@ -141,8 +150,8 @@ export async function waitForServer(timeoutMs = 30_000): Promise<void> {
     try {
       const res = await fetch(`${base}/session`, { method: "GET" });
       if (res.ok) return;
-    } catch {
-      /* not up yet */
+    } catch (error: unknown) {
+      if (!(error instanceof Error)) throw error;
     }
     await new Promise((r) => setTimeout(r, 500));
   }
@@ -176,16 +185,17 @@ export function createSession(title: string): Promise<SessionInfo> {
   });
 }
 
-export function getSessionMessages(
+export async function getSessionMessages(
   sessionID: string,
 ): Promise<readonly OpenCodeMessage[]> {
-  const query = new URLSearchParams({ order: "asc", limit: "200" });
-  return api<readonly OpenCodeMessage[]>(
+  const query = new URLSearchParams({ order: "asc" });
+  const wire = await api<unknown>(
     `/session/${sessionID}/message?${query}`,
     {
       method: "GET",
     },
   );
+  return parseSessionMessages(wire);
 }
 
 /** Fire-and-forget prompt; results arrive over the SSE event stream. */
@@ -230,8 +240,8 @@ export async function subscribeEvents(
   source.onmessage = (msg) => {
     try {
       onEvent(JSON.parse(msg.data) as OpenCodeEvent);
-    } catch {
-      /* malformed frame; skip */
+    } catch (error: unknown) {
+      if (!(error instanceof SyntaxError)) throw error;
     }
   };
   return () => source.close();

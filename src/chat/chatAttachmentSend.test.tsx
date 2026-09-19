@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import * as tauriCore from "@tauri-apps/api/core";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const invoke = mock<(command: string, args?: unknown) => Promise<unknown>>(
   () => Promise.resolve(undefined),
@@ -25,11 +25,34 @@ type PromptRequest = {
 };
 
 const promptRequests: PromptRequest[] = [];
+const agentRun = {
+  runId: "run_workspace",
+  sessionId: "ses_workspace",
+  workspacePath: "C:\\workspace",
+  createdAt: "2026-09-19T00:00:00Z",
+  endedAt: null,
+  outcome: null,
+  errorSummary: null,
+  messageIds: [],
+  partIds: [],
+  callIds: [],
+};
+let agentProjection: {
+  active: typeof agentRun | null;
+  recent: readonly (typeof agentRun)[];
+  artifacts: readonly object[];
+} = { active: null, recent: [], artifacts: [] };
+let selectedWorkspace: string | null = null;
+let holdAgentStart = false;
+let releaseAgentStart: (() => void) | null = null;
 
 mock.module("@tauri-apps/api/core", () => ({ ...tauriCore, invoke }));
 mock.module("@tauri-apps/api/event", () => ({
   emit: () => Promise.resolve(),
   listen: () => Promise.resolve(() => {}),
+}));
+mock.module("@tauri-apps/plugin-dialog", () => ({
+  open: () => Promise.resolve(selectedWorkspace),
 }));
 
 function jsonResponse(body: unknown): Response {
@@ -105,6 +128,10 @@ const SETTINGS = {
 beforeEach(() => {
   invoke.mockReset();
   promptRequests.length = 0;
+  agentProjection = { active: null, recent: [], artifacts: [] };
+  selectedWorkspace = null;
+  holdAgentStart = false;
+  releaseAgentStart = null;
   invoke.mockImplementation((command: string, args?: unknown) => {
     switch (command) {
       case "sidecar_base_url":
@@ -150,6 +177,25 @@ beforeEach(() => {
         return Promise.resolve({ discarded: true });
       case "cleanup_chat_session":
         return Promise.resolve({ removed: 0 });
+      case "agent_run_read":
+        return Promise.resolve(agentProjection);
+      case "agent_run_start": {
+        const finish = () => {
+          agentProjection = { active: agentRun, recent: [], artifacts: [] };
+        };
+        if (!holdAgentStart) {
+          finish();
+          return Promise.resolve(agentRun);
+        }
+        return new Promise((resolve) => {
+          releaseAgentStart = () => {
+            finish();
+            resolve(agentRun);
+          };
+        });
+      }
+      case "agent_permission_pending":
+        return Promise.resolve([]);
       case "memory_context":
       case "history_save":
         return Promise.resolve({ memories: [], promptBlock: "" });
@@ -201,6 +247,81 @@ describe("dropped attachment sending", () => {
       providerID: "yume-2",
       modelID: "claude-sonnet-4.5",
     });
+    expect(invoke.mock.calls.some(([command]) => command === "agent_run_start")).toBe(false);
+  });
+
+  test("routes Send through the host agent when a workspace is selected", async () => {
+    selectedWorkspace = "C:\\workspace";
+    render(<ChatApp />);
+    const input = await screen.findByPlaceholderText("输入消息,Enter 发送");
+    fireEvent.click(screen.getByRole("button", { name: "选择工作文件夹" }));
+    await screen.findByText("C:\\workspace");
+
+    fireEvent.change(input, { target: { value: "整理项目" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => {
+      expect(invoke.mock.calls.filter(([command]) => command === "agent_run_start")).toHaveLength(1);
+    });
+    expect(invoke.mock.calls.find(([command]) => command === "agent_run_start")?.[1]).toEqual({
+      request: { workspacePath: "C:\\workspace", input: "整理项目" },
+    });
+    expect(promptRequests).toHaveLength(0);
+    if (!(input instanceof HTMLTextAreaElement)) throw new Error("chat input is not a textarea");
+    expect(input.value).toBe("");
+  });
+
+  test("routes Enter through the host agent when a workspace is selected", async () => {
+    selectedWorkspace = "C:\\workspace";
+    render(<ChatApp />);
+    const input = await screen.findByPlaceholderText("输入消息,Enter 发送");
+    fireEvent.click(screen.getByRole("button", { name: "选择工作文件夹" }));
+    await screen.findByText("C:\\workspace");
+
+    fireEvent.change(input, { target: { value: "运行检查" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(invoke.mock.calls.filter(([command]) => command === "agent_run_start")).toHaveLength(1);
+    });
+    expect(promptRequests).toHaveLength(0);
+  });
+
+  test("suppresses duplicate workspace submissions while start is pending", async () => {
+    selectedWorkspace = "C:\\workspace";
+    holdAgentStart = true;
+    render(<ChatApp />);
+    const input = await screen.findByPlaceholderText("输入消息,Enter 发送");
+    fireEvent.click(screen.getByRole("button", { name: "选择工作文件夹" }));
+    await screen.findByText("C:\\workspace");
+    fireEvent.change(input, { target: { value: "只执行一次" } });
+    const send = screen.getByRole("button", { name: "发送" });
+
+    fireEvent.click(send);
+    fireEvent.click(send);
+
+    await waitFor(() => {
+      expect(invoke.mock.calls.filter(([command]) => command === "agent_run_start")).toHaveLength(1);
+    });
+    await act(async () => releaseAgentStart?.());
+  });
+
+  test("does not submit again while a workspace run is active", async () => {
+    agentProjection = { active: agentRun, recent: [], artifacts: [] };
+    render(<ChatApp />);
+    const input = await screen.findByPlaceholderText("输入消息,Enter 发送");
+    await screen.findByRole("button", { name: "停" });
+    fireEvent.change(input, { target: { value: "不要重复执行" } });
+
+    const send = screen.getByRole("button", { name: "发送" });
+    if (!(send instanceof HTMLButtonElement)) throw new Error("send control is not a button");
+    expect(send.disabled).toBe(true);
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(invoke.mock.calls.filter(([command]) => command === "agent_run_start")).toHaveLength(0);
+    });
+    expect(promptRequests).toHaveLength(0);
   });
 
   test("sends a dropped file without typed text", async () => {

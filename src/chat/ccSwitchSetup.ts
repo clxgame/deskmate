@@ -78,9 +78,9 @@ function chronologyFor(message: OpenCodeMessage, part: ToolPart): number | null 
     newestChronologyValue(part.time) ??
     toChronologyNumber(part.updatedAt) ??
     toChronologyNumber(part.createdAt) ??
-    newestChronologyValue(message.time) ??
-    toChronologyNumber(message.updatedAt) ??
-    toChronologyNumber(message.createdAt)
+    newestChronologyValue(message.info.time) ??
+    toChronologyNumber(message.info.updatedAt) ??
+    toChronologyNumber(message.info.createdAt)
   );
 }
 
@@ -135,11 +135,11 @@ export function recoverCcSwitchToolResultsFromMessages(
   const results: CcSwitchToolResult[] = [];
   const terminalEntriesBySessionID = new Map<string, TerminalSnapshotEntry[]>();
   for (const message of messages) {
-    if (message.role === "user") continue;
-    for (const part of message.parts ?? []) {
+    if (message.info.role === "user") continue;
+    for (const part of message.parts) {
       const toolPart = toOpenCodeToolPart(part);
       if (!toolPart) continue;
-      const source = { role: message.role };
+      const source = { role: message.info.role };
       const result = tracker.acceptToolPart(toolPart, source);
       if (isTerminalCcSwitchSetupCall(toolPart, source)) {
         const entries = terminalEntriesBySessionID.get(toolPart.sessionID) ?? [];

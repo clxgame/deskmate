@@ -1118,3 +1118,98 @@
 .history-new:hover {
   background: var(--surface-hover);
 }
+
+.workspace-task {
+  display: grid;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  border-top: 1px solid var(--line);
+  background: var(--surface-raised);
+  font-size: var(--t-small);
+}
+
+.workspace-task-head,
+.workspace-task-status {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.workspace-task-folder,
+.workspace-task-status button {
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-sunken);
+  color: var(--text);
+  padding: var(--s-1) var(--s-2);
+  cursor: pointer;
+}
+
+.workspace-task-folder:focus-visible,
+.workspace-task-status button:focus-visible,
+.workspace-task-clear:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 2px;
+}
+
+.workspace-task-folder:disabled {
+  background: var(--surface-disabled);
+  color: var(--text-disabled);
+  cursor: default;
+}
+
+.workspace-task-clear {
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.workspace-task-path,
+.workspace-task-note,
+.workspace-task-recent,
+.workspace-task-error {
+  margin: 0;
+}
+
+.workspace-task-path {
+  display: flex;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.workspace-task-path span,
+.workspace-task-status span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.workspace-task-status button { flex: 0 0 auto; }
+
+.workspace-task .chat-tool-approvals {
+  max-height: 180px;
+  padding-inline: 0;
+}
+
+.workspace-task-error { color: var(--danger); }
+
+.workspace-task-artifacts { display: grid; gap: var(--s-1); }
+.workspace-task-artifact {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--s-2);
+}
+.workspace-task-artifact span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-task-artifact small { color: var(--text-dim); }
+.workspace-task-artifact button {
+  border: 0;
+  background: transparent;
+  color: var(--accent-ink);
+  cursor: pointer;
+}
+.workspace-task-artifact button:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }

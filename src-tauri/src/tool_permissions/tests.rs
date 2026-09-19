@@ -1,5 +1,6 @@
-use super::runtime::{reply_current, resolve_pending, Reply};
+use super::runtime::{pending_scoped, reply_current, resolve_pending, respond_scoped, Reply};
 use super::{Mode, ToolPermissions};
+use crate::agent::AgentPermissionState;
 use serde_json::json;
 use std::{
     io::{BufRead, BufReader, Read, Write},
@@ -147,4 +148,53 @@ fn allow_once_and_cancel_use_only_the_selected_request() {
         let calls = server.join().expect("finished");
         assert!(calls[1].contains(&format!("\"reply\":\"{expected}\"")));
     }
+}
+
+#[test]
+fn agent_permission_requests_use_the_exact_workspace_query_while_legacy_stays_unscoped() {
+    let (base, server) = engine(vec![
+        json!([request("p1", "read", "ses_a")]),
+        json!(true),
+        json!([]),
+    ]);
+    let workspace = std::path::Path::new(r"\\?\E:\中文 工作区\保留#?&%");
+    let pending = pending_scoped(&base, workspace).expect("scoped pending");
+    assert_eq!(pending.len(), 1);
+    respond_scoped(&base, &pending[0], Reply::Once, workspace).expect("scoped reply");
+    assert!(resolve_pending(&base, "ses_a", &ToolPermissions::default())
+        .expect("legacy pending")
+        .is_empty());
+
+    let calls = server.join().expect("fixture finished");
+    for call in &calls[..2] {
+        let target = call.split_whitespace().nth(1).expect("request target");
+        let url =
+            url::Url::parse(&format!("http://127.0.0.1{target}")).expect("scoped request URL");
+        assert_eq!(
+            url.query_pairs()
+                .find(|(key, _)| key == "directory")
+                .map(|(_, value)| value.into_owned()),
+            Some(r"E:\中文 工作区\保留#?&%".to_owned())
+        );
+    }
+    assert!(calls[1].starts_with("POST /permission/p1/reply?"));
+    assert!(calls[2].starts_with("GET /permission HTTP/1.1"));
+}
+
+#[test]
+fn legacy_permission_commands_reject_agent_owned_scheduled_sessions() {
+    let root = std::env::temp_dir().join(format!(
+        "yume-agent-legacy-permission-{}",
+        uuid::Uuid::new_v4()
+    ));
+    assert!(std::fs::create_dir_all(&root).is_ok());
+    let permissions = AgentPermissionState::default();
+    assert!(permissions
+        .register_run("msg_schedule_fixture", "ses_schedule_fixture", &root)
+        .is_ok());
+    assert_eq!(
+        permissions.reject_legacy_session("ses_schedule_fixture"),
+        Err("permission_agent_session_scoped".to_owned())
+    );
+    assert!(std::fs::remove_dir_all(root).is_ok());
 }

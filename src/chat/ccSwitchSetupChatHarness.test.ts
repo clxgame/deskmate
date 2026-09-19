@@ -94,9 +94,7 @@ export function completedTool(output: unknown, callID = "call-1"): ToolPart {
 
 export function assistantMessage(parts: readonly ToolPart[]): OpenCodeMessage {
   return {
-    id: "msg-1",
-    sessionID: "ses-1",
-    role: "assistant",
+    info: { id: "msg-1", sessionID: "ses-1", role: "assistant" },
     parts,
   };
 }
@@ -107,7 +105,7 @@ export function setSnapshotMessages(messages: readonly OpenCodeMessage[]): void 
 
 export function wasSessionMessageFetched(): boolean {
   return fetchLog.some((url) =>
-    url.includes("/session/ses-1/message?order=asc&limit=200"),
+    url.includes("/session/ses-1/message?order=asc"),
   );
 }
 
@@ -141,7 +139,7 @@ function installOpenCodeTransport(): void {
         Response.json({ id: "ses-1", title: "YUME chat", directory: "." }),
       );
     }
-    if (url.includes("/session/ses-1/message?order=asc&limit=200")) {
+    if (url.includes("/session/ses-1/message?order=asc")) {
       return Promise.resolve(Response.json(snapshotMessages));
     }
     return Promise.resolve(new Response(null, { status: 204 }));

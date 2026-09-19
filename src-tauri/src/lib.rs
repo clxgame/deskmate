@@ -11,6 +11,7 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 use tauri::{Emitter, Manager, RunEvent, State};
 
+mod agent;
 mod ai_usage;
 pub mod ccswitch;
 mod chat_attachments;
@@ -33,10 +34,10 @@ mod pomodoro;
 mod settings;
 mod settings_window;
 mod startup_settings;
+mod tool_permissions;
 mod updater;
 mod window_layout;
 mod worklog;
-mod tool_permissions;
 use ai_usage::fetch_ai_usage;
 use chat_attachments::AttachmentStore;
 use history::HistoryState;
@@ -61,6 +62,22 @@ struct ChatMotion {
 #[tauri::command]
 fn sidecar_base_url(sidecar: State<Sidecar>) -> String {
     format!("http://127.0.0.1:{}", sidecar.port)
+}
+
+pub(crate) fn sidecar_url(app: &tauri::AppHandle) -> String {
+    format!("http://127.0.0.1:{}", app.state::<Sidecar>().port)
+}
+
+pub(crate) fn sidecar_owned_running(app: &tauri::AppHandle) -> Result<bool, String> {
+    let sidecar = app.state::<Sidecar>();
+    let mut child = sidecar.child.lock().map_err(|_| "sidecar lock poisoned")?;
+    match child.as_mut() {
+        Some(process) => process
+            .try_wait()
+            .map(|status| status.is_none())
+            .map_err(|error| error.to_string()),
+        None => Ok(false),
+    }
 }
 
 /// Load the persona system prompt + placeholders, preferring an installed pack.
@@ -253,15 +270,14 @@ mod tests {
             *key == OsStr::new("OPENCODE_ENABLE_EXA") && *value == Some(OsStr::new("1"))
         }));
         assert!(envs.iter().any(|(key, value)| {
-            *key == OsStr::new("OPENCODE_WEBSEARCH_PROVIDER")
-                && *value == Some(OsStr::new("exa"))
+            *key == OsStr::new("OPENCODE_WEBSEARCH_PROVIDER") && *value == Some(OsStr::new("exa"))
         }));
-        assert!(envs.iter().any(|(key, value)| {
-            *key == OsStr::new("EXA_API_KEY") && value.is_none()
-        }));
-        assert!(envs.iter().any(|(key, value)| {
-            *key == OsStr::new("PARALLEL_API_KEY") && value.is_none()
-        }));
+        assert!(envs
+            .iter()
+            .any(|(key, value)| { *key == OsStr::new("EXA_API_KEY") && value.is_none() }));
+        assert!(envs
+            .iter()
+            .any(|(key, value)| { *key == OsStr::new("PARALLEL_API_KEY") && value.is_none() }));
         assert!(envs.iter().any(|(key, value)| {
             *key == OsStr::new("OPENCODE_ENABLE_PARALLEL") && value.is_none()
         }));
@@ -619,8 +635,12 @@ pub(crate) fn show_chat(app: &tauri::AppHandle) -> Result<(), String> {
     let shown = app.state::<ChatShown>();
 
     clear_chat_motion(app);
-    let large = app.state::<SettingsState>().0.lock()
-        .map(|s| s.chat_large).map_err(|error| error.to_string())?;
+    let large = app
+        .state::<SettingsState>()
+        .0
+        .lock()
+        .map(|s| s.chat_large)
+        .map_err(|error| error.to_string())?;
     settings_window::apply_chat(app, large).map_err(|error| error.to_string())?;
     reposition_chat(app)?;
     chat.show().map_err(|e| e.to_string())?;
@@ -1063,9 +1083,13 @@ fn spawn_sidecar(app: &tauri::AppHandle, port: u16) -> std::io::Result<Child> {
         cmd.env("OPENCODE_CONFIG_CONTENT", config)
             .env("OPENCODE_AUTH_CONTENT", auth);
     } else {
-        cmd.env("OPENCODE_CONFIG_CONTENT", serde_json::json!({
-            "permission": settings::sidecar_permission_policy()
-        }).to_string());
+        cmd.env(
+            "OPENCODE_CONFIG_CONTENT",
+            serde_json::json!({
+                "permission": settings::sidecar_permission_policy()
+            })
+            .to_string(),
+        );
     }
 
     #[cfg(windows)]
@@ -1086,6 +1110,9 @@ fn spawn_sidecar(app: &tauri::AppHandle, port: u16) -> std::io::Result<Child> {
 }
 
 pub(crate) fn restart_sidecar(app: &tauri::AppHandle) -> Result<(), String> {
+    if app.try_state::<agent::AgentRunState>().is_some() {
+        agent::interrupt_owned_run(app, "sidecar_restarted");
+    }
     let sidecar = app.state::<Sidecar>();
     let mut previous = sidecar
         .child
@@ -1284,6 +1311,7 @@ pub fn run() {
         .manage(pomodoro::PomodoroState::default())
         .manage(AttachmentStore::default())
         .manage(ccswitch::contract::CcSwitchSetupState::default())
+        .manage(agent::AgentPermissionState::default())
         .manage(ChatShown(Mutex::new(false)))
         .manage(pet_visibility::PetVisibility::default())
         .manage(pet_visibility_recovery::VisibilityError::default())
@@ -1292,6 +1320,12 @@ pub fn run() {
         .manage(Arc::new(ChatMotion::default()))
         .invoke_handler(tauri::generate_handler![
             chat_links::open_chat_link,
+            agent::agent_permission_pending,
+            agent::agent_permission_reply,
+            agent::run_commands::agent_run_start,
+            agent::run_commands::agent_run_read,
+            agent::artifacts::agent_artifact_locate,
+            agent::run_commands::agent_run_cancel,
             tool_permissions::runtime::tool_permission_pending,
             tool_permissions::runtime::tool_permission_reply,
             tool_permissions::runtime::tool_permission_cancel,
@@ -1420,11 +1454,7 @@ pub fn run() {
                 if !loaded.always_on_top {
                     let _ = pet.set_always_on_top(false);
                 }
-                pet_geometry::apply(
-                    &pet,
-                    loaded.pet_scale,
-                    &loaded.persona_id,
-                );
+                pet_geometry::apply(&pet, loaded.pet_scale, &loaded.persona_id);
                 pet_startup::place(&pet, &loaded.persona_id, loaded.pet_position);
             }
             app.manage(HistoryState(Mutex::new(history::load(&handle))));
@@ -1432,6 +1462,14 @@ pub fn run() {
             // `MemoryState` records that and every memory command answers
             // MEMORY_DISABLED while chat and the pet keep working.
             app.manage(memory::MemoryState::initialize(&handle));
+            let runs = handle
+                .path()
+                .app_data_dir()
+                .map_err(|error| error.to_string())?
+                .join("agent-runs");
+            let agent_runs = agent::AgentRunState::load(agent::RunStore::new(runs))?;
+            agent_runs.restore_permission_ownership(&app.state::<agent::AgentPermissionState>())?;
+            app.manage(agent_runs);
             app.manage(worklog::commands::WorklogState::initialize(&handle));
             app.manage(worklog::bridge::WorklogBridge::initialize(&handle));
             worklog::bridge::start_worker(handle.clone());
@@ -1442,12 +1480,15 @@ pub fn run() {
                 Ok(child) => {
                     // SAFE-UNWRAP: a poisoned sidecar mutex means an earlier setup command panicked.
                     *app.state::<Sidecar>().child.lock().unwrap() = Some(child);
+                    agent::recover_after_start(handle.clone());
                 }
                 Err(e) => {
                     eprintln!("failed to spawn opencode sidecar: {e}");
                 }
             }
-            app.manage(tool_permissions::events::PermissionEvents::start(format!("http://127.0.0.1:{port}")));
+            app.manage(tool_permissions::events::PermissionEvents::start(format!(
+                "http://127.0.0.1:{port}"
+            )));
             worklog::runner_runtime::start(handle.clone());
             pet_recovery::start(handle.clone())?;
             Ok(())
@@ -1457,7 +1498,11 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             if let RunEvent::Exit = event {
-                app.state::<tool_permissions::events::PermissionEvents>().stop();
+                if app.try_state::<agent::AgentRunState>().is_some() {
+                    agent::interrupt_owned_run(app, "app_exited");
+                }
+                app.state::<tool_permissions::events::PermissionEvents>()
+                    .stop();
                 pet_recovery::stop(app);
                 worklog::runner_runtime::stop(app);
                 pomodoro::stop_checker(app);

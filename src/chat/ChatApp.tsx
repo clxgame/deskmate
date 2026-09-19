@@ -48,7 +48,6 @@ import { memoryForgetConversation } from "../lib/memory";
 import {
   getSettings,
   onResourceError,
-  onScheduledTask,
   onSettingsChanged,
   type Settings,
 } from "../lib/settings";
@@ -76,6 +75,8 @@ import { buildWorklogSystemInstruction, newUserMessageId, registerWorklogTurn, W
 import { buildCurrentInformationInstruction } from "./currentInformation";
 import { webSearchSites } from "./webSearchSites";
 import { CcSwitchSetupCard } from "./CcSwitchSetupCard";
+import { WorkspaceTask } from "./WorkspaceTask";
+import { useAgentRun } from "./useAgentRun";
 import {
   CCSWITCH_PREPARE_OPENCODE_PROVIDER_TOOL,
   createCcSwitchToolResultTracker,
@@ -216,6 +217,7 @@ export default function ChatApp() {
   tRef.current = t;
   const sessionRef = useRef<string | null>(null);
   const permissions = useToolPermissions(currentSessionId, status === "busy");
+  const agent = useAgentRun(lang);
   const [petActivity] = useState(() => createChatPetActivity(broadcastPetActivity));
   const personaRef = useRef<PersonaData | null>(null);
   const activePersonaIdRef = useRef(DEFAULT_PERSONA_ID);
@@ -829,6 +831,14 @@ export default function ChatApp() {
       setMemoryNotice(t.ccSwitchSecretRedirect);
       return;
     }
+    if (agent.workspace) {
+      if (!text || agent.busy) return;
+      if (await agent.start(text)) {
+        setInput("");
+        setAttachmentError(null);
+      }
+      return;
+    }
     if (attachmentBusy) {
       setAttachmentError(t.chatAttachmentStillReading);
       return;
@@ -1137,20 +1147,6 @@ export default function ChatApp() {
     }
     stageAttachmentFiles(event.dataTransfer.files);
   };
-
-  // Scheduled tasks fired by the Rust scheduler: auto-send the prompt.
-  const sendTextRef = useRef(sendText);
-  sendTextRef.current = sendText;
-  useEffect(() => {
-    const unlisten = onScheduledTask((task) => {
-      void sendTextRef.current(
-        `[${tRef.current.scheduledTaskPrefix} ${task.time}] ${task.prompt}`,
-      );
-    });
-    return () => {
-      void unlisten.then((fn) => fn());
-    };
-  }, []);
 
   // Bundled personas/skills failed to unpack: tell the user why instead of
   // letting it look like an empty persona list.
@@ -1487,6 +1483,7 @@ export default function ChatApp() {
             </div>
           )}
 
+          <WorkspaceTask language={lang} agent={agent} />
           <ToolApprovalCards requests={permissions.requests} error={permissions.error} onReply={permissions.reply} t={t} />
           <footer className="chat-input-row">
             <input
@@ -1549,9 +1546,11 @@ export default function ChatApp() {
                 className="chat-send"
                 onClick={() => void send()}
                 disabled={
-                  status !== "ready" ||
-                  attachmentBusy ||
-                  (!input.trim() && chatAttachments.items.length === 0)
+                  agent.workspace
+                    ? agent.busy || !input.trim()
+                    : status !== "ready" ||
+                      attachmentBusy ||
+                      (!input.trim() && chatAttachments.items.length === 0)
                 }
               >
                 {t.chatSend}

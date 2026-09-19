@@ -18,7 +18,8 @@ function ApprovalCard({ request, onReply, t }: { readonly request: PermissionReq
     ? key === "shell" && "command" in metadata ? metadata.command
       : key === "web" && "url" in metadata ? metadata.url : undefined
     : undefined;
-  const details = typeof summary === "string" ? summary : request.metadata && typeof request.metadata === "object" && Object.keys(request.metadata).length > 0
+  const cwd = metadata && typeof metadata === "object" && "cwd" in metadata && typeof metadata.cwd === "string" ? metadata.cwd : undefined;
+  const details = typeof summary === "string" ? [summary, cwd].filter((item) => item !== undefined).join("\n") : request.metadata && typeof request.metadata === "object" && Object.keys(request.metadata).length > 0
     ? JSON.stringify(request.metadata, null, 2) : request.patterns.join("\n");
   const respond = async (decision: PermissionReply) => {
     setSubmitting(true);

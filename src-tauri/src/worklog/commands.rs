@@ -39,6 +39,10 @@ impl WorklogState {
     ) -> WorklogResult<T> {
         body(self.repository()?.as_ref())
     }
+
+    pub(crate) fn has_running_run(&self) -> WorklogResult<bool> {
+        self.repository()?.has_running_run()
+    }
 }
 fn configured_model(app: &tauri::AppHandle) -> WorklogResult<String> {
     let state = app.state::<crate::settings::SettingsState>();

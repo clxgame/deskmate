@@ -38,11 +38,15 @@ Actions artifacts or release attachments.
    `xcrun notarytool store-credentials <profile>`; never send passwords in chat
    or store them in scripts. The identity SHA-1 from
    `security find-identity -v -p codesigning` is an identifier, not a secret.
-4. Finalize with an output directory that does not exist:
+4. Finalize with an output directory that does not exist. If the updater private
+   key is available locally, export it through `TAURI_SIGNING_PRIVATE_KEY` or
+   `TAURI_SIGNING_PRIVATE_KEY_PATH`. If it is kept only as the repository
+   secret, explicitly select the draft-only Actions handoff:
 
    ```bash
    export MACOS_SIGNING_IDENTITY='<Developer ID Application identity SHA-1>'
    export MACOS_NOTARY_PROFILE='<local keychain profile name>'
+   export MACOS_UPDATER_SIGNING=github-actions # omit when signing locally
    bash scripts/release-macos.sh /path/to/YUME.app /path/to/new-release-output
    ```
 
@@ -60,18 +64,40 @@ Actions artifacts or release attachments.
    it never reuses an unverified prebuilt library. Requires access to GitHub
    and Apple's timestamp/notarization services. Notarization can take minutes.
 
-5. Upload **only** the three finalized download files to the existing draft:
+5. With a local updater key, upload the finalized downloads to the existing
+   draft. Packaging creates `YUME_<version>_aarch64.app.tar.gz` plus its Tauri
+   updater signature. The updater private key must match the public key embedded
+   in `tauri.conf.json` and must never be copied into the repository or output.
 
    ```bash
    bash scripts/publish-macos.sh /path/to/new-release-output/downloads 0.3.21
    ```
 
-   This rechecks the downloads and refuses published releases or overwriting
-   existing assets. Do not upload the output root, caches, notarization input,
-   logs, unsigned candidate or a DMG made directly by `tauri build --no-sign`.
-6. Check Windows installer/signature/`latest.json`, install the signed Mac App,
-   and perform [runtime checks](macos-runtime-checks.md). Only then publish the
-   draft. Check an older installed Mac can find and download the new installer.
+   This rechecks all downloads, reuses only byte-identical assets already present
+   in the draft, and merges `darwin-aarch64` into the Windows-generated
+   `latest.json`. A conflict or published release is rejected. Do not upload the
+   output root, caches, notarization input, logs, unsigned candidate or a DMG made
+   directly by `tauri build --no-sign`.
+
+   When `MACOS_UPDATER_SIGNING=github-actions` was used, upload only the three
+   locally reverified Apple payloads, then manually dispatch the pinned
+   `finalize macOS release` workflow for the same version:
+
+   ```bash
+   bash scripts/upload-macos-payloads.sh /path/to/new-release-output/downloads 0.4.4
+   gh workflow run finalize-macos-release.yml -f version=0.4.4
+   ```
+
+   That workflow refuses published releases, checks out the matching tag, uses
+   the existing repository updater secret to sign only the tarball, preserves
+   the Windows entries while merging `darwin-aarch64`, and uploads the final
+   signature and checksums. It never receives the Apple identity or notary
+   credentials. Download all five Mac assets afterward and run
+   `verify-macos-downloads.sh` locally before publishing.
+6. Check the Windows installer/signature and merged `latest.json`, then perform
+   [runtime checks](macos-runtime-checks.md). Before publishing, prove an older
+   auto-update-capable, signed and notarized Mac build completes one click from
+   check through download, installation and restart in an isolated location.
 
 ## Failures and recovery
 

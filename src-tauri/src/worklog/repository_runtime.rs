@@ -17,8 +17,22 @@ pub struct ClaimedRun {
     pub sources: Vec<SourceSnapshot>,
 }
 impl Repository {
+    pub fn has_running_run(&self) -> WorklogResult<bool> {
+        self.store.with_connection(|db| {
+            db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM report_runs WHERE state='running')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+        })
+    }
+
     pub fn claim_run(&self, now: DateTime<Utc>) -> WorklogResult<Option<ClaimedRun>> {
         self.store.with_transaction(|tx| {
+            if crate::updater::installation_in_progress() {
+                return Ok(None);
+            }
             let stamp = now.to_rfc3339();
             tx.execute("UPDATE report_runs SET state='failed',error_code='ATTEMPTS_EXHAUSTED',lease_until=NULL WHERE state='running' AND lease_until<=?1 AND attempt>=max_attempt",[&stamp])?;
             let candidate = tx.query_row("SELECT id,attempt,kind,period_start,period_end,model_id,base_report_revision,source_snapshot,state,max_attempt FROM report_runs WHERE state='queued' OR (state='retry_wait' AND next_retry_at<=?1) OR (state='running' AND lease_until<=?1 AND attempt<max_attempt) ORDER BY created_at,id LIMIT 1",[&stamp],|row|Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?,row.get::<_,String>(4)?,row.get::<_,String>(5)?,row.get::<_,Option<i64>>(6)?,row.get::<_,String>(7)?,row.get::<_,String>(8)?,row.get::<_,i64>(9)?))).optional()?;

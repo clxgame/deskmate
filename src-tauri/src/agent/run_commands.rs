@@ -26,12 +26,17 @@ pub(crate) async fn agent_run_start(
     tauri::async_runtime::spawn_blocking(move || {
         let run_id = format!("msg_agent_{}", uuid::Uuid::new_v4().simple());
         let state = app.state::<AgentRunState>();
+        let operation = state.lock_operation()?;
+        if crate::updater::installation_in_progress() {
+            return Err("agent_update_installing".to_owned());
+        }
         let target = super::continuation::start_target(
             &request,
             &app.state::<crate::history::HistoryState>(),
             &state,
         )?;
         state.begin(&run_id, &target.workspace, &request.input)?;
+        drop(operation);
         let workspace = state
             .read()?
             .active

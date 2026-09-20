@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { cp, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { mergeMacUpdater } from "./merge-updater-manifest";
 
 const root = resolve(import.meta.dir, "..");
 const run = async (args: string[]) => {
@@ -18,6 +19,49 @@ test("CI stores unsigned Mac candidates only in Actions, never in Releases", asy
   expect(mac).toContain("actions/upload-artifact@");
   expect(mac).toContain("YUME.unsigned.app.zip");
   expect(mac).not.toMatch(/gh release upload|tauri-apps\/tauri-action|scripts\/package-macos.sh/);
+});
+
+test("Mac finalizer uses the repository updater key and can only modify a draft", async () => {
+  const workflow = await readFile(
+    join(root, ".github/workflows/finalize-macos-release.yml"), "utf8",
+  );
+  expect(workflow).toContain("workflow_dispatch:");
+  expect(workflow).toContain("TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}");
+  expect(workflow).toContain('isDraft --jq .isDraft)\" = true');
+  expect(workflow).toContain("scripts/merge-updater-manifest.ts");
+  expect(workflow).not.toMatch(/MACOS_SIGNING_IDENTITY|MACOS_NOTARY_PROFILE|notarytool/);
+});
+
+test("CI Mac checks use the deterministic updater/release suite", async () => {
+  const workflow = await readFile(join(root, ".github/workflows/release.yml"), "utf8");
+  expect(workflow).toContain("bun test scripts/macos-release.test.ts");
+  expect(workflow).not.toMatch(/^\s*bun test\s*$/m);
+});
+
+test("Mac updater metadata is merged without losing signed Windows targets", () => {
+  const windows = {
+    version: "0.4.4",
+    notes: "release",
+    platforms: {
+      "windows-x86_64": { signature: "windows-signature", url: "https://example.test/yume.exe" },
+      "windows-x86_64-nsis": { signature: "windows-signature", url: "https://example.test/yume.exe" },
+    },
+  };
+  const merged = mergeMacUpdater(windows, "0.4.4", "clxgame/deskmate", "mac-signature\n");
+  expect(merged.platforms["windows-x86_64"]).toEqual(windows.platforms["windows-x86_64"]);
+  expect(merged.platforms["darwin-aarch64"]).toEqual({
+    signature: "mac-signature",
+    url: "https://github.com/clxgame/deskmate/releases/download/v0.4.4/YUME_0.4.4_aarch64.app.tar.gz",
+  });
+});
+
+test("Mac updater metadata refuses mismatched releases and unexpected platforms", () => {
+  expect(() => mergeMacUpdater({ version: "0.4.3", platforms: {} },
+    "0.4.4", "clxgame/deskmate", "sig")).toThrow();
+  expect(() => mergeMacUpdater({
+    version: "0.4.4",
+    platforms: { "darwin-aarch64": { signature: "old", url: "https://example.test/old" } },
+  }, "0.4.4", "clxgame/deskmate", "sig")).toThrow();
 });
 
 describe.skipIf(process.platform !== "darwin")("macOS release fail-closed guards", () => {

@@ -1,26 +1,20 @@
 #!/usr/bin/env bash
-# Attach only locally verified assets to an existing, unpublished draft.
+# Upload locally Developer-ID-signed and notarized payloads to an unpublished draft.
 set -euo pipefail
-directory="${1:?Usage: publish-macos.sh downloads-directory version [owner/repository]}"
+directory="${1:?Usage: upload-macos-payloads.sh downloads-directory version [owner/repository]}"
 version="${2:?Missing version}"
 repo="${3:-clxgame/deskmate}"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
 [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || exit 1
 scripts=$(cd "$(dirname "$0")" && pwd)
-bash "$scripts/verify-macos-downloads.sh" "$directory" "$version"
+bash "$scripts/verify-macos-payloads.sh" "$directory" "$version"
 test "$(gh release view "v$version" --repo "$repo" --json isDraft --jq .isDraft)" = true || {
   echo 'Refusing to modify a published release' >&2; exit 1;
 }
-work=$(mktemp -d "${TMPDIR:-/tmp}/yume-publish-macos.XXXXXX")
-trap 'rm -rf "$work"' EXIT
-mkdir "$work/existing"
-gh release download "v$version" --repo "$repo" --pattern latest.json --dir "$work/existing"
 assets=(
   "$directory/YUME_${version}_aarch64.dmg"
   "$directory/YUME_${version}_aarch64.app.zip"
   "$directory/YUME_${version}_aarch64.app.tar.gz"
-  "$directory/YUME_${version}_aarch64.app.tar.gz.sig"
-  "$directory/SHA256SUMS-macos.txt"
 )
 for asset in "${assets[@]}"; do
   name=$(basename "$asset")
@@ -33,12 +27,4 @@ for asset in "${assets[@]}"; do
     gh release upload "v$version" --repo "$repo" "$asset"
   fi
 done
-mkdir "$work/final"
-"$scripts/merge-updater-manifest.ts" \
-  "$work/existing/latest.json" "$work/final/latest.json" "$version" "$repo" \
-  "$directory/YUME_${version}_aarch64.app.tar.gz.sig"
-gh release upload "v$version" --repo "$repo" --clobber "$work/final/latest.json"
-mkdir "$work/remote"
-gh release download "v$version" --repo "$repo" --pattern latest.json --dir "$work/remote"
-cmp "$work/final/latest.json" "$work/remote/latest.json"
-echo 'Verified macOS assets and merged cross-platform updater manifest uploaded to draft.'
+echo 'Verified macOS payloads uploaded to draft; run the macOS updater finalizer before publishing.'

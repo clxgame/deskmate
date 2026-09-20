@@ -1416,7 +1416,8 @@ pub fn run() {
             memory::commands::memory_unlink_task,
             memory::commands::memory_unlink_deleted_task,
             updater::update_app,
-            updater::open_update_download
+            updater::update_status,
+            updater::cancel_update
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -1502,6 +1503,9 @@ pub fn run() {
             agent::start_collector(handle.clone());
             worklog::runner_runtime::start(handle.clone());
             pet_recovery::start(handle.clone())?;
+            // Only remove the pre-update backup after the new process has
+            // completed its normal initialization path.
+            updater::confirm_installed_update(&handle);
             Ok(())
         })
         .build(tauri::generate_context!())

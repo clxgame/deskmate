@@ -12,7 +12,10 @@ export function updateErrorMessage(t: Dict, error: unknown): string {
     case "rate_limited": return t.updateRateLimited;
     case "invalid_manifest": return t.updateManifestInvalid;
     case "invalid_signature": return t.updateSignatureInvalid;
-    case "open_failed": return t.updateOpenFailed;
+    case "unsafe_install": return t.updateUnsafeInstall;
+    case "permission_denied": return t.updatePermissionDenied;
+    case "restore_failed": return t.updateRestoreFailed;
+    case "canceled": return t.updateCanceled;
     default: return t.updateError;
   }
 }

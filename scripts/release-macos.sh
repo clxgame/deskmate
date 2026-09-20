@@ -32,5 +32,10 @@ bash "$scripts/notarize-macos.sh" "$output/notarization.zip" "$app" "$output/log
 perl -e 'alarm shift; exec @ARGV or die $!;' 120 "$app/Contents/Resources/resources/opencode/opencode" --version
 perl -e 'alarm shift; exec @ARGV or die $!;' 120 "$app/Contents/Resources/resources/ncmdump/ncmdump" --help
 bash "$scripts/package-macos.sh" "$app" "$output/downloads"
-echo "Verified downloads: $output/downloads"
+version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")
+if [[ -s "$output/downloads/YUME_${version}_aarch64.app.tar.gz.sig" ]]; then
+  echo "Verified finalized downloads: $output/downloads"
+else
+  echo "Verified draft payloads awaiting GitHub updater signing: $output/downloads"
+fi
 echo "Installable app: $app"

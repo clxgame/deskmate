@@ -1,77 +1,47 @@
 export type UpdateState =
   | { readonly kind: "idle" }
   | { readonly kind: "checking" }
-  | {
-      readonly kind: "available";
-      readonly version: string;
-      readonly downloadUrl: string;
-      readonly opening: boolean;
-      readonly openError: string | null;
-    }
-  | { readonly kind: "downloading"; readonly percent: number | null }
-  | { readonly kind: "installing" }
+  | { readonly kind: "downloading"; readonly version: string; readonly percent: number | null }
+  | { readonly kind: "verifying"; readonly version: string }
+  | { readonly kind: "waitingForIdle"; readonly version: string; readonly canceling: boolean }
+  | { readonly kind: "installing"; readonly version: string }
+  | { readonly kind: "restarting"; readonly version: string }
   | { readonly kind: "uptodate" }
   | { readonly kind: "error"; readonly message: string };
 
 export type UpdateAction =
+  | { readonly type: "idle" }
   | { readonly type: "check" }
-  | { readonly type: "available"; readonly version: string; readonly downloadUrl: string }
-  | { readonly type: "openDownload" }
-  | { readonly type: "downloadOpened" }
-  | { readonly type: "downloadFailed"; readonly message: string }
-  | { readonly type: "downloadStarted"; readonly contentLength: number | null }
-  | {
-      readonly type: "downloadProgress";
-      readonly downloaded: number;
-      readonly contentLength: number | null;
-    }
-  | { readonly type: "install" }
+  | { readonly type: "download"; readonly version: string;
+      readonly downloaded: number; readonly contentLength: number | null }
+  | { readonly type: "verify"; readonly version: string }
+  | { readonly type: "wait"; readonly version: string }
+  | { readonly type: "cancelWait" }
+  | { readonly type: "install"; readonly version: string }
+  | { readonly type: "restart"; readonly version: string }
   | { readonly type: "uptodate" }
   | { readonly type: "fail"; readonly message: string };
 
 export const initialUpdateState: UpdateState = { kind: "idle" };
 
-export function reduceUpdateState(
-  state: UpdateState,
-  action: UpdateAction,
-): UpdateState {
+export function reduceUpdateState(state: UpdateState, action: UpdateAction): UpdateState {
   switch (action.type) {
-    case "check":
-      return { kind: "checking" };
-    case "available":
-      return { kind: "available", version: action.version, downloadUrl: action.downloadUrl,
-        opening: false, openError: null };
-    case "openDownload":
-      return state.kind === "available" ? { ...state, opening: true, openError: null } : state;
-    case "downloadOpened":
-      return state.kind === "available" ? { ...state, opening: false } : state;
-    case "downloadFailed":
-      return state.kind === "available"
-        ? { ...state, opening: false, openError: action.message } : state;
-    case "downloadStarted":
-      return {
-        kind: "downloading",
-        percent: action.contentLength === null ? null : 0,
-      };
-    case "downloadProgress": {
-      const percent =
-        action.contentLength === null || action.contentLength <= 0
-          ? null
-          : Math.min(
-              100,
-              Math.max(
-                0,
-                Math.round((action.downloaded / action.contentLength) * 100),
-              ),
-            );
-      return { kind: "downloading", percent };
+    case "idle": return { kind: "idle" };
+    case "check": return { kind: "checking" };
+    case "download": {
+      const percent = action.contentLength === null || action.contentLength <= 0
+        ? null
+        : Math.min(100, Math.max(0, Math.round((action.downloaded / action.contentLength) * 100)));
+      return { kind: "downloading", version: action.version, percent };
     }
-    case "install":
-      return { kind: "installing" };
-    case "uptodate":
-      return { kind: "uptodate" };
-    case "fail":
-      return { kind: "error", message: action.message };
+    case "verify": return { kind: "verifying", version: action.version };
+    case "wait": return { kind: "waitingForIdle", version: action.version, canceling: false };
+    case "cancelWait":
+      return state.kind === "waitingForIdle" ? { ...state, canceling: true } : state;
+    case "install": return { kind: "installing", version: action.version };
+    case "restart": return { kind: "restarting", version: action.version };
+    case "uptodate": return { kind: "uptodate" };
+    case "fail": return { kind: "error", message: action.message };
     default: {
       const exhaustive: never = action;
       return exhaustive;

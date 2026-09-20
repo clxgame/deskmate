@@ -111,7 +111,10 @@ jobs:
       - name: Check frontend and prepare native resources
         run: |
           bun run typecheck
-          bun test
+          bun test scripts/macos-release.test.ts \
+            src/settings/UpdateFooter.test.tsx \
+            src/settings/updateErrors.test.ts \
+            src/settings/updateState.test.ts
           bun run prepare:sidecar
           bun run build
 

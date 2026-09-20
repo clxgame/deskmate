@@ -1,4 +1,4 @@
-import { ContractError, jsonObject, type JsonObject } from "./types";
+import { ContractError, jsonObject, stringField, type JsonObject } from "./types";
 import { request as httpRequest } from "node:http";
 
 export type Client = {
@@ -20,6 +20,15 @@ type DiscoveryOptions = {
 export type ToolDiscovery = {
   readonly ids: readonly string[];
   readonly attempts: number;
+};
+
+export type TextMessage = {
+  readonly messageId: string;
+  readonly partId: string;
+  readonly role: "user" | "assistant";
+  readonly text: string;
+  readonly created: number;
+  readonly parentId?: string;
 };
 
 export async function request(client: Client, path: string, input: Request = {}): Promise<unknown> {
@@ -131,6 +140,56 @@ export async function messages(client: Client, sessionId: string, limit?: number
   const value = await request(client, `/session/${sessionId}/message${query}`);
   if (!Array.isArray(value)) throw new ContractError("INVALID_WIRE", "messages is not an array");
   return value.map((item) => jsonObject(item, "message envelope"));
+}
+
+function textMessage(envelope: JsonObject, part: JsonObject): TextMessage | undefined {
+  const info = jsonObject(envelope.info, "message info");
+  if (info.role !== "user" && info.role !== "assistant") return undefined;
+  if (part.type !== "text") return undefined;
+  const time = jsonObject(info.time, "message time");
+  if (typeof time.created !== "number" || typeof part.text !== "string") {
+    throw new ContractError("INVALID_WIRE", "text message metadata missing");
+  }
+  const parentId = info.parentID;
+  if (parentId !== undefined && typeof parentId !== "string") {
+    throw new ContractError("INVALID_WIRE", "parentID is not a string");
+  }
+  return {
+    messageId: stringField(info, "id"),
+    partId: stringField(part, "id"),
+    role: info.role,
+    text: part.text,
+    created: time.created,
+    ...(parentId === undefined ? {} : { parentId }),
+  };
+}
+
+export async function readTextMessages(
+  client: Client,
+  sessionId: string,
+  timeoutMs?: number,
+): Promise<readonly TextMessage[]> {
+  const unique = new Map<string, TextMessage>();
+  const value = await request(client, `/session/${sessionId}/message`, { timeoutMs });
+  if (!Array.isArray(value)) throw new ContractError("INVALID_WIRE", "messages is not an array");
+  for (const item of value) {
+    const envelope = jsonObject(item, "message envelope");
+    if (!Array.isArray(envelope.parts)) throw new ContractError("INVALID_WIRE", "message parts is not an array");
+    for (const value of envelope.parts) {
+      const message = textMessage(envelope, jsonObject(value, "message part"));
+      if (message === undefined) continue;
+      const key = `${message.messageId}\0${message.partId}`;
+      const existing = unique.get(key);
+      if (existing !== undefined && JSON.stringify(existing) !== JSON.stringify(message)) {
+        throw new ContractError("INVALID_WIRE", `conflicting duplicate ${message.messageId}/${message.partId}`);
+      }
+      unique.set(key, message);
+    }
+  }
+  return [...unique.values()].sort((left, right) =>
+    left.created - right.created
+    || left.messageId.localeCompare(right.messageId)
+    || left.partId.localeCompare(right.partId));
 }
 
 export async function waitForTerminal(client: Client, sessionId: string, parentId: string): Promise<JsonObject> {

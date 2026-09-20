@@ -24,6 +24,10 @@ pub(crate) struct RunRecord {
     pub(crate) ended_at: Option<String>,
     pub(crate) outcome: Option<RunOutcome>,
     pub(crate) error_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) pending_outcome: Option<RunOutcome>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) pending_error_summary: Option<String>,
     #[serde(default)]
     pub(crate) message_ids: Vec<String>,
     #[serde(default)]
@@ -45,6 +49,8 @@ pub(crate) struct RunListing {
 #[derive(Clone, Debug)]
 pub(crate) struct NativePart {
     pub(crate) id: String,
+    pub(crate) kind: Option<String>,
+    pub(crate) text: Option<String>,
     pub(crate) call_id: Option<String>,
     pub(crate) tool: Option<String>,
     pub(crate) state: Option<NativeToolState>,
@@ -61,6 +67,8 @@ pub(crate) struct NativeToolState {
 #[derive(Clone, Debug)]
 pub(crate) struct NativeMessage {
     pub(crate) id: String,
+    pub(crate) role: Option<String>,
+    pub(crate) created: Option<u64>,
     pub(crate) parent_id: Option<String>,
     pub(crate) completed: bool,
     pub(crate) finish: Option<String>,

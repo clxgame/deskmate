@@ -80,6 +80,8 @@ impl AgentRunState {
             ended_at: None,
             outcome: None,
             error_summary: None,
+            pending_outcome: None,
+            pending_error_summary: None,
             message_ids: Vec::new(),
             part_ids: Vec::new(),
             call_ids: Vec::new(),
@@ -116,10 +118,7 @@ impl AgentRunState {
         self.update_active(run_id, |record| record.initial_input = None)
     }
 
-    pub(crate) fn fail_active(&self, run_id: &str, summary: &str) -> Result<(), String> {
-        self.finish(run_id, RunOutcome::Failed, Some(summary.into()))
-    }
-
+    #[cfg(test)]
     pub(crate) fn cancel_with(
         &self,
         run_id: &str,
@@ -206,6 +205,30 @@ impl AgentRunState {
         Ok(())
     }
 
+    pub(crate) fn request_finish(
+        &self,
+        run_id: &str,
+        outcome: RunOutcome,
+        error: Option<String>,
+    ) -> Result<(), String> {
+        self.update_active(run_id, |record| {
+            record.pending_outcome = Some(outcome);
+            record.pending_error_summary = error;
+        })
+    }
+
+    pub(super) fn set_collection_error(
+        &self,
+        run_id: &str,
+        error: Option<&str>,
+    ) -> Result<(), String> {
+        let next = error.map(str::to_owned);
+        if self.active_record(run_id)?.error_summary == next {
+            return Ok(());
+        }
+        self.update_active(run_id, |record| record.error_summary = next)
+    }
+
     fn update_active(
         &self,
         run_id: &str,
@@ -219,29 +242,5 @@ impl AgentRunState {
             .ok_or_else(|| "agent_run_unknown".to_owned())?;
         update(record);
         self.store.write(record)
-    }
-
-    fn finish(
-        &self,
-        run_id: &str,
-        outcome: RunOutcome,
-        error: Option<String>,
-    ) -> Result<(), String> {
-        let mut data = self.data.lock().map_err(|_| "agent_state_unavailable")?;
-        let mut record = data
-            .active
-            .take()
-            .filter(|record| record.run_id == run_id)
-            .ok_or_else(|| "agent_run_unknown".to_owned())?;
-        record.initial_input = None;
-        record.outcome = Some(outcome);
-        record.error_summary = error;
-        record.ended_at = Some(chrono::Utc::now().to_rfc3339());
-        if let Err(error) = self.store.write(&record) {
-            data.active = Some(record);
-            return Err(error);
-        }
-        data.recent.insert(0, record);
-        Ok(())
     }
 }

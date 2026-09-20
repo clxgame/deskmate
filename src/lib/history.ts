@@ -5,6 +5,8 @@ export interface HistoryMessage {
   role: "user" | "assistant";
   text: string;
   time: number;
+  messageId?: string;
+  partId?: string;
 }
 
 /** A full chat session record. */
@@ -14,6 +16,16 @@ export interface HistorySession {
   created: number;
   updated: number;
   messages: HistoryMessage[];
+  originRunId?: string;
+  deleted?: boolean;
+  agentDetails?: AgentHistoryDetails;
+}
+
+export interface AgentHistoryDetails {
+  workspacePath: string;
+  status: "active" | "completed" | "failed" | "cancelled" | "interrupted";
+  source: "interactive" | "scheduled";
+  availability: "ready" | "retryable" | "missing" | "workspace_missing";
 }
 
 /** Lightweight listing entry. */
@@ -23,6 +35,7 @@ export interface HistorySummary {
   created: number;
   updated: number;
   count: number;
+  agentDetails?: AgentHistoryDetails;
 }
 
 export function historyList(): Promise<HistorySummary[]> {

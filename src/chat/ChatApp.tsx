@@ -1,7 +1,8 @@
-// allow: SIZE_OK — legacy chat shell keeps the single render boundary; this fix only adds the deterministic 小著 reply adapter.
+// allow: SIZE_OK — legacy chat composition root; Agent history behavior lives in useAgentHistoryView and this file only wires existing chat primitives.
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ChangeEvent,
@@ -57,8 +58,8 @@ import { AppIcon } from "../ui/AppIcon";
 import {
   historyDelete,
   historyList,
-  historyLoad,
   historySave,
+  type HistorySession,
   type HistorySummary,
 } from "../lib/history";
 import {
@@ -77,6 +78,7 @@ import { webSearchSites } from "./webSearchSites";
 import { CcSwitchSetupCard } from "./CcSwitchSetupCard";
 import { WorkspaceTask } from "./WorkspaceTask";
 import { useAgentRun } from "./useAgentRun";
+import { useAgentHistoryView } from "./useAgentHistoryView";
 import {
   CCSWITCH_PREPARE_OPENCODE_PROVIDER_TOOL,
   createCcSwitchToolResultTracker,
@@ -186,6 +188,14 @@ function preserveWebSearchActivity(activity: ToolActivity | undefined): ToolActi
   return typeof activity === "object" ? activity : undefined;
 }
 
+function historyChatMessages(session: HistorySession): ChatMessage[] {
+  return session.messages.map((message, index) => ({
+    id: message.partId ?? message.messageId ?? `history-${index}`,
+    role: message.role,
+    text: message.text,
+  }));
+}
+
 export default function ChatApp() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -218,6 +228,17 @@ export default function ChatApp() {
   const sessionRef = useRef<string | null>(null);
   const permissions = useToolPermissions(currentSessionId, status === "busy");
   const agent = useAgentRun(lang);
+  const {
+    viewedId: agentHistoryId,
+    archive: agentHistoryArchive,
+    open: openHistory,
+    adopt: adoptAgentHistory,
+    leave: leaveAgentHistory,
+  } = useAgentHistoryView(agent.projection.active?.sessionId ?? null);
+  const agentHistoryActiveRef = useRef(agentHistoryId !== null);
+  useLayoutEffect(() => {
+    agentHistoryActiveRef.current = agentHistoryId !== null;
+  }, [agentHistoryId]);
   const [petActivity] = useState(() => createChatPetActivity(broadcastPetActivity));
   const personaRef = useRef<PersonaData | null>(null);
   const activePersonaIdRef = useRef(DEFAULT_PERSONA_ID);
@@ -670,6 +691,7 @@ export default function ChatApp() {
   }, [loadPersona, resetSession]);
 
   const handleEvent = useCallback((e: OpenCodeEvent) => {
+    if (agentHistoryActiveRef.current) return;
     const props = e.properties ?? {};
 
     switch (e.type) {
@@ -796,10 +818,11 @@ export default function ChatApp() {
 
   // Persist history when a turn completes (status ready) and messages exist.
   useEffect(() => {
-    if (status !== "ready" || messages.length === 0) return;
+    if (agentHistoryId || status !== "ready" || messages.length === 0) return;
     const sessionID = sessionRef.current;
     if (!sessionID) return;
     const timer = setTimeout(() => {
+      if (agentHistoryActiveRef.current) return;
       const msgs = messagesRef.current;
       const firstUser = msgs.find((m) => m.role === "user");
       const title = firstUser
@@ -817,7 +840,11 @@ export default function ChatApp() {
       }).catch((e) => console.error("history save failed", e));
     }, 300);
     return () => clearTimeout(timer);
-  }, [messages, status]);
+  }, [agentHistoryId, messages, status]);
+
+  useEffect(() => {
+    if (agentHistoryArchive) setMessages(historyChatMessages(agentHistoryArchive));
+  }, [agentHistoryArchive]);
 
   const send = async () => {
     const text = input.trim();
@@ -831,11 +858,17 @@ export default function ChatApp() {
       setMemoryNotice(t.ccSwitchSecretRedirect);
       return;
     }
-    if (agent.workspace) {
+    if (agent.workspace || agentHistoryId || agent.busy) {
       if (!text || agent.busy) return;
-      if (await agent.start(text)) {
+      if (chatAttachments.items.length > 0) {
+        setAttachmentError(t.agentAttachmentsUnsupported);
+        return;
+      }
+      const run = await agent.start(text, agentHistoryId ?? undefined);
+      if (run) {
         setInput("");
         setAttachmentError(null);
+        if (run.sessionId) await adoptAgentHistory(run.sessionId);
       }
       return;
     }
@@ -1177,8 +1210,17 @@ export default function ChatApp() {
     fixedReplySequenceRef.current += 1;
     clearReplyPacing();
     setIsPersonaTyping(false);
-    const rec = await historyLoad(id).catch(() => null);
-    if (!rec) return;
+    const opened = await openHistory(id);
+    if (opened.kind === "missing" || opened.kind === "stale") return;
+    if (opened.kind === "agent") {
+      agent.clearSelection();
+      setView("chat");
+      setStatus("ready");
+      broadcastMood("idle");
+      return;
+    }
+    agent.clearSelection();
+    const rec = opened.session;
     const previousSession = sessionRef.current;
     if (previousSession !== null && previousSession !== id) {
       await cleanupAttachmentSession(previousSession);
@@ -1198,11 +1240,13 @@ export default function ChatApp() {
     setView("chat");
     setStatus("ready");
     broadcastMood("idle");
-  }, [cleanupAttachmentSession, resetAttachmentSession, petActivity]);
+  }, [agent, cleanupAttachmentSession, openHistory, resetAttachmentSession, petActivity]);
 
   /** Start a fresh session. */
   const newChat = useCallback(async () => {
     try {
+      leaveAgentHistory();
+      agent.clearSelection();
       await resetSession();
     } catch (error: unknown) {
       console.error(
@@ -1211,7 +1255,7 @@ export default function ChatApp() {
       setStatus("error");
       broadcastMood("error");
     }
-  }, [resetSession]);
+  }, [agent, leaveAgentHistory, resetSession]);
 
   const closeChat = async (): Promise<void> => {
     try {
@@ -1483,7 +1527,7 @@ export default function ChatApp() {
             </div>
           )}
 
-          <WorkspaceTask language={lang} agent={agent} />
+          <WorkspaceTask language={lang} agent={agent} historyDetails={agentHistoryArchive?.agentDetails} onWorkspaceSelected={leaveAgentHistory} />
           <ToolApprovalCards requests={permissions.requests} error={permissions.error} onReply={permissions.reply} t={t} />
           <footer className="chat-input-row">
             <input
@@ -1546,7 +1590,7 @@ export default function ChatApp() {
                 className="chat-send"
                 onClick={() => void send()}
                 disabled={
-                  agent.workspace
+                  agent.workspace || agentHistoryId || agent.busy
                     ? agent.busy || !input.trim()
                     : status !== "ready" ||
                       attachmentBusy ||
@@ -1642,7 +1686,7 @@ function upsertAssistant(
 
 // ------------------------------------------------------------------- 历史
 
-function HistoryPanel({
+export function HistoryPanel({
   t,
   onContinue,
   onNewChat,
@@ -1655,6 +1699,7 @@ function HistoryPanel({
 }) {
   const [sessions, setSessions] = useState<HistorySummary[] | null>(null);
   const [failed, setFailed] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   /**
    * Deleting a conversation offers to drop the memories that came only from it,
    * enabled by default. Memories with other sources, or that the user saved
@@ -1677,7 +1722,17 @@ function HistoryPanel({
   }, [refresh]);
 
   const remove = async (id: string) => {
-    await historyDelete(id).catch(() => {});
+    setDeleteError(null);
+    try {
+      await historyDelete(id);
+    } catch (error) {
+      setDeleteError(
+        String(error).includes("history_agent_running")
+          ? t.historyDeleteAgentRunning
+          : t.historyDeleteFailed,
+      );
+      return;
+    }
     await onDelete(id).catch(() => {});
     if (deleteMemories) {
       // A memory failure must not leave the conversation half-deleted.
@@ -1697,6 +1752,9 @@ function HistoryPanel({
       </div>
       {failed && (
         <p className="history-empty history-error">{t.historyLoadFailed}</p>
+      )}
+      {deleteError && (
+        <p className="history-delete-error" role="alert">{deleteError}</p>
       )}
       {sessions !== null && sessions.length > 0 && (
         <label className="history-memory-option">
@@ -1726,6 +1784,11 @@ function HistoryPanel({
                 <span className="history-item-meta">
                   {formatTime(s.updated)} · {t.historyCount(s.count)}
                 </span>
+                {s.agentDetails && (
+                  <span className="history-item-meta history-agent-meta">
+                    {s.agentDetails.workspacePath} · {s.agentDetails.status}
+                  </span>
+                )}
               </button>
               <button
                 className="history-del"

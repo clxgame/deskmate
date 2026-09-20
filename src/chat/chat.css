@@ -1073,6 +1073,16 @@
   opacity: 0.55;
 }
 
+.history-agent-meta {
+  overflow-wrap: anywhere;
+}
+
+.history-delete-error {
+  color: var(--danger);
+  font-size: 12px;
+  margin: 8px 14px 0;
+}
+
 .history-del {
   background: none;
   border: none;
@@ -1181,9 +1191,9 @@
 
 .workspace-task-path span,
 .workspace-task-status span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
   min-width: 0;
   flex: 1;
 }

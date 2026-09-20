@@ -18,6 +18,7 @@ fn request(
         permission: permission.into(),
         patterns: patterns.iter().map(|value| (*value).into()).collect(),
         metadata,
+        tool: None,
     }
 }
 

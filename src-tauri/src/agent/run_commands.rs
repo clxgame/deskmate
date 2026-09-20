@@ -1,7 +1,7 @@
 use super::{
     lifecycle::AgentRunState,
     permissions::AgentPermissionState,
-    record_store::{RunListing, RunRecord},
+    record_store::{RunListing, RunOutcome, RunRecord},
 };
 use serde::Deserialize;
 use tauri::Manager;
@@ -9,8 +9,9 @@ use tauri::Manager;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AgentStartInput {
-    workspace_path: std::path::PathBuf,
-    input: String,
+    pub(super) workspace_path: Option<std::path::PathBuf>,
+    pub(super) history_id: Option<String>,
+    pub(super) input: String,
 }
 
 pub(super) use super::start_context::{current_start_settings, lifecycle_client, StartSettings};
@@ -25,7 +26,12 @@ pub(crate) async fn agent_run_start(
     tauri::async_runtime::spawn_blocking(move || {
         let run_id = format!("msg_agent_{}", uuid::Uuid::new_v4().simple());
         let state = app.state::<AgentRunState>();
-        state.begin(&run_id, &request.workspace_path, &request.input)?;
+        let target = super::continuation::start_target(
+            &request,
+            &app.state::<crate::history::HistoryState>(),
+            &state,
+        )?;
+        state.begin(&run_id, &target.workspace, &request.input)?;
         let workspace = state
             .read()?
             .active
@@ -75,16 +81,30 @@ pub(crate) async fn agent_run_start(
             }
         };
         let client = lifecycle_client(&app, &settings, &workspace);
-        if !client.wait_ready(std::time::Duration::from_secs(10)) {
+        if !client.wait_ready(super::opencode::READY_TIMEOUT) {
             let _ = state.fail_active(&run_id, "agent_sidecar_unavailable");
             return Err("agent_sidecar_unavailable".to_owned());
         }
-        let session = match client.create_session(&workspace) {
-            Ok(session) => session,
-            Err(error) => {
-                let _ = state.fail_active(&run_id, &error);
-                return Err(error);
-            }
+        let session = match target.session_id {
+            Some(session) => match client.snapshot(&session) {
+                Ok(_) => session,
+                Err(error) => {
+                    let reason = if error == "agent_http_404" {
+                        "agent_history_session_missing".to_owned()
+                    } else {
+                        error
+                    };
+                    let _ = state.fail_active_preserving_input(&run_id, &reason);
+                    return Err(reason);
+                }
+            },
+            None => match client.create_session(&workspace) {
+                Ok(session) => session,
+                Err(error) => {
+                    let _ = state.fail_active(&run_id, &error);
+                    return Err(error);
+                }
+            },
         };
         if let Err(error) = state.bind_session_with(&run_id, &session, || {
             app.state::<AgentPermissionState>()
@@ -93,6 +113,22 @@ pub(crate) async fn agent_run_start(
             let _ = app.state::<AgentPermissionState>().cancel_run(&run_id);
             let _ = state.fail_active(&run_id, &error);
             return Err(error);
+        }
+        let created = u64::try_from(chrono::Utc::now().timestamp_millis())
+            .map_err(|_| "history_time_invalid".to_owned())?;
+        if crate::history::save_agent_input(
+            &app,
+            &app.state::<crate::history::HistoryState>(),
+            crate::history::AgentHistoryInput {
+                session_id: &session,
+                run_id: &run_id,
+                text: &request.input,
+                created,
+            },
+        )
+        .is_err()
+        {
+            return fail_history_start(&state, &app.state::<AgentPermissionState>(), &run_id);
         }
         if let Err(error) = client.prompt(&session, &run_id, &system, &request.input) {
             let _ = app.state::<AgentPermissionState>().cancel_run(&run_id);
@@ -109,115 +145,50 @@ pub(crate) async fn agent_run_start(
     .map_err(|_| "agent_worker_failed".to_owned())?
 }
 
-#[tauri::command]
-pub(crate) async fn agent_run_read(
-    app: tauri::AppHandle,
-    window: tauri::WebviewWindow,
-) -> Result<RunListing, String> {
-    crate::tool_permissions::runtime::require_chat(&window)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<AgentRunState>();
-        if !crate::sidecar_owned_running(&app)? {
-            if let Some(record) = state.read()?.active {
-                state.interrupt_active("sidecar_process_lost")?;
-                let _ = app
-                    .state::<AgentPermissionState>()
-                    .cancel_run(&record.run_id);
-            }
-            return state.read();
-        }
-        if let Some(record) = state.read()?.active {
-            if let Some(session) = record.session_id.clone() {
-                let settings = current_start_settings(&app)?;
-                let snapshot =
-                    lifecycle_client(&app, &settings, &record.workspace_path).snapshot(&session);
-                reconcile_read_snapshot(
-                    &state,
-                    &app.state::<AgentPermissionState>(),
-                    &record.run_id,
-                    snapshot,
-                )?;
-                if state.read()?.active.is_none() {
-                    let _ = app
-                        .state::<AgentPermissionState>()
-                        .cancel_run(&record.run_id);
-                }
-            }
-        }
-        state.read()
-    })
-    .await
-    .map_err(|_| "agent_worker_failed".to_owned())?
-}
-
-pub(super) fn reconcile_read_snapshot(
+pub(super) fn fail_history_start<T>(
     state: &AgentRunState,
     permissions: &AgentPermissionState,
     run_id: &str,
-    snapshot: Result<Vec<super::record_store::NativeMessage>, String>,
-) -> Result<(), String> {
-    match snapshot {
-        Ok(messages) => state.reconcile(run_id, &messages),
-        Err(error) => {
-            state.interrupt_active(&error)?;
-            let _ = permissions.cancel_run(run_id);
-            Ok(())
-        }
+) -> Result<T, String> {
+    let _ = permissions.cancel_run(run_id);
+    match state.fail_active_preserving_input(run_id, "history_storage_failed") {
+        Ok(()) => Err("history_storage_failed".to_owned()),
+        Err(error) => Err(error),
     }
 }
 
-pub(crate) fn recover_after_start(app: tauri::AppHandle) {
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<AgentRunState>();
-        let Ok(listing) = state.read() else {
-            return;
-        };
-        let Some(record) = listing.active else {
-            return;
-        };
-        let Some(session) = record.session_id.clone() else {
-            let _ = state.interrupt_active("submission_not_confirmed");
-            return;
-        };
-        let Ok(settings) = current_start_settings(&app) else {
-            return;
-        };
-        let client = lifecycle_client(&app, &settings, &record.workspace_path);
-        let recovered = client
-            .wait_ready(std::time::Duration::from_secs(10))
-            .then(|| client.snapshot(&session))
-            .transpose()
-            .and_then(|value| value.ok_or_else(|| "sidecar_not_ready".to_owned()));
-        match recovered {
-            Ok(messages) => {
-                let _ = state.reconcile(&record.run_id, &messages);
-            }
-            Err(error) => {
-                let _ = state.interrupt_active(&error);
-            }
-        }
-        if state
-            .read()
-            .ok()
-            .is_some_and(|listing| listing.active.is_none())
-        {
-            let _ = app
-                .state::<AgentPermissionState>()
-                .cancel_run(&record.run_id);
-        }
-    });
+#[tauri::command]
+pub(crate) async fn agent_run_read(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, AgentRunState>,
+) -> Result<RunListing, String> {
+    crate::tool_permissions::runtime::require_chat(&window)?;
+    state.read()
 }
 
 pub(crate) fn interrupt_owned_run(app: &tauri::AppHandle, reason: &str) {
     let state = app.state::<AgentRunState>();
-    let run_id = state
-        .read()
-        .ok()
-        .and_then(|listing| listing.active.map(|record| record.run_id));
-    if state.interrupt_active(reason).is_ok() {
-        if let Some(run_id) = run_id {
-            let _ = app.state::<AgentPermissionState>().cancel_run(&run_id);
-        }
+    let Some(record) = state.read().ok().and_then(|listing| listing.active) else {
+        return;
+    };
+    if reason == "app_exited" {
+        let _ = state.interrupt_active(reason);
+        let _ = app
+            .state::<AgentPermissionState>()
+            .cancel_run(&record.run_id);
+        return;
+    }
+    if state
+        .request_finish(
+            &record.run_id,
+            RunOutcome::Interrupted,
+            Some(reason.to_owned()),
+        )
+        .is_ok()
+    {
+        let _ = app
+            .state::<AgentPermissionState>()
+            .cancel_run(&record.run_id);
     }
 }
 
@@ -230,19 +201,44 @@ pub(crate) async fn agent_run_cancel(
     crate::tool_permissions::runtime::require_chat(&window)?;
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AgentRunState>();
-        let _operation = state.lock_operation()?;
-        let workspace = state
-            .read()?
-            .active
-            .filter(|record| record.run_id == run_id)
-            .ok_or_else(|| "agent_run_unknown".to_owned())?
-            .workspace_path;
-        state.cancel_with(&run_id, |session| {
-            let settings = current_start_settings(&app)?;
-            lifecycle_client(&app, &settings, &workspace).abort(session)
-        })?;
-        app.state::<AgentPermissionState>().cancel_run(&run_id)?;
-        Ok(())
+        let record = state.active_record(&run_id)?;
+        if record.initial_input.is_some() {
+            if let Some(session) = record.session_id.as_deref() {
+                let settings = current_start_settings(&app)?;
+                let aborted =
+                    lifecycle_client(&app, &settings, &record.workspace_path).abort(session)?;
+                if !aborted {
+                    state.set_collection_error(&run_id, Some("abort_not_confirmed"))?;
+                    return Err("agent_abort_unconfirmed".to_owned());
+                }
+            }
+            let _operation = state.lock_operation()?;
+            if state.matches_active(&record)? {
+                state.cancel_preparation(&run_id)?;
+                let _ = app.state::<AgentPermissionState>().cancel_run(&run_id);
+            }
+            return Ok(());
+        }
+
+        let session = record
+            .session_id
+            .as_deref()
+            .ok_or_else(|| "agent_session_unknown".to_owned())?;
+        let settings = current_start_settings(&app)?;
+        let aborted = lifecycle_client(&app, &settings, &record.workspace_path).abort(session)?;
+        if !aborted {
+            state.set_collection_error(&run_id, Some("abort_not_confirmed"))?;
+            return Err("agent_abort_unconfirmed".to_owned());
+        }
+        {
+            let _operation = state.lock_operation()?;
+            if !state.matches_active(&record)? {
+                return Ok(());
+            }
+            state.request_finish(&run_id, RunOutcome::Cancelled, None)?;
+            let _ = app.state::<AgentPermissionState>().cancel_run(&run_id);
+        }
+        super::collector::collect_active_run_once(&app, super::collector::CollectionMode::Live)
     })
     .await
     .map_err(|_| "agent_worker_failed".to_owned())?

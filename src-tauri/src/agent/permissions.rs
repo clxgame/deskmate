@@ -1,14 +1,10 @@
-use super::workspace::{PathIntent, WorkspaceRoot};
+use super::{
+    permission_policy::decision,
+    permission_provenance::{matches_current_tool, validate_request},
+    workspace::WorkspaceRoot,
+};
 use crate::{tool_permissions::runtime::PermissionRequest, worklog::bridge::safe_id};
-use serde::Deserialize;
 use std::{collections::HashMap, path::Path, sync::Mutex};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum AgentReply {
-    Once,
-    Reject,
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum PendingDecision {
@@ -31,6 +27,12 @@ struct OwnedRun {
 struct OwnedRequest {
     run_id: String,
     request: PermissionRequest,
+    detail: ApprovalDetail,
+}
+
+pub(super) struct WaitingPermission {
+    pub(super) request: PermissionRequest,
+    pub(super) detail: ApprovalDetail,
 }
 
 #[derive(Default)]
@@ -61,20 +63,29 @@ impl AgentPermissionState {
             .0
             .lock()
             .map_err(|_| "agent_permission_unavailable".to_owned())?;
-        data.pending.retain(|_, request| request.run_id != run_id);
+        let old_run_ids = data
+            .runs
+            .iter()
+            .filter(|(_, owned)| owned.session_id == session_id)
+            .map(|(owned_run_id, _)| owned_run_id.clone())
+            .collect::<Vec<_>>();
+        data.pending.retain(|_, request| {
+            request.run_id != run_id && !old_run_ids.contains(&request.run_id)
+        });
+        data.runs
+            .retain(|owned_run_id, _| !old_run_ids.contains(owned_run_id));
         data.blocked_sessions.insert(session_id.to_owned());
         data.runs.insert(run_id.to_owned(), run);
         Ok(())
     }
 
+    #[cfg(test)]
     pub(super) fn accept(
         &self,
         run_id: &str,
         request: PermissionRequest,
     ) -> Result<PendingDecision, String> {
-        if !safe_id(run_id) || !safe_id(&request.id) || !safe_id(&request.session_id) {
-            return Err("agent_invalid_id".into());
-        }
+        validate_request(run_id, &request)?;
         let mut data = self
             .0
             .lock()
@@ -86,11 +97,11 @@ impl AgentPermissionState {
         if run.session_id != request.session_id {
             return Err("agent_session_mismatch".into());
         }
-        let decision = decision(run, &request)?;
-        if matches!(decision, PendingDecision::Ask(_)) {
+        let result = decision(&run.workspace, &request)?;
+        if let PendingDecision::Ask(detail) = &result {
             if let Some(existing) = data.pending.get(&request.id) {
                 return if existing.run_id == run_id {
-                    Ok(decision)
+                    Ok(result)
                 } else {
                     Err("agent_permission_owner_mismatch".into())
                 };
@@ -100,10 +111,81 @@ impl AgentPermissionState {
                 OwnedRequest {
                     run_id: run_id.to_owned(),
                     request,
+                    detail: detail.clone(),
                 },
             );
         }
-        Ok(decision)
+        Ok(result)
+    }
+
+    pub(super) fn sync_pending(
+        &self,
+        run_id: &str,
+        requests: Vec<PermissionRequest>,
+        message_ids: &[String],
+        call_ids: &[String],
+    ) -> Result<Vec<(PermissionRequest, PendingDecision)>, String> {
+        if !safe_id(run_id) {
+            return Err("agent_invalid_id".into());
+        }
+        let mut data = self
+            .0
+            .lock()
+            .map_err(|_| "agent_permission_unavailable".to_owned())?;
+        if !data.runs.contains_key(run_id) {
+            return Err("agent_run_unknown".to_owned());
+        }
+        data.pending.retain(|_, request| request.run_id != run_id);
+        let run = data
+            .runs
+            .get(run_id)
+            .ok_or_else(|| "agent_run_unknown".to_owned())?;
+        let mut evaluated = Vec::with_capacity(requests.len());
+        for request in requests {
+            validate_request(run_id, &request)?;
+            if run.session_id != request.session_id {
+                return Err("agent_session_mismatch".into());
+            }
+            if !matches_current_tool(&request, message_ids, call_ids) {
+                continue;
+            }
+            let result = decision(&run.workspace, &request)?;
+            evaluated.push((request, result));
+        }
+        for (request, result) in &evaluated {
+            if let PendingDecision::Ask(detail) = result {
+                data.pending.insert(
+                    request.id.clone(),
+                    OwnedRequest {
+                        run_id: run_id.to_owned(),
+                        request: request.clone(),
+                        detail: detail.clone(),
+                    },
+                );
+            }
+        }
+        Ok(evaluated)
+    }
+
+    pub(super) fn waiting(&self, run_id: &str) -> Result<Vec<WaitingPermission>, String> {
+        let data = self
+            .0
+            .lock()
+            .map_err(|_| "agent_permission_unavailable".to_owned())?;
+        if !data.runs.contains_key(run_id) {
+            return Err("agent_run_unknown".to_owned());
+        }
+        let mut waiting: Vec<_> = data
+            .pending
+            .values()
+            .filter(|owned| owned.run_id == run_id)
+            .map(|owned| WaitingPermission {
+                request: owned.request.clone(),
+                detail: owned.detail.clone(),
+            })
+            .collect();
+        waiting.sort_by(|left, right| left.request.id.cmp(&right.request.id));
+        Ok(waiting)
     }
 
     pub(super) fn take_reply(
@@ -168,94 +250,6 @@ impl AgentPermissionState {
         } else {
             Ok(())
         }
-    }
-}
-
-fn request_paths(request: &PermissionRequest) -> Result<Vec<&Path>, String> {
-    if request.patterns.is_empty() || request.patterns.iter().any(String::is_empty) {
-        return Err("agent_path_metadata_missing".to_owned());
-    }
-    Ok(request.patterns.iter().map(Path::new).collect())
-}
-
-fn read_paths_allowed(run: &OwnedRun, request: &PermissionRequest) -> Result<bool, String> {
-    Ok(request_paths(request)?.into_iter().all(|path| {
-        run.workspace
-            .resolve_opencode(path, PathIntent::Existing)
-            .is_ok()
-    }))
-}
-
-fn mutation_paths_allowed(run: &OwnedRun, request: &PermissionRequest) -> Result<bool, String> {
-    let patterns = request_paths(request)?;
-    if let Some(filepath) = request
-        .metadata
-        .get("filepath")
-        .and_then(serde_json::Value::as_str)
-        .filter(|value| !value.is_empty())
-    {
-        let filepath = Path::new(filepath);
-        let intent = if filepath.exists() {
-            PathIntent::Existing
-        } else {
-            PathIntent::NewFile
-        };
-        let Ok(target) = run.workspace.resolve_opencode(filepath, intent) else {
-            return Ok(false);
-        };
-        return Ok(patterns
-            .into_iter()
-            .all(|path| run.workspace.matches_opencode_path(path, intent, &target)));
-    }
-
-    Ok(patterns.into_iter().all(|path| {
-        run.workspace
-            .resolve_opencode(path, PathIntent::Existing)
-            .is_ok()
-            || run
-                .workspace
-                .resolve_opencode(path, PathIntent::NewFile)
-                .is_ok()
-    }))
-}
-
-fn decision(run: &OwnedRun, request: &PermissionRequest) -> Result<PendingDecision, String> {
-    match request.permission.as_str() {
-        "read" | "glob" | "grep" | "list" => Ok(if read_paths_allowed(run, request)? {
-            PendingDecision::AllowOnce
-        } else {
-            PendingDecision::Reject
-        }),
-        "edit" | "write" | "patch" => Ok(if mutation_paths_allowed(run, request)? {
-            PendingDecision::Ask(ApprovalDetail {
-                command: None,
-                cwd: run.workspace.path().to_path_buf(),
-            })
-        } else {
-            PendingDecision::Reject
-        }),
-        "bash" | "shell" => {
-            let Some(command) = request
-                .metadata
-                .get("command")
-                .and_then(serde_json::Value::as_str)
-            else {
-                return Err("agent_shell_metadata_missing".into());
-            };
-            if command.is_empty() {
-                return Err("agent_shell_metadata_missing".into());
-            }
-            Ok(PendingDecision::Ask(ApprovalDetail {
-                command: Some(command.to_owned()),
-                cwd: run.workspace.path().to_path_buf(),
-            }))
-        }
-        "webfetch" | "websearch" => Ok(PendingDecision::Ask(ApprovalDetail {
-            command: None,
-            cwd: run.workspace.path().to_path_buf(),
-        })),
-        "external_directory" | "question" | "task" | "doom_loop" => Ok(PendingDecision::Reject),
-        _ => Ok(PendingDecision::Reject),
     }
 }
 

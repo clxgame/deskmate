@@ -1,10 +1,24 @@
 use super::test_support::{Checked, TestResult};
-use super::{process_current_reply, process_pending, process_reply, AgentReply};
+use super::{collector::cached_permissions, process_current_reply, process_reply, AgentReply};
 use crate::{
-    agent::{record_store::NativeMessage, AgentPermissionState, AgentRunState, RunStore},
+    agent::{AgentPermissionState, AgentRunState, RunStore},
     tool_permissions::runtime::PermissionRequest,
 };
-use std::{cell::Cell, fs};
+use std::fs;
+
+fn process_fixture_pending(
+    state: &AgentPermissionState,
+    run_id: &str,
+    requests: Vec<PermissionRequest>,
+) -> Result<Vec<(PermissionRequest, crate::tool_permissions::runtime::Reply)>, String> {
+    super::process_pending(
+        state,
+        run_id,
+        &["msg_fixture".to_owned()],
+        &["call_bash".to_owned()],
+        requests,
+    )
+}
 
 fn real_bash_request(id: &str, session_id: &str) -> TestResult<PermissionRequest> {
     Ok(serde_json::from_value(serde_json::json!({
@@ -30,21 +44,22 @@ fn command_boundary_uses_owned_state_and_renderer_ids_only() -> TestResult<()> {
         .register_run("run-b", "session-b", &root)
         .checked("register second run")?;
 
-    let batch = process_pending(
+    let batch = process_fixture_pending(
         &state,
         "run-a",
         vec![real_bash_request("permission-a", "session-a")?],
     )
     .checked("process host-observed request")?;
-    assert!(batch.automatic.is_empty());
-    assert_eq!(batch.waiting.len(), 1);
-    assert_eq!(batch.waiting[0].request_id, "permission-a");
+    assert!(batch.is_empty());
+    let waiting = cached_permissions(&state, "run-a")?;
+    assert_eq!(waiting.len(), 1);
+    assert_eq!(waiting[0].request_id, "permission-a");
     assert_eq!(
-        batch.waiting[0].command.as_deref(),
+        waiting[0].command.as_deref(),
         Some("bun -e \"await Bun.write('command.exit','0')\"")
     );
     assert_eq!(
-        batch.waiting[0].cwd,
+        waiting[0].cwd,
         root.canonicalize()
             .checked("canonical fixture")?
             .to_string_lossy()
@@ -54,14 +69,14 @@ fn command_boundary_uses_owned_state_and_renderer_ids_only() -> TestResult<()> {
     assert!(process_reply(&state, "run-a", "permission-a", super::AgentReply::Reject).is_err());
 
     let old = real_bash_request("permission-old", "session-a")?;
-    process_pending(&state, "run-a", vec![old]).checked("store old request")?;
+    process_fixture_pending(&state, "run-a", vec![old]).checked("store old request")?;
     state
         .register_run("run-a", "session-new", &root)
         .checked("replace host-owned run")?;
     assert!(process_reply(&state, "run-a", "permission-old", super::AgentReply::Once).is_err());
 
     let cancelled = real_bash_request("permission-cancelled", "session-new")?;
-    process_pending(&state, "run-a", vec![cancelled]).checked("store pending request")?;
+    process_fixture_pending(&state, "run-a", vec![cancelled]).checked("store pending request")?;
     state.cancel_run("run-a").checked("cancel run")?;
     assert!(process_reply(
         &state,
@@ -70,7 +85,7 @@ fn command_boundary_uses_owned_state_and_renderer_ids_only() -> TestResult<()> {
         super::AgentReply::Once
     )
     .is_err());
-    assert!(process_pending(
+    assert!(process_fixture_pending(
         &state,
         "run-a",
         vec![real_bash_request("permission-stale", "session-new")?]
@@ -105,19 +120,8 @@ fn permission_workspace_comes_from_the_active_host_run() -> TestResult<()> {
     Ok(())
 }
 
-fn live_snapshot(run_id: &str) -> Vec<NativeMessage> {
-    vec![NativeMessage {
-        id: format!("assistant_{run_id}"),
-        parent_id: Some(run_id.to_owned()),
-        completed: false,
-        finish: None,
-        error: None,
-        parts: Vec::new(),
-    }]
-}
-
 #[test]
-fn permission_reply_reconciles_terminal_run_before_remote_reply() -> TestResult<()> {
+fn permission_reply_rejects_a_run_terminalized_by_collection() -> TestResult<()> {
     let root = std::env::temp_dir().join(format!("yume-agent-stale-{}", uuid::Uuid::new_v4()));
     let workspace = root.join("中文 工作区");
     fs::create_dir_all(&workspace).checked("create workspace")?;
@@ -131,43 +135,35 @@ fn permission_reply_reconciles_terminal_run_before_remote_reply() -> TestResult<
     .checked("bind aborted run")?;
     runs.confirm_submission("msg_aborted")
         .checked("confirm aborted run")?;
-    process_pending(
+    process_fixture_pending(
         &permissions,
         "msg_aborted",
         vec![real_bash_request("per_aborted", "ses_aborted")?],
     )
     .checked("queue lingering request")?;
-    let replies = Cell::new(0);
-    let pending_fetches = Cell::new(0);
+    runs.reconcile(
+        "msg_aborted",
+        &[crate::agent::record_store::NativeMessage {
+            role: None,
+            created: None,
+            id: "assistant_aborted".into(),
+            parent_id: Some("msg_aborted".into()),
+            completed: true,
+            finish: None,
+            error: Some("MessageAbortedError".into()),
+            parts: Vec::new(),
+        }],
+    )?;
     let error = process_current_reply(
         &runs,
         &permissions,
         "msg_aborted",
         "per_aborted",
         AgentReply::Once,
-        |_| {
-            Ok(vec![NativeMessage {
-                id: "assistant_aborted".into(),
-                parent_id: Some("msg_aborted".into()),
-                completed: true,
-                finish: None,
-                error: Some("MessageAbortedError".into()),
-                parts: Vec::new(),
-            }])
-        },
-        |_| {
-            pending_fetches.set(pending_fetches.get() + 1);
-            Ok(Vec::new())
-        },
-        |_, _, _| {
-            replies.set(replies.get() + 1);
-            Ok(())
-        },
     )
-    .expect_err("aborted run is stale");
+    .err()
+    .checked("aborted run is stale")?;
     assert_eq!(error, "agent_permission_stale");
-    assert_eq!(pending_fetches.get(), 0);
-    assert_eq!(replies.get(), 0);
     assert_eq!(
         runs.read().checked("read terminal run")?.recent[0]
             .error_summary
@@ -193,71 +189,52 @@ fn permission_reply_requires_current_exact_scoped_request() -> TestResult<()> {
     .checked("bind current run")?;
     runs.confirm_submission("msg_current")
         .checked("confirm current run")?;
+    runs.reconcile(
+        "msg_current",
+        &[crate::agent::record_store::NativeMessage {
+            role: Some("assistant".into()),
+            created: Some(1),
+            id: "msg_fixture".into(),
+            parent_id: Some("msg_current".into()),
+            completed: false,
+            finish: None,
+            error: None,
+            parts: vec![crate::agent::record_store::NativePart {
+                id: "part_bash".into(),
+                kind: Some("tool".into()),
+                text: None,
+                call_id: Some("call_bash".into()),
+                tool: Some("bash".into()),
+                state: None,
+            }],
+        }],
+    )?;
     let current = real_bash_request("per_current", "ses_current")?;
-    process_pending(&permissions, "msg_current", vec![current.clone()])
+    process_fixture_pending(&permissions, "msg_current", vec![current.clone()])
         .checked("queue current request")?;
 
-    let replies = Cell::new(0);
-    let missing = process_current_reply(
+    let (request, _, workspace_path) = process_current_reply(
         &runs,
         &permissions,
         "msg_current",
         "per_current",
         AgentReply::Once,
-        |_| Ok(live_snapshot("msg_current")),
-        |_| Ok(Vec::new()),
-        |_, _, _| {
-            replies.set(replies.get() + 1);
-            Ok(())
-        },
-    )
-    .expect_err("missing remote request is stale");
-    assert_eq!(missing, "agent_permission_stale");
-    assert_eq!(replies.get(), 0);
-
-    let mut other_session = current.clone();
-    other_session.session_id = "ses_other".into();
-    let mismatched = process_current_reply(
-        &runs,
-        &permissions,
-        "msg_current",
-        "per_current",
-        AgentReply::Once,
-        |_| Ok(live_snapshot("msg_current")),
-        |_| Ok(vec![other_session]),
-        |_, _, _| {
-            replies.set(replies.get() + 1);
-            Ok(())
-        },
-    )
-    .expect_err("other session request is stale");
-    assert_eq!(mismatched, "agent_permission_stale");
-    assert_eq!(replies.get(), 0);
-
-    process_current_reply(
-        &runs,
-        &permissions,
-        "msg_current",
-        "per_current",
-        AgentReply::Once,
-        |_| Ok(live_snapshot("msg_current")),
-        |_| Ok(vec![current]),
-        |request, _, workspace_path| {
-            assert_eq!(request.id, "per_current");
-            assert_eq!(request.session_id, "ses_current");
-            assert_eq!(
-                workspace_path,
-                workspace
-                    .canonicalize()
-                    .map_err(|_| "canonical workspace unavailable".to_owned())?
-                    .as_path()
-            );
-            replies.set(replies.get() + 1);
-            Ok(())
-        },
-    )
-    .checked("reply to exact live request")?;
-    assert_eq!(replies.get(), 1);
+    )?;
+    assert_eq!(request.id, current.id);
+    assert_eq!(request.session_id, current.session_id);
+    assert_eq!(workspace_path, workspace.canonicalize()?);
+    assert_eq!(
+        process_current_reply(
+            &runs,
+            &permissions,
+            "msg_current",
+            "per_current",
+            AgentReply::Once,
+        )
+        .err()
+        .checked("repeated reply is stale")?,
+        "agent_permission_stale"
+    );
     fs::remove_dir_all(root).checked("remove fixture")?;
     Ok(())
 }

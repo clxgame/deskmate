@@ -5,6 +5,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub(crate) const READY_TIMEOUT: Duration = Duration::from_secs(10);
+
 #[derive(Clone)]
 pub(crate) struct AgentEndpoint {
     pub(crate) base_url: String,
@@ -35,6 +37,7 @@ struct WireMessage {
 #[derive(Deserialize)]
 struct WireInfo {
     id: String,
+    role: Option<String>,
     #[serde(rename = "parentID")]
     parent_id: Option<String>,
     finish: Option<String>,
@@ -43,6 +46,7 @@ struct WireInfo {
 }
 #[derive(Deserialize)]
 struct WireTime {
+    created: Option<u64>,
     completed: Option<u64>,
 }
 #[derive(Deserialize)]
@@ -52,6 +56,9 @@ struct WireError {
 #[derive(Deserialize)]
 struct WirePart {
     id: String,
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    text: Option<String>,
     #[serde(rename = "callID")]
     call_id: Option<String>,
     tool: Option<String>,
@@ -153,6 +160,8 @@ impl OpenCodeClient {
             .into_iter()
             .map(|message| NativeMessage {
                 id: message.info.id,
+                role: message.info.role,
+                created: message.info.time.created,
                 parent_id: message.info.parent_id,
                 completed: message.info.time.completed.is_some(),
                 finish: message.info.finish,
@@ -162,6 +171,8 @@ impl OpenCodeClient {
                     .into_iter()
                     .map(|part| NativePart {
                         id: part.id,
+                        kind: part.kind,
+                        text: part.text,
                         call_id: part.call_id,
                         tool: part.tool,
                         state: part.state.map(|state| NativeToolState {

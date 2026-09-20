@@ -17,6 +17,7 @@ fn request(
         permission: permission.into(),
         patterns: patterns.iter().map(|value| (*value).into()).collect(),
         metadata,
+        tool: None,
     }
 }
 
@@ -201,5 +202,42 @@ fn denies_unknown_external_stale_cross_run_and_repeated_replies() -> TestResult<
     state.cancel_run("run-a").checked("cancel run")?;
     assert!(state.take_reply("run-a", "p-missing").is_err());
     fs::remove_dir_all(root).checked("remove fixture")?;
+    Ok(())
+}
+
+#[test]
+fn a_new_turn_on_the_same_session_drops_old_permission_ownership() -> TestResult<()> {
+    let root = std::env::temp_dir().join(format!(
+        "yume-agent-permission-turn-{}",
+        uuid::Uuid::new_v4()
+    ));
+    fs::create_dir_all(&root).checked("create fixture")?;
+    let state = AgentPermissionState::default();
+    state.register_run("run-old", "session-shared", &root)?;
+    state.accept(
+        "run-old",
+        request(
+            "p-old",
+            "session-shared",
+            "edit",
+            &[root.join("old.txt").to_string_lossy().as_ref()],
+            json!({}),
+        ),
+    )?;
+    state.register_run("run-new", "session-shared", &root)?;
+    assert!(state.take_reply("run-old", "p-old").is_err());
+    assert!(state
+        .accept(
+            "run-new",
+            request(
+                "p-new",
+                "session-shared",
+                "edit",
+                &[root.join("new.txt").to_string_lossy().as_ref()],
+                json!({})
+            ),
+        )
+        .is_ok());
+    fs::remove_dir_all(root)?;
     Ok(())
 }

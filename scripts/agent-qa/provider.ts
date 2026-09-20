@@ -69,7 +69,14 @@ function chunks(body: JsonObject): readonly JsonObject[] {
       choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
     }];
   }
-  const content = text.includes("QA_MISLEADING") ? "PASS" : "fixture complete";
+  const priorContent = JSON.stringify(messages(body));
+  const content = text.includes("HISTORY_ROUND_ONE")
+    ? "first-round-token: amber-lantern-731"
+    : text.includes("HISTORY_ROUND_TWO")
+      ? priorContent.includes("amber-lantern-731")
+        ? "continued-token: amber-lantern-731"
+        : "continuation-missing"
+      : text.includes("QA_MISLEADING") ? "PASS" : "fixture complete";
   return [{
     id: "chatcmpl-agent-final", object: "chat.completion.chunk", created: 2, model: "model-a",
     choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }],

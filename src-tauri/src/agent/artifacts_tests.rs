@@ -18,6 +18,8 @@ fn fixture() -> TestResult<(PathBuf, RunRecord)> {
             ended_at: None,
             outcome: None,
             error_summary: None,
+            pending_outcome: None,
+            pending_error_summary: None,
             message_ids: Vec::new(),
             part_ids: Vec::new(),
             call_ids: Vec::new(),
@@ -28,12 +30,16 @@ fn fixture() -> TestResult<(PathBuf, RunRecord)> {
 
 fn message(tool: &str, status: &str, input: serde_json::Value) -> NativeMessage {
     NativeMessage {
+        role: None,
+        created: None,
         id: "message_one".into(),
         parent_id: Some("run_one".into()),
         completed: true,
         finish: Some("stop".into()),
         error: None,
         parts: vec![NativePart {
+            kind: None,
+            text: None,
             id: "part_one".into(),
             call_id: Some("call_one".into()),
             tool: Some(tool.into()),

@@ -17,8 +17,19 @@ pub struct PermissionRequest {
     pub patterns: Vec<String>,
     #[serde(default)]
     pub metadata: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<PermissionTool>,
 }
-#[derive(Clone, Copy, Deserialize)]
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionTool {
+    #[serde(rename = "messageID")]
+    pub message_id: String,
+    #[serde(rename = "callID")]
+    pub call_id: String,
+}
+#[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Reply {
     Once,

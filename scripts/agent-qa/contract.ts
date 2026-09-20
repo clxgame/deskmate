@@ -149,10 +149,11 @@ async function main(): Promise<void> {
     throw new ContractError("EXPECTED_FAILURE", "misleading PASS lacked required artifact");
   }
   const batch = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-");
-  const batchDirectory = resolve(".omo/evidence/yume-agent-mode-sol", batch);
+  const lifecycleMode = process.argv.includes("lifecycle") || process.argv.includes("lifecycle-host-failure");
+  const batchDirectory = resolve(lifecycleMode ? ".omo/evidence/workspace-chat-history" : ".omo/evidence/yume-agent-mode-sol", batch);
   const permissionsMode = process.argv.includes("permissions");
   const discoveryFailureMode = process.argv.includes("--case") && process.argv.includes("discovery-failure");
-  if (process.argv.includes("lifecycle") || process.argv.includes("lifecycle-host-failure")) {
+  if (lifecycleMode) {
     await runLifecycle(batchDirectory, process.argv.includes("lifecycle-host-failure"));
     console.log(`evidence=${batchDirectory}`);
     return;

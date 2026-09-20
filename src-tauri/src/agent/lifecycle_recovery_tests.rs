@@ -25,6 +25,8 @@ fn snapshot_recovery_deduplicates_native_references_and_never_replays() -> TestR
     state.bind_session("msg_run", "ses_run").checked("bind")?;
     state.confirm_submission("msg_run").checked("confirm")?;
     let duplicate = NativeMessage {
+        role: None,
+        created: None,
         id: "msg_assistant".into(),
         parent_id: Some("msg_run".into()),
         completed: true,
@@ -32,12 +34,16 @@ fn snapshot_recovery_deduplicates_native_references_and_never_replays() -> TestR
         error: None,
         parts: vec![
             NativePart {
+                kind: None,
+                text: None,
                 id: "part_one".into(),
                 call_id: Some("call_one".into()),
                 tool: None,
                 state: None,
             },
             NativePart {
+                kind: None,
+                text: None,
                 id: "part_one".into(),
                 call_id: Some("call_one".into()),
                 tool: None,
@@ -78,12 +84,16 @@ fn intermediate_tool_calls_keep_run_active_until_explicit_terminal_message() -> 
     state.confirm_submission("msg_run").checked("confirm")?;
 
     let read_round = NativeMessage {
+        role: None,
+        created: None,
         id: "msg_read".into(),
         parent_id: Some("msg_run".into()),
         completed: true,
         finish: Some("tool-calls".into()),
         error: None,
         parts: vec![NativePart {
+            kind: None,
+            text: None,
             id: "part_read".into(),
             call_id: Some("call_read".into()),
             tool: Some("read".into()),
@@ -96,12 +106,16 @@ fn intermediate_tool_calls_keep_run_active_until_explicit_terminal_message() -> 
         }],
     };
     let edit_round = NativeMessage {
+        role: None,
+        created: None,
         id: "msg_edit".into(),
         parent_id: Some("msg_run".into()),
         completed: false,
         finish: None,
         error: None,
         parts: vec![NativePart {
+            kind: None,
+            text: None,
             id: "part_edit".into(),
             call_id: Some("call_edit".into()),
             tool: Some("edit".into()),
@@ -141,6 +155,7 @@ fn intermediate_tool_calls_keep_run_active_until_explicit_terminal_message() -> 
                     metadata: serde_json::json!({
                         "filepath": workspace.join("same.txt").to_string_lossy()
                     }),
+                    tool: None,
                 },
             )
             .checked("queue edit approval")?,
@@ -148,12 +163,16 @@ fn intermediate_tool_calls_keep_run_active_until_explicit_terminal_message() -> 
     ));
 
     let final_round = NativeMessage {
+        role: None,
+        created: None,
         id: "msg_final".into(),
         parent_id: Some("msg_run".into()),
         completed: true,
         finish: Some("stop".into()),
         error: None,
         parts: vec![NativePart {
+            kind: None,
+            text: None,
             id: "part_text".into(),
             call_id: None,
             tool: None,
@@ -181,6 +200,8 @@ fn intermediate_tool_calls_keep_run_active_until_explicit_terminal_message() -> 
         .reconcile(
             "msg_error_run",
             &[NativeMessage {
+                role: None,
+                created: None,
                 id: "msg_error".into(),
                 parent_id: Some("msg_error_run".into()),
                 completed: true,

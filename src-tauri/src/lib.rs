@@ -1393,8 +1393,8 @@ pub fn run() {
             ccswitch::protocol::restore_ccswitch_recovery,
             ccswitch::protocol::discard_ccswitch_recovery,
             local_ai_deploy::deploy_local_ai_stack,
-            history::history_list,
-            history::history_load,
+            history::view::history_list,
+            history::view::history_load,
             history::history_save,
             history::history_delete,
             packs::installed_packs,
@@ -1457,7 +1457,8 @@ pub fn run() {
                 pet_geometry::apply(&pet, loaded.pet_scale, &loaded.persona_id);
                 pet_startup::place(&pet, &loaded.persona_id, loaded.pet_position);
             }
-            app.manage(HistoryState(Mutex::new(history::load(&handle))));
+            let history = history::load(&handle).map_err(std::io::Error::other)?;
+            app.manage(HistoryState(Mutex::new(history)));
             // Memory is optional infrastructure: if the database cannot open,
             // `MemoryState` records that and every memory command answers
             // MEMORY_DISABLED while chat and the pet keep working.
@@ -1468,6 +1469,11 @@ pub fn run() {
                 .map_err(|error| error.to_string())?
                 .join("agent-runs");
             let agent_runs = agent::AgentRunState::load(agent::RunStore::new(runs))?;
+            history::index_agent_records(
+                &handle,
+                &app.state::<HistoryState>(),
+                &agent_runs.all_records()?,
+            )?;
             agent_runs.restore_permission_ownership(&app.state::<agent::AgentPermissionState>())?;
             app.manage(agent_runs);
             app.manage(worklog::commands::WorklogState::initialize(&handle));
@@ -1489,6 +1495,7 @@ pub fn run() {
             app.manage(tool_permissions::events::PermissionEvents::start(format!(
                 "http://127.0.0.1:{port}"
             )));
+            agent::start_collector(handle.clone());
             worklog::runner_runtime::start(handle.clone());
             pet_recovery::start(handle.clone())?;
             Ok(())

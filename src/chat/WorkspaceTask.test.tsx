@@ -2,7 +2,7 @@ import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const calls: Array<{ readonly command: string; readonly args: object | undefined }> = [];
-type MockRun = { readonly runId: string; readonly sessionId: string; readonly workspacePath: string; readonly createdAt: string; readonly endedAt: string | null; readonly outcome: string | null; readonly errorSummary: string | null; readonly messageIds: readonly string[]; readonly partIds: readonly string[]; readonly callIds: readonly string[] };
+type MockRun = { readonly runId: string; readonly sessionId: string | null; readonly workspacePath: string; readonly createdAt: string; readonly endedAt: string | null; readonly outcome: string | null; readonly errorSummary: string | null; readonly messageIds: readonly string[]; readonly partIds: readonly string[]; readonly callIds: readonly string[] };
 const run: MockRun = { runId: "msg_run", sessionId: "ses_run", workspacePath: "C:\\workspace", createdAt: "now", endedAt: null, outcome: null, errorSummary: null, messageIds: [], partIds: [], callIds: [] };
 let projection: { active: typeof run | null; recent: readonly typeof run[]; artifacts: readonly object[] } = { active: null, recent: [], artifacts: [] };
 let selected: string | null = "C:\\workspace";
@@ -15,7 +15,10 @@ mock.module("@tauri-apps/api/core", () => ({
     if (command === failCommand) throw new Error(`${command} failed`);
     if (command === "agent_run_read") return readOverride ? readOverride() : projection;
     if (command === "agent_run_start") { projection = { active: run, recent: [], artifacts: [] }; return run; }
-    if (command === "agent_permission_pending") return [{ requestId: "req_one", permission: "bash", patterns: [], metadata: {}, command: "bun test", cwd: "C:\\workspace" }];
+    if (command === "agent_permission_pending") {
+      if ((args as { runId?: string } | undefined)?.runId === "msg_preparing") return [];
+      return [{ requestId: "req_one", permission: "bash", patterns: [], metadata: {}, command: "bun test", cwd: "C:\workspace" }];
+    }
     if (command === "agent_run_cancel") projection = { active: null, recent: [{ ...run, outcome: "cancelled" }], artifacts: [] };
     return undefined;
   },
@@ -58,6 +61,14 @@ test("chooses a directory, starts once, and restores the host projection", async
   await waitFor(() => expect(calls.some((item) => item.command === "agent_run_read")).toBe(true));
 });
 
+test("keeps recovered preparation visible with empty approvals and Stop cancels it", async () => {
+  projection = { active: { ...run, runId: "msg_preparing", sessionId: null }, recent: [], artifacts: [] };
+  render(<WorkspaceHarness />);
+  const stop = await screen.findByRole("button", { name: "停" });
+  expect(screen.queryByRole("button", { name: "允许这一次" })).toBeNull();
+  fireEvent.click(stop);
+  await waitFor(() => expect(calls.some((item) => item.command === "agent_run_cancel" && JSON.stringify(item.args) === JSON.stringify({ runId: "msg_preparing" }))).toBe(true));
+});
 test("picker cancellation submits nothing", async () => {
   selected = null;
   render(<WorkspaceHarness prompt="不会发送" />);
@@ -77,6 +88,12 @@ test("shows host busy and read failures without allowing another start", async (
   failCommand = "agent_run_read";
   render(<WorkspaceHarness prompt="任务" />);
   await screen.findByRole("alert");
+});
+
+test("shows retryable archive failure from the cached host projection", async () => {
+  projection = { active: { ...run, errorSummary: "history_storage_failed" }, recent: [], artifacts: [] };
+  render(<WorkspaceHarness />);
+  expect((await screen.findByRole("alert")).textContent).toBe("历史保存失败，可重试。");
 });
 
 test("keeps the selected folder and prompt when host start fails", async () => {
@@ -148,4 +165,48 @@ test("shows a localized scheduled busy receipt without resending it", async () =
   const view = render(<WorkspaceHarness />);
   await waitFor(() => expect(view.container.querySelector(".workspace-task-recent")?.textContent).toContain("未执行：已有任务运行"));
   expect(calls.some((item) => item.command === "agent_run_start")).toBe(false);
+});
+
+test("keeps a long workspace path intact and applies the wrapping rule", async () => {
+  const longPath = "C:\\Users\\example\\Documents\\projects\\deeply-nested-workspace\\packages\\desktop\\src\\features\\chat";
+  projection = { active: { ...run, workspacePath: longPath }, recent: [], artifacts: [] };
+  const view = render(<WorkspaceHarness />);
+  await screen.findByText(longPath);
+  expect(view.container.querySelector(".workspace-task-status span")?.textContent).toBe(longPath);
+  const css = await Bun.file("src/chat/chat.css").text();
+  const wrappingRule = css.match(/\.workspace-task-path span,\s*\.workspace-task-status span\s*\{([^}]*)\}/)?.[1] ?? "";
+  expect(wrappingRule).toContain("overflow-wrap: anywhere");
+  expect(wrappingRule).toContain("white-space: normal");
+  expect(wrappingRule).not.toContain("text-overflow: ellipsis");
+  expect(wrappingRule).not.toContain("white-space: nowrap");
+});
+
+test("shows recovered history workspace and retryable detail state", async () => {
+  const agent = {
+    projection: { active: null, recent: [], artifacts: [] },
+    workspace: null,
+    requests: [],
+    error: null,
+    busy: false,
+    choose: async () => null,
+    clear: () => {},
+    clearSelection: () => {},
+    start: async () => null,
+    stop: async () => {},
+    reply: async () => {},
+    locate: async () => {},
+    refresh: async () => {},
+  } as unknown as ReturnType<typeof useAgentRun>;
+  render(<WorkspaceTask
+    language="en-US"
+    agent={agent}
+    historyDetails={{
+      workspacePath: "C:\\recorded\\old-workspace",
+      status: "completed",
+      source: "interactive",
+      availability: "retryable",
+    }}
+  />);
+  expect(screen.getByText("C:\\recorded\\old-workspace")).toBeDefined();
+  expect(screen.getByRole("alert").textContent).toContain("Open this history again to retry");
 });

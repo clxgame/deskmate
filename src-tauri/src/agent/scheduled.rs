@@ -54,6 +54,8 @@ impl AgentRunState {
             ended_at: None,
             outcome: None,
             error_summary: None,
+            pending_outcome: None,
+            pending_error_summary: None,
             message_ids: Vec::new(),
             part_ids: Vec::new(),
             call_ids: Vec::new(),
@@ -116,6 +118,26 @@ pub(crate) fn execute(
             }) {
                 let _ = permissions.cancel_run(id);
                 return Err(error);
+            }
+            let created = u64::try_from(chrono::Utc::now().timestamp_millis())
+                .map_err(|_| "history_time_invalid".to_owned())?;
+            if crate::history::save_agent_input(
+                app,
+                &app.state::<crate::history::HistoryState>(),
+                crate::history::AgentHistoryInput {
+                    session_id: &session,
+                    run_id: id,
+                    text: &task.prompt,
+                    created,
+                },
+            )
+            .is_err()
+            {
+                let _ = permissions.cancel_run(id);
+                return match state.fail_active_preserving_input(id, "history_storage_failed") {
+                    Ok(()) => Err("history_storage_failed".to_owned()),
+                    Err(error) => Err(error),
+                };
             }
             let result = client
                 .prompt(&session, id, "", &task.prompt)

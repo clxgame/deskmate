@@ -105,6 +105,50 @@ fn submission_failure_is_terminal_and_reloadable() -> TestResult<()> {
 }
 
 #[test]
+fn persisted_session_ownership_resolves_to_first_run() -> TestResult<()> {
+    let (root, workspace) = fixture()?;
+    let store = RunStore::new(root.join("agent-runs"));
+    let state = AgentRunState::new(store.clone());
+    state.begin("msg_first", &workspace, "first")?;
+    state.bind_session("msg_first", "ses_shared")?;
+    state.fail_active("msg_first", "done")?;
+    state.begin("msg_second", &workspace, "second")?;
+    state.bind_session("msg_second", "ses_shared")?;
+    state.fail_active("msg_second", "done")?;
+
+    let recovered = AgentRunState::load(store)?;
+    assert_eq!(
+        recovered.origin_run_for_session("ses_shared")?.as_deref(),
+        Some("msg_first")
+    );
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
+fn continuation_workspace_requires_the_exact_origin_and_session() -> TestResult<()> {
+    let (root, workspace) = fixture()?;
+    let state = AgentRunState::new(RunStore::new(root.join("agent-runs")));
+    state.begin("msg_origin", &workspace, "first")?;
+    state.bind_session("msg_origin", "ses_shared")?;
+    state.fail_active("msg_origin", "done")?;
+    assert_eq!(
+        state.continuation_workspace("ses_shared", "msg_origin")?,
+        workspace.canonicalize()?
+    );
+    assert_eq!(
+        state.continuation_workspace("ses_shared", "msg_spoof"),
+        Err("agent_history_origin_mismatch".into())
+    );
+    assert_eq!(
+        state.continuation_workspace("ses_spoof", "msg_origin"),
+        Err("agent_history_session_mismatch".into())
+    );
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
 fn host_boundary_failure_injection_is_observable() -> TestResult<()> {
     assert_ne!(
         std::env::var("YUME_AGENT_HOST_BOUNDARY_FAIL").as_deref(),

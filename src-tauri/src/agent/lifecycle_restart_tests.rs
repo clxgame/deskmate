@@ -56,6 +56,7 @@ fn lifecycle_registration_and_completion_clear_permission_ownership() -> TestRes
         permission: "read".into(),
         patterns: vec![workspace.join("file.txt").to_string_lossy().into_owned()],
         metadata: serde_json::json!({}),
+        tool: None,
     };
     fs::write(workspace.join("file.txt"), b"fixture").checked("write file")?;
     assert_eq!(

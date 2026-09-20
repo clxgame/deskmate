@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import type { Socket } from "node:net";
 import { afterEach, describe, expect, test } from "bun:test";
-import { discoverTools } from "./client";
+import { discoverTools, messages, readTextMessages } from "./client";
 import { ContractError } from "./types";
 
 const closeCallbacks: Array<() => Promise<void>> = [];
@@ -18,7 +18,7 @@ async function responseFixture(status: number, body: string): Promise<{
   const sockets = new Set<Socket>();
   const server = createServer((_request, response) => {
     attempts += 1;
-    response.writeHead(status, { "Content-Type": "application/json" });
+    response.writeHead(status, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
     response.end(body);
   });
   server.on("connection", (socket) => {
@@ -36,6 +36,46 @@ async function responseFixture(status: number, body: string): Promise<{
 }
 
 describe("tool discovery readiness", () => {
+  test("preserves native info and parts message envelopes", async () => {
+    const body = JSON.stringify([{
+      info: { id: "msg_user", role: "user" },
+      parts: [{ id: "part_text", messageID: "msg_user", type: "text", text: "hello" }],
+    }]);
+    const fixture = await responseFixture(200, body);
+    const snapshot = await messages({ baseUrl: fixture.baseUrl, directory: "C:\\agent-qa" }, "ses_fixture");
+    expect(snapshot).toEqual(JSON.parse(body));
+  });
+
+  test("sorts and deduplicates native user and assistant text", async () => {
+    const body = JSON.stringify([
+      { info: { id: "msg_assistant", role: "assistant", parentID: "msg_user", time: { created: 20 } }, parts: [{ id: "part_answer", type: "text", text: "answer" }] },
+      { info: { id: "msg_user", role: "user", time: { created: 10 } }, parts: [{ id: "part_question", type: "text", text: "question" }] },
+      { info: { id: "msg_assistant", role: "assistant", parentID: "msg_user", time: { created: 20 } }, parts: [{ id: "part_answer", type: "text", text: "answer" }] },
+    ]);
+    const fixture = await responseFixture(200, body);
+    const snapshot = await readTextMessages({ baseUrl: fixture.baseUrl, directory: "C:\\agent-qa" }, "ses_fixture");
+    expect(snapshot).toEqual([
+      { messageId: "msg_user", partId: "part_question", role: "user", text: "question", created: 10 },
+      { messageId: "msg_assistant", partId: "part_answer", parentId: "msg_user", role: "assistant", text: "answer", created: 20 },
+    ]);
+  });
+
+  test("rejects malformed text metadata and conflicting duplicate IDs", async () => {
+    const malformed = await responseFixture(200, JSON.stringify([{
+      info: { id: "msg_user", role: "user", time: {} },
+      parts: [{ id: "part_text", type: "text", text: "missing created" }],
+    }]));
+    await expect(readTextMessages({ baseUrl: malformed.baseUrl, directory: "C:\\agent-qa" }, "ses_malformed"))
+      .rejects.toMatchObject({ code: "INVALID_WIRE" });
+
+    const conflicting = await responseFixture(200, JSON.stringify([
+      { info: { id: "msg_user", role: "user", time: { created: 1 } }, parts: [{ id: "part_text", type: "text", text: "first" }] },
+      { info: { id: "msg_user", role: "user", time: { created: 1 } }, parts: [{ id: "part_text", type: "text", text: "changed" }] },
+    ]));
+    await expect(readTextMessages({ baseUrl: conflicting.baseUrl, directory: "C:\\agent-qa" }, "ses_conflict"))
+      .rejects.toMatchObject({ code: "INVALID_WIRE" });
+  });
+
   test("cancels a hung early probe and retries the same existing endpoint", async () => {
     let attempts = 0;
     const sockets = new Set<Socket>();

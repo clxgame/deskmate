@@ -34,6 +34,8 @@ export type Runtime = {
   readonly port: number;
   readonly child: OwnedChild;
   readonly pid: number;
+  readonly restartSidecar: () => Promise<number>;
+  readonly stopSidecar: () => Promise<void>;
   readonly close: () => Promise<CleanupReceipt>;
 };
 
@@ -97,9 +99,10 @@ export async function startRuntime(options: RuntimeOptions = {}): Promise<Runtim
       permission: { "*": "deny", read: "allow", trusted_probe: "allow", edit: "ask", bash: "ask", webfetch: "ask", ...(options.flowTools === true ? { write: "ask" } : {}) },
       provider: { yume: { npm: "@ai-sdk/openai-compatible", name: "YUME Agent QA", options: { baseURL: provider.baseUrl }, models: { "model-a": { name: "Model A" } } } },
     });
-    child = spawn(binary, ["--pure", "serve", "--port", String(port), "--hostname", "127.0.0.1", "--print-logs"], {
+    const launch = (): OwnedChild => spawn(binary, ["--pure", "serve", "--port", String(port), "--hostname", "127.0.0.1", "--print-logs"], {
       cwd: fixture.workspaceA, env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
     });
+    child = launch();
     const pid = child.pid;
     if (pid === undefined) throw new ContractError("SIDECAR_START", "sidecar PID unavailable");
     const healthValue = await health(`http://127.0.0.1:${port}`);
@@ -107,6 +110,18 @@ export async function startRuntime(options: RuntimeOptions = {}): Promise<Runtim
     return {
       root, workspaceA: fixture.workspaceA, workspaceB: fixture.workspaceB,
       baseUrl: `http://127.0.0.1:${port}`, provider, port, child, pid,
+      restartSidecar: async () => {
+        if (child !== undefined) await stopChild(child);
+        child = launch();
+        const restartedPid = child.pid;
+        if (restartedPid === undefined) throw new ContractError("SIDECAR_START", "restarted sidecar PID unavailable");
+        const restartedHealth = await health(`http://127.0.0.1:${port}`);
+        if (restartedHealth.version !== "1.18.21") throw new ContractError("VERSION_MISMATCH", JSON.stringify(restartedHealth));
+        return restartedPid;
+      },
+      stopSidecar: async () => {
+        if (child !== undefined) await stopChild(child);
+      },
       close: () => cleanupOwned({ root, provider, port, child }),
     };
   } catch (error) {

@@ -1,3 +1,4 @@
+// allow: SIZE_OK — one integration harness owns the provider/settings mocks and restores global fetch after every case.
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import * as tauriCore from "@tauri-apps/api/core";
 import * as tauriEvent from "@tauri-apps/api/event";
@@ -42,6 +43,7 @@ const listen = mock<(_event: string, _handler: (event: unknown) => void) => Prom
   () => Promise.resolve(() => undefined),
 );
 const persist = mock<PersistSettings>(() => Promise.resolve());
+const originalFetch = globalThis.fetch;
 const fetchCall = mock((_input: string | URL | Request, _init?: RequestInit) =>
   Promise.resolve(
     new Response(
@@ -94,7 +96,10 @@ function PickModelProbe({
   return null;
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  globalThis.fetch = originalFetch;
+});
 
 beforeEach(() => {
   invoke.mockClear();

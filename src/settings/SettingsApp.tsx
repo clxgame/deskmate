@@ -33,50 +33,9 @@ import {
   personaById,
 } from "../pet/personaCatalog";
 import { THEME_IDS, type ThemeId } from "./theme";
-import { AppIcon, type AppIconName } from "../ui/AppIcon";
+import { AppIcon } from "../ui/AppIcon";
+import { SettingsNavigation, type TabId } from "./SettingsNavigation";
 import "./settings.css";
-
-type TabId =
-  | "general"
-  | "ai"
-  | "widget"
-  | "permissions"
-  | "shortcuts"
-  | "account"
-  | "memory"
-  | "about";
-
-const TAB_ICONS = [
-  { id: "general", icon: "general" },
-  { id: "ai", icon: "ai" },
-  { id: "permissions", icon: "permissions" },
-  { id: "widget", icon: "widget" },
-  { id: "shortcuts", icon: "shortcuts" },
-  { id: "account", icon: "pet" },
-  { id: "memory", icon: "memory" },
-  { id: "about", icon: "about" },
-] as const satisfies readonly { readonly id: TabId; readonly icon: AppIconName }[];
-
-function tabLabel(t: Dict, id: TabId): string {
-  switch (id) {
-    case "general":
-      return t.tabGeneral;
-    case "ai":
-      return t.tabAi;
-    case "permissions":
-      return t.tabPermissions;
-    case "widget":
-      return t.tabWidget;
-    case "shortcuts":
-      return t.tabShortcuts;
-    case "account":
-      return t.tabAccount;
-    case "memory":
-      return t.tabMemory;
-    case "about":
-      return t.tabAbout;
-  }
-}
 
 const THEME_LABEL_KEYS: Record<
   ThemeId,
@@ -227,26 +186,17 @@ export default function SettingsApp() {
       </header>
 
       <div className="set-body">
-        <nav className="set-sidebar">
-          {TAB_ICONS.map((item) => (
-            <button
-              key={item.id}
-              id={`set-category-${item.id}`}
-              className={`set-tab${tab === item.id ? " set-tab-active" : ""}`}
-              onClick={() => setTab(item.id)}
-            >
-              <AppIcon className="set-tab-icon" name={item.icon} size={20} />
-              {tabLabel(t, item.id)}
-            </button>
-          ))}
-        </nav>
+        <SettingsNavigation tab={tab} onSelect={setTab} t={t} />
 
         {settings === null ? (
           <div className="set-panel">
             <div className="set-loading">{t.loading}</div>
           </div>
         ) : (
-          <main className="set-panel" aria-labelledby={`set-category-${tab}`}>
+          <main
+            className={`set-panel${["general", "account", "shortcuts", "about"].includes(tab) ? " set-panel-compact" : ""}`}
+            aria-labelledby={`set-category-${tab}`}
+          >
             {petVisibilityError !== null && <div role="alert" className="set-note set-note-error">{petVisibilityError}
               <button type="button" className="set-btn" onClick={() => setPetVisibilityError(null)}>{t.close}</button>
             </div>}
@@ -340,7 +290,7 @@ function ThemePicker({
 function GeneralTab({ settings, patch, t }: TabProps) {
   return (
     <>
-      <BentoCard title={t.tabGeneral} badge={t.settingsBadgePreferences}>
+      <BentoCard title={t.tabGeneral}>
         <Row label={t.autostart}>
           <Switch
             label={t.autostart}
@@ -378,14 +328,12 @@ function GeneralTab({ settings, patch, t }: TabProps) {
         </Row>
       </BentoCard>
 
-      <BentoCard title={t.theme} description={t.themeHint} badge={t.settingsBadgeTheme}>
-        <Row label={t.theme}>
-          <ThemePicker
-            value={settings.theme}
-            onChange={(value) => patch("theme", value)}
-            t={t}
-          />
-        </Row>
+      <BentoCard title={t.theme} description={t.themeHint}>
+        <ThemePicker
+          value={settings.theme}
+          onChange={(value) => patch("theme", value)}
+          t={t}
+        />
       </BentoCard>
     </>
   );
@@ -395,7 +343,7 @@ function GeneralTab({ settings, patch, t }: TabProps) {
 
 function ShortcutsTab({ settings, patch, t }: TabProps) {
   return (
-    <BentoCard title={t.tabShortcuts} description={t.shortcutHint} badge={t.settingsBadgeShortcuts}>
+    <BentoCard title={t.tabShortcuts} description={t.shortcutHint}>
       <Row label={t.shortcutToggleChat}>
         <ShortcutInput
           label={t.shortcutToggleChat}
@@ -483,89 +431,83 @@ function AccountTab({ settings, patch, t }: TabProps) {
 
   const [installedPacks, setInstalledPacks] = useState<InstalledPack[]>([]);
   return (
-    <>
-      <BentoCard title={t.tabAccount} badge={t.settingsBadgePet}>
-        <div className="set-pet-controls">
-          <Row label={t.petScale}>
-            <input
-              className="set-slider"
-              type="range"
-              min={0.1}
-              max={2}
-              step={0.1}
-              value={settings.petScale}
-              aria-label={t.petScale}
-              onChange={(e) => {
-                const value = Number(e.target.value);
-                patch("petScale", value);
-                scalePreviewValue.current = value;
-                void emitPetScalePreview(value).catch((error: unknown) =>
-                  console.error("pet scale preview failed", error),
-                );
-                if (scaleFrame.current === null) {
-                  scaleFrame.current = window.requestAnimationFrame(() => {
-                    scaleFrame.current = null;
-                    void previewPetScale(scalePreviewValue.current).catch(
-                      (error: unknown) =>
-                        console.error("pet scale resize failed", error),
-                    );
-                  });
-                }
-              }}
-            />
-            <span className="set-slider-value">
-              {settings.petScale.toFixed(1)}x
-            </span>
-          </Row>
-          <Row label={t.petVisible}>
-            <Switch
-              label={t.petVisible}
-              checked={settings.petVisible}
-              onChange={(v) => patch("petVisible", v)}
-            />
-          </Row>
-          <Row label={t.alwaysOnTop}>
-            <Switch
-              label={t.alwaysOnTop}
-              checked={settings.alwaysOnTop}
-              onChange={(value) => patch("alwaysOnTop", value)}
-            />
-          </Row>
-          {(personaById(personaId).renderType ?? "glb") === "glb" && (
-            <Row label={t.mouseFollow}>
-              <Switch
-                label={t.mouseFollow}
-                checked={settings.mouseFollow}
-                onChange={(value) => patch("mouseFollow", value)}
-              />
-            </Row>
-          )}
-        </div>
-      </BentoCard>
-
-      <BentoCard title={t.userName} badge={t.settingsBadgeProfile}>
-        <Row label={t.userName} className="set-row-nickname">
+    <PersonaPacks
+      t={t}
+      language={settings.language}
+      installed={installedPacks}
+      onInstalledChange={setInstalledPacks}
+      activePersonaId={personaId}
+      onActivePersonaRemoved={() => patch("personaId", DEFAULT_PERSONA_ID)}
+      onActivePersonaChange={(nextPersonaId) => patch("personaId", nextPersonaId)}
+    >
+      <div className="set-pet-controls">
+        <Row label={t.petScale}>
           <input
-            className="set-input"
-            type="text"
-            aria-label={t.userName}
-            value={settings.userName}
-            placeholder={t.userNamePlaceholder}
-            onChange={(e) => patch("userName", e.target.value)}
+            className="set-slider"
+            type="range"
+            min={0.1}
+            max={2}
+            step={0.1}
+            value={settings.petScale}
+            aria-label={t.petScale}
+            onChange={(e) => {
+              const value = Number(e.target.value);
+              patch("petScale", value);
+              scalePreviewValue.current = value;
+              void emitPetScalePreview(value).catch((error: unknown) =>
+                console.error("pet scale preview failed", error),
+              );
+              if (scaleFrame.current === null) {
+                scaleFrame.current = window.requestAnimationFrame(() => {
+                  scaleFrame.current = null;
+                  void previewPetScale(scalePreviewValue.current).catch(
+                    (error: unknown) =>
+                      console.error("pet scale resize failed", error),
+                  );
+                });
+              }
+            }}
+          />
+          <span className="set-slider-value">
+            {settings.petScale.toFixed(1)}x
+          </span>
+        </Row>
+        <Row label={t.petVisible}>
+          <Switch
+            label={t.petVisible}
+            checked={settings.petVisible}
+            onChange={(v) => patch("petVisible", v)}
           />
         </Row>
-      </BentoCard>
+        <Row label={t.alwaysOnTop}>
+          <Switch
+            label={t.alwaysOnTop}
+            checked={settings.alwaysOnTop}
+            onChange={(value) => patch("alwaysOnTop", value)}
+          />
+        </Row>
+        {(personaById(personaId).renderType ?? "glb") === "glb" && (
+          <Row label={t.mouseFollow}>
+            <Switch
+              label={t.mouseFollow}
+              checked={settings.mouseFollow}
+              onChange={(value) => patch("mouseFollow", value)}
+            />
+          </Row>
+        )}
+      </div>
 
-      <PersonaPacks
-        t={t}
-        language={settings.language}
-        installed={installedPacks}
-        onInstalledChange={setInstalledPacks}
-        activePersonaId={personaId}
-        onActivePersonaRemoved={() => patch("personaId", DEFAULT_PERSONA_ID)}
-        onActivePersonaChange={(nextPersonaId) => patch("personaId", nextPersonaId)}
-      />
-    </>
+      <Row label={t.userName} className="set-row-nickname">
+        <input
+          className="set-input"
+          type="text"
+          aria-label={t.userName}
+          value={settings.userName}
+          placeholder={t.userNamePlaceholder}
+          onChange={(e) => patch("userName", e.target.value)}
+        />
+      </Row>
+    </PersonaPacks>
   );
 }
 
@@ -600,7 +542,6 @@ function AboutTab({ t }: TabProps) {
         <div className="set-about-meta">
           <div className="set-about-headline">
             <h2 className="set-about-name">YUME</h2>
-            <span className="set-about-tag">Deskmate</span>
             <span className="set-about-version">{version ? `v${version}` : "…"}</span>
           </div>
           <p className="set-about-desc">{t.aboutDesc}</p>

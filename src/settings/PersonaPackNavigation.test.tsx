@@ -110,7 +110,10 @@ test("supports keyboard selection on package icons", async () => {
   await screen.findByRole("article", { name: "aki 团子" });
   const user = userEvent.setup();
   await user.tab();
+  expect(document.activeElement).toBe(screen.getByRole("combobox", { name: "角色" }));
   await user.tab();
+  await user.tab();
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "aki 团子" }));
   await user.keyboard("{Enter}");
   expect(screen.getByRole("button", { name: "aki 团子", pressed: true })).toBeDefined();
   expect(selections).toHaveBeenCalledWith("changli");

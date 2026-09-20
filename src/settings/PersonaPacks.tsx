@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { positionPackTooltip } from "./alignPackTooltip";
 import type { Dict } from "../lib/i18n";
 import {
@@ -19,6 +19,7 @@ import {
   packLibrary,
   type PackActivity,
 } from "./personaPackModel";
+import { BentoCard } from "./settingsPrimitives";
 import "./persona-packs.css";
 
 type Notice = {
@@ -27,6 +28,7 @@ type Notice = {
 };
 
 export interface PersonaPacksProps {
+  readonly children?: ReactNode;
   readonly t: Dict;
   readonly language: string;
   readonly installed: readonly InstalledPack[];
@@ -43,6 +45,7 @@ function errorText(error: unknown, fallback: string): string {
 }
 
 export function PersonaPacks({
+  children,
   t,
   language,
   installed,
@@ -154,84 +157,95 @@ export function PersonaPacks({
     if (first !== undefined) onActivePersonaChange(first.id);
   };
 
+  const selector = (
+    <PersonaPackSelector
+      pack={selectedPack}
+      activePersonaId={activePersonaId}
+      onActivePersonaChange={onActivePersonaChange}
+      t={t}
+      language={language}
+    />
+  );
+
   return (
-    <section ref={libraryRef} className="set-packs" aria-labelledby="persona-packs-heading">
-      <div className="set-packs-head">
-        <div>
-          <h3 className="set-packs-title" id="persona-packs-heading">
-            {t.personaPacks}
-          </h3>
-          <p className="set-packs-summary" aria-live="polite">
-            {t.packLibrarySummary(packs.length, availablePersonas)}
-          </p>
-        </div>
-      </div>
-
-      <ul className="set-pack-list">
-        {packs.map((pack) => (
-          <li key={"pack:" + pack.packId}>
-            <PersonaPackCard
-              pack={pack}
-              selected={pack.packId === selectedPack.packId}
-              activity={activity}
-              language={language}
-              t={t}
-              onSelect={selectPack}
-              onUninstall={() => requestUninstall(pack)}
-            />
-          </li>
-        ))}
-        <li key="import">
-          <PersonaPackImport activity={activity} t={t} onImport={() => void onImport()} />
-        </li>
-      </ul>
-
-      {pendingUninstall !== null && (
-        <>
-          <div
-            className="set-confirm-backdrop"
-            onClick={() => setPendingUninstall(null)}
-          />
-          <div className="set-confirm" role="alertdialog" aria-modal="true">
-            <p className="set-confirm-body">{t.packUninstallConfirm}</p>
-            <div className="set-confirm-actions set-memory-actions">
-              <button
-                type="button"
-                className="set-btn set-btn-danger"
-                onClick={() => void onUninstall()}
-                disabled={activity !== "idle"}
-              >
-                {t.memoryConfirmDelete}
-              </button>
-              <button
-                type="button"
-                className="set-btn"
-                onClick={() => setPendingUninstall(null)}
-                disabled={activity !== "idle"}
-              >
-                {t.memoryCancelEdit}
-              </button>
-            </div>
+    <>
+      {children ? (
+        <BentoCard title={t.tabAccount}>
+          {selector}
+          {children}
+        </BentoCard>
+      ) : selector}
+      <section ref={libraryRef} className="set-packs" aria-labelledby="persona-packs-heading">
+        <div className="set-packs-head">
+          <div>
+            <h3 className="set-packs-title" id="persona-packs-heading">
+              {t.personaPacks}
+            </h3>
+            <p className="set-packs-summary" aria-live="polite">
+              {t.packLibrarySummary(packs.length, availablePersonas)}
+            </p>
           </div>
-        </>
-      )}
+        </div>
 
-      <PersonaPackSelector
-        pack={selectedPack}
-        activePersonaId={activePersonaId}
-        onActivePersonaChange={onActivePersonaChange}
-        t={t}
-        language={language}
-      />
+        <p className="set-packs-summary">{t.packSelectionHint}</p>
+        <ul className="set-pack-list">
+          {packs.map((pack) => (
+            <li key={"pack:" + pack.packId}>
+              <PersonaPackCard
+                pack={pack}
+                selected={pack.packId === selectedPack.packId}
+                activity={activity}
+                language={language}
+                t={t}
+                onSelect={selectPack}
+                onUninstall={() => requestUninstall(pack)}
+              />
+            </li>
+          ))}
+          <li key="import">
+            <PersonaPackImport activity={activity} t={t} onImport={() => void onImport()} />
+          </li>
+        </ul>
 
-      {notice !== null && (
-        <p
-          className={`set-pack-feedback set-pack-feedback-${notice.tone}`}
-          role={notice.tone === "error" ? "alert" : "status"}
-        >
-          {notice.message}
-        </p>
-      )}
-    </section>
+        {pendingUninstall !== null && (
+          <>
+            <div
+              className="set-confirm-backdrop"
+              onClick={() => setPendingUninstall(null)}
+            />
+            <div className="set-confirm" role="alertdialog" aria-modal="true">
+              <p className="set-confirm-body">{t.packUninstallConfirm}</p>
+              <div className="set-confirm-actions set-memory-actions">
+                <button
+                  type="button"
+                  className="set-btn set-btn-danger"
+                  onClick={() => void onUninstall()}
+                  disabled={activity !== "idle"}
+                >
+                  {t.memoryConfirmDelete}
+                </button>
+                <button
+                  type="button"
+                  className="set-btn"
+                  onClick={() => setPendingUninstall(null)}
+                  disabled={activity !== "idle"}
+                >
+                  {t.memoryCancelEdit}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {notice !== null && (
+          <p
+            className={`set-pack-feedback set-pack-feedback-${notice.tone}`}
+            role={notice.tone === "error" ? "alert" : "status"}
+          >
+            {notice.message}
+          </p>
+        )}
+      </section>
+    </>
   );
 }

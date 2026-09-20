@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import * as tauriCore from "@tauri-apps/api/core";
+import userEvent from "@testing-library/user-event";
+import { dict } from "../lib/i18n";
+import { SettingsNavigation, type TabId } from "./SettingsNavigation";
 import type { ReactNode } from "react";
 import { useState } from "react";
 
@@ -12,9 +16,10 @@ type FocusChangedHandler = (event: FocusChangedEvent) => void;
 const TAB_LABELS = [
   "General",
   "AI",
-  "Desktop pet",
+  "Tool permissions",
+  "Widget",
   "Shortcuts",
-  "Account",
+  "Desktop pet",
   "Memory",
   "About",
 ] as const;
@@ -30,12 +35,13 @@ type SettingsShortcutCase = {
 const SETTINGS_SHORTCUT_CASES = [
   { key: "1", modifier: "Ctrl", expectedLabel: "General" },
   { key: "2", modifier: "Ctrl", expectedLabel: "AI" },
-  { key: "3", modifier: "Ctrl", expectedLabel: "Desktop pet" },
-  { key: "4", modifier: "Ctrl", expectedLabel: "Shortcuts" },
-  { key: "5", modifier: "Ctrl", expectedLabel: "Account" },
-  { key: "6", modifier: "Ctrl", expectedLabel: "Memory" },
-  { key: "7", modifier: "Ctrl", expectedLabel: "About" },
-  { key: "4", modifier: "Meta", expectedLabel: "Shortcuts" },
+  { key: "3", modifier: "Ctrl", expectedLabel: "Tool permissions" },
+  { key: "4", modifier: "Ctrl", expectedLabel: "Widget" },
+  { key: "5", modifier: "Ctrl", expectedLabel: "Shortcuts" },
+  { key: "6", modifier: "Ctrl", expectedLabel: "Desktop pet" },
+  { key: "7", modifier: "Ctrl", expectedLabel: "Memory" },
+  { key: "8", modifier: "Ctrl", expectedLabel: "About" },
+  { key: "8", modifier: "Meta", expectedLabel: "About" },
 ] as const satisfies readonly SettingsShortcutCase[];
 
 let focusChangedHandler: FocusChangedHandler | null = null;
@@ -53,6 +59,8 @@ mock.module("@tauri-apps/api/window", () => ({
 }));
 
 const { SettingsKeyboardNavigation } = await import("./SettingsKeyboardNavigation");
+mock.module("@tauri-apps/api/core", () => ({ ...tauriCore, invoke: () => Promise.resolve([]) }));
+const { PersonaPacks } = await import("./PersonaPacks");
 
 function emitFocusChange(payload: boolean): void {
   if (focusChangedHandler === null) {
@@ -80,23 +88,14 @@ function SettingsTabsFixture({
   readonly children?: ReactNode;
   readonly clickedTabs?: TabLabel[];
 }) {
-  const [activeLabel, setActiveLabel] = useState<TabLabel>("General");
+  const [tab, setTab] = useState<TabId>("general");
   return (
     <>
-      <nav aria-label="settings">
-        {TAB_LABELS.map((label) => (
-          <button
-            key={label}
-            className={`set-tab${activeLabel === label ? " set-tab-active" : ""}`}
-            onClick={() => {
-              clickedTabs.push(label);
-              setActiveLabel(label);
-            }}
-          >
-            {label}
-          </button>
-        ))}
-      </nav>
+      <SettingsNavigation tab={tab} t={dict("en-US")} onSelect={(id) => {
+        const label = document.getElementById(`set-category-${id}`)?.textContent ?? "";
+        clickedTabs.push(label as TabLabel);
+        setTab(id);
+      }} />
       <main>{children}</main>
       <SettingsKeyboardNavigation />
     </>
@@ -352,4 +351,54 @@ describe("SettingsKeyboardNavigation", () => {
       });
     });
   }
+});
+
+for (const modifier of ["Control", "Meta"]) {
+  test(`keeps real pack confirmation open during ${modifier} navigation and resumes after cancel`, async () => {
+    const clickedTabs: TabLabel[] = [];
+    const t = dict("zh-CN");
+    render(<SettingsTabsFixture clickedTabs={clickedTabs}>
+      <PersonaPacks t={t} language="zh-CN"
+        installed={[{ packId: "aki", version: "1.0.0", personaIds: ["changli"] }]}
+        onInstalledChange={() => {}} activePersonaId="xiaozhu"
+        onActivePersonaChange={() => {}} onActivePersonaRemoved={() => {}} />
+    </SettingsTabsFixture>);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "卸载" }));
+    expect(screen.getByRole("alertdialog")).toBeDefined();
+    await user.keyboard(`{${modifier}>}8{/${modifier}}`);
+    expect(clickedTabs).toEqual([]);
+    expect(screen.getByRole("alertdialog")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    await user.keyboard(`{${modifier}>}8{/${modifier}}`);
+    expect(clickedTabs).toEqual(["About"]);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "About" }));
+  });
+}
+
+for (const hidden of [false, true]) {
+  test(`ARIA dialog shortcut guard respects hidden ancestor: ${hidden}`, async () => {
+    const clickedTabs: TabLabel[] = [];
+    const verify = mock(() => {});
+    render(<SettingsTabsFixture clickedTabs={clickedTabs}>
+      <button className="set-verify" onClick={verify}>Verify</button>
+      <div hidden={hidden}><div role="dialog" aria-modal="true">Confirm</div></div>
+    </SettingsTabsFixture>);
+    const user = userEvent.setup();
+    await user.keyboard('{Control>}8{/Control}');
+    await user.keyboard('{Control>}{Shift>}v{/Shift}{/Control}');
+    expect(clickedTabs).toEqual(hidden ? ["About"] : []);
+    expect(verify.mock.calls.length).toBe(hidden ? 1 : 0);
+  });
+}
+
+test("does not navigate when a shortcut recorder already handled the key", async () => {
+  const clickedTabs: TabLabel[] = [];
+  render(<SettingsTabsFixture clickedTabs={clickedTabs}>
+    <input aria-label="Record shortcut" onKeyDown={(event) => event.preventDefault()} />
+  </SettingsTabsFixture>);
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("textbox", { name: "Record shortcut" }));
+  await user.keyboard('{Control>}8{/Control}');
+  expect(clickedTabs).toEqual([]);
 });

@@ -47,6 +47,20 @@ function logNavigationError(error: unknown): void {
   console.error(error instanceof Error ? error : new Error(String(error)));
 }
 
+function hasOpenModal(): boolean {
+  const modals = document.querySelectorAll<HTMLElement>(
+    'dialog[open], [role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]',
+  );
+  return Array.from(modals).some((modal) => {
+    for (let element: HTMLElement | null = modal; element; element = element.parentElement) {
+      const style = getComputedStyle(element);
+      if (element.hidden || element.getAttribute("aria-hidden") === "true" ||
+          style.display === "none" || style.visibility === "hidden") return false;
+    }
+    return true;
+  });
+}
+
 export function SettingsKeyboardNavigation() {
   useEffect(() => {
     const unlisten = getCurrentWindow().onFocusChanged((event) => {
@@ -62,8 +76,9 @@ export function SettingsKeyboardNavigation() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented) return;
       if (!(event.ctrlKey || event.metaKey)) return;
-      if (document.querySelector("dialog[open]") !== null) return;
+      if (hasOpenModal()) return;
       if (event.shiftKey) {
         const key = event.key.toLowerCase();
         const handled =

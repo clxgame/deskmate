@@ -275,6 +275,46 @@ body,
   background: transparent;
 }
 
+/* Compact settings pages; material and shared spacing tokens stay unchanged. */
+.set-panel-compact {
+  --settings-card-pad-y: 12px;
+  --settings-card-pad-x: 16px;
+  --settings-card-gap: 12px;
+  padding: 16px 20px;
+}
+
+.set-panel-compact .set-bento-card {
+  padding: var(--settings-card-pad-y) var(--settings-card-pad-x);
+  margin-bottom: var(--settings-card-gap);
+}
+
+.set-panel-compact .set-bento-head {
+  margin-bottom: 8px;
+}
+
+.set-panel-compact .set-row {
+  padding-block: 8px;
+}
+
+.set-panel-compact .set-theme-picker {
+  width: 100%;
+}
+
+.set-panel-compact .set-theme-choice {
+  min-height: 36px;
+  font-size: var(--t-body);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.set-panel-compact .set-theme-choice > span:last-child {
+  min-width: 0;
+}
+
+.set-panel-compact .set-pack-active-persona {
+  margin-top: 0;
+}
+
 .set-panel-head {
   margin: 0 0 var(--s-5);
   font-size: var(--t-head);

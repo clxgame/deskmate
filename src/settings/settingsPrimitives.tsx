@@ -49,3 +49,38 @@ export function Switch({
     </label>
   );
 }
+
+export function BentoCard({
+  title,
+  description,
+  badge,
+  action,
+  children,
+  className,
+}: {
+  readonly title?: string;
+  readonly description?: string;
+  readonly badge?: string;
+  readonly action?: ReactNode;
+  readonly children: ReactNode;
+  readonly className?: string;
+}) {
+  const cardClassName = className === undefined ? "set-bento-card" : `set-bento-card ${className}`;
+  return (
+    <section className={cardClassName}>
+      {(title || description || action || badge) && (
+        <header className="set-bento-head">
+          <div className="set-bento-title-row">
+            <div className="set-bento-title-wrap">
+              {title && <h3 className="set-bento-title">{title}</h3>}
+              {badge && <span className="set-bento-badge">{badge}</span>}
+            </div>
+            {action && <div className="set-bento-action">{action}</div>}
+          </div>
+          {description && <p className="set-bento-desc">{description}</p>}
+        </header>
+      )}
+      <div className="set-bento-body">{children}</div>
+    </section>
+  );
+}

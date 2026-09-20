@@ -26,7 +26,7 @@ import { MemoryTab } from "./MemoryTab";
 import { type WorklogTarget } from "./worklog/WorklogTab";
 import { WidgetTab, type WidgetId } from "./widgets/WidgetTab";
 import { PersonaPacks } from "./PersonaPacks";
-import { Row, Switch, type TabProps } from "./settingsPrimitives";
+import { BentoCard, Row, Switch, type TabProps } from "./settingsPrimitives";
 import type { InstalledPack } from "../lib/packs";
 import {
   DEFAULT_PERSONA_ID,
@@ -213,7 +213,10 @@ export default function SettingsApp() {
   return (
     <div className="set-root" data-theme={settings?.theme ?? "dark"}>
       <header className="set-titlebar" data-tauri-drag-region="">
-        <span className="set-title">{t.settingsTitle}</span>
+        <div className="set-title-cluster">
+          <span className="set-brand-badge"><AppIcon name="pet" size={16} /> YUME</span>
+          <span className="set-title">{t.settingsTitle}</span>
+        </div>
         <button
           className="set-close"
           onClick={() => void hideSettingsWindow()}
@@ -337,48 +340,53 @@ function ThemePicker({
 function GeneralTab({ settings, patch, t }: TabProps) {
   return (
     <>
-      <Row label={t.autostart}>
-        <Switch
-          label={t.autostart}
-          checked={settings.autostart}
-          onChange={(v) => patch("autostart", v)}
-        />
-      </Row>
-      <Row label={t.language}>
-        <select
-          className="set-select"
-          value={settings.language}
-          onChange={(e) => patch("language", e.target.value)}
-        >
-          {LANGS.map((l) => (
-            <option key={l.value} value={l.value}>
-              {l.label}
-            </option>
-          ))}
-        </select>
-      </Row>
-      <Row label={t.settingsLarge}>
-        <Switch
-          label={t.settingsLarge}
-          checked={settings.settingsLarge ?? false}
-          onChange={(value) => patch("settingsLarge", value)}
-        />
-      </Row>
-      <Row label={t.chatLarge}>
-        <Switch
-          label={t.chatLarge}
-          checked={settings.chatLarge ?? false}
-          onChange={(value) => patch("chatLarge", value)}
-        />
-      </Row>
-      <Row label={t.theme}>
-        <ThemePicker
-          value={settings.theme}
-          onChange={(value) => patch("theme", value)}
-          t={t}
-        />
-      </Row>
-      <p className="set-note">{t.themeHint}</p>
+      <BentoCard title={t.tabGeneral} badge={t.settingsBadgePreferences}>
+        <Row label={t.autostart}>
+          <Switch
+            label={t.autostart}
+            checked={settings.autostart}
+            onChange={(v) => patch("autostart", v)}
+          />
+        </Row>
+        <Row label={t.language}>
+          <select
+            className="set-select"
+            aria-label={t.language}
+            value={settings.language}
+            onChange={(e) => patch("language", e.target.value)}
+          >
+            {LANGS.map((l) => (
+              <option key={l.value} value={l.value}>
+                {l.label}
+              </option>
+            ))}
+          </select>
+        </Row>
+        <Row label={t.settingsLarge}>
+          <Switch
+            label={t.settingsLarge}
+            checked={settings.settingsLarge ?? false}
+            onChange={(value) => patch("settingsLarge", value)}
+          />
+        </Row>
+        <Row label={t.chatLarge}>
+          <Switch
+            label={t.chatLarge}
+            checked={settings.chatLarge ?? false}
+            onChange={(value) => patch("chatLarge", value)}
+          />
+        </Row>
+      </BentoCard>
+
+      <BentoCard title={t.theme} description={t.themeHint} badge={t.settingsBadgeTheme}>
+        <Row label={t.theme}>
+          <ThemePicker
+            value={settings.theme}
+            onChange={(value) => patch("theme", value)}
+            t={t}
+          />
+        </Row>
+      </BentoCard>
     </>
   );
 }
@@ -387,7 +395,7 @@ function GeneralTab({ settings, patch, t }: TabProps) {
 
 function ShortcutsTab({ settings, patch, t }: TabProps) {
   return (
-    <>
+    <BentoCard title={t.tabShortcuts} description={t.shortcutHint} badge={t.settingsBadgeShortcuts}>
       <Row label={t.shortcutToggleChat}>
         <ShortcutInput
           label={t.shortcutToggleChat}
@@ -404,8 +412,7 @@ function ShortcutsTab({ settings, patch, t }: TabProps) {
           t={t}
         />
       </Row>
-      <p className="set-note">{t.shortcutHint}</p>
-    </>
+    </BentoCard>
   );
 }
 
@@ -477,69 +484,78 @@ function AccountTab({ settings, patch, t }: TabProps) {
   const [installedPacks, setInstalledPacks] = useState<InstalledPack[]>([]);
   return (
     <>
-      <div className="set-pet-controls">
-        <Row label={t.petScale}>
+      <BentoCard title={t.tabAccount} badge={t.settingsBadgePet}>
+        <div className="set-pet-controls">
+          <Row label={t.petScale}>
+            <input
+              className="set-slider"
+              type="range"
+              min={0.1}
+              max={2}
+              step={0.1}
+              value={settings.petScale}
+              aria-label={t.petScale}
+              onChange={(e) => {
+                const value = Number(e.target.value);
+                patch("petScale", value);
+                scalePreviewValue.current = value;
+                void emitPetScalePreview(value).catch((error: unknown) =>
+                  console.error("pet scale preview failed", error),
+                );
+                if (scaleFrame.current === null) {
+                  scaleFrame.current = window.requestAnimationFrame(() => {
+                    scaleFrame.current = null;
+                    void previewPetScale(scalePreviewValue.current).catch(
+                      (error: unknown) =>
+                        console.error("pet scale resize failed", error),
+                    );
+                  });
+                }
+              }}
+            />
+            <span className="set-slider-value">
+              {settings.petScale.toFixed(1)}x
+            </span>
+          </Row>
+          <Row label={t.petVisible}>
+            <Switch
+              label={t.petVisible}
+              checked={settings.petVisible}
+              onChange={(v) => patch("petVisible", v)}
+            />
+          </Row>
+          <Row label={t.alwaysOnTop}>
+            <Switch
+              label={t.alwaysOnTop}
+              checked={settings.alwaysOnTop}
+              onChange={(value) => patch("alwaysOnTop", value)}
+            />
+          </Row>
+          {(personaById(personaId).renderType ?? "glb") === "glb" && (
+            <Row label={t.mouseFollow}>
+              <Switch
+                label={t.mouseFollow}
+                checked={settings.mouseFollow}
+                onChange={(value) => patch("mouseFollow", value)}
+              />
+            </Row>
+          )}
+        </div>
+      </BentoCard>
+
+      <BentoCard title={t.userName} badge={t.settingsBadgeProfile}>
+        <Row label={t.userName} className="set-row-nickname">
           <input
-            className="set-slider"
-            type="range"
-            min={0.1}
-            max={2}
-            step={0.1}
-            value={settings.petScale}
-            aria-label={t.petScale}
-            onChange={(e) => {
-              const value = Number(e.target.value);
-              patch("petScale", value);
-              scalePreviewValue.current = value;
-              void emitPetScalePreview(value).catch((error: unknown) =>
-                console.error("pet scale preview failed", error),
-              );
-              if (scaleFrame.current === null) {
-                scaleFrame.current = window.requestAnimationFrame(() => {
-                  scaleFrame.current = null;
-                  void previewPetScale(scalePreviewValue.current).catch(
-                    (error: unknown) =>
-                      console.error("pet scale resize failed", error),
-                  );
-                });
-              }
-            }}
-          />
-          <span className="set-slider-value">
-            {settings.petScale.toFixed(1)}x
-          </span>
-        </Row>
-        <Row label={t.petVisible}>
-          <Switch
-            label={t.petVisible}
-            checked={settings.petVisible}
-            onChange={(v) => patch("petVisible", v)}
+            className="set-input"
+            type="text"
+            aria-label={t.userName}
+            value={settings.userName}
+            placeholder={t.userNamePlaceholder}
+            onChange={(e) => patch("userName", e.target.value)}
           />
         </Row>
-        <Row label={t.alwaysOnTop}>
-          <Switch
-            label={t.alwaysOnTop}
-            checked={settings.alwaysOnTop}
-            onChange={(value) => patch("alwaysOnTop", value)}
-          />
-        </Row>
-        {(personaById(personaId).renderType ?? "glb") === "glb" && <Row label={t.mouseFollow}>
-          <Switch
-            label={t.mouseFollow}
-            checked={settings.mouseFollow}
-            onChange={(value) => patch("mouseFollow", value)}
-          />
-        </Row>}
-      </div>
-      <Row label={t.userName} className="set-row-nickname">
-        <input
-          className="set-input"
-          type="text"
-          value={settings.userName}
-          placeholder={t.userNamePlaceholder}
-          onChange={(e) => patch("userName", e.target.value)}
-        />
-      </Row>
+      </BentoCard>
+
       <PersonaPacks
         t={t}
         language={settings.language}
@@ -578,29 +594,39 @@ function AboutTab({ t }: TabProps) {
   }, []);
 
   return (
-    <>
-      <p className="set-about-name">YUME</p>
-      <p className="set-about-version">{version ? `v${version}` : "…"}</p>
-      <p className="set-about-desc">{t.aboutDesc}</p>
-      <p className="set-about-credits">
-        {t.aboutCredits}
-        <a
-          href={contactUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(event) => {
-            if (!isTauri()) return;
-            event.preventDefault();
-            setContactFailed(false);
-            void invoke("open_chat_link", { url: contactUrl }).catch(() =>
-              setContactFailed(true),
-            );
-          }}
-        >
-          小著
-        </a>
+    <BentoCard className="set-bento-about">
+      <div className="set-about-hero">
+        <div className="set-about-icon-badge"><AppIcon name="pet" size={32} /></div>
+        <div className="set-about-meta">
+          <div className="set-about-headline">
+            <h2 className="set-about-name">YUME</h2>
+            <span className="set-about-tag">Deskmate</span>
+            <span className="set-about-version">{version ? `v${version}` : "…"}</span>
+          </div>
+          <p className="set-about-desc">{t.aboutDesc}</p>
+        </div>
+      </div>
+      <div className="set-about-credits-row">
+        <span className="set-about-credits">
+          {t.aboutCredits}
+          <a
+            href={contactUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(event) => {
+              if (!isTauri()) return;
+              event.preventDefault();
+              setContactFailed(false);
+              void invoke("open_chat_link", { url: contactUrl }).catch(() =>
+                setContactFailed(true),
+              );
+            }}
+          >
+            小著
+          </a>
+        </span>
         {contactFailed && <span className="set-about-error" role="alert"> {t.aboutContactError}</span>}
-      </p>
-    </>
+      </div>
+    </BentoCard>
   );
 }

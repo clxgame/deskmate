@@ -204,3 +204,42 @@ fn cancel_evicts_cached_approval_and_automatic_reply_runs_without_locks() -> Tes
     fs::remove_dir_all(root)?;
     Ok(())
 }
+
+#[test]
+fn invalid_permission_snapshot_fails_the_run_instead_of_retrying_forever() -> TestResult<()> {
+    // Given: an active run whose message snapshot is readable but whose permission
+    // snapshot is structurally invalid and cannot be repaired.
+    let (root, workspace) = fixture("invalid-permission")?;
+    let (runs, permissions) = active(&root, &workspace)?;
+
+    // When: the collector sees the invalid permission snapshot.
+    let result = collect_once_with(
+        &runs,
+        &permissions,
+        CollectorActions {
+            snapshot: |_: &RunRecord| Ok(SnapshotRead::Messages(permission_snapshot())),
+            pending: |_: &RunRecord| Err("permission_invalid_metadata".into()),
+            archive: |_: &RunRecord, _: &[NativeMessage]| Ok(()),
+            respond: |_: &RunRecord, _: &PermissionRequest, _: Reply| Ok(()),
+        },
+    );
+
+    // Then: the existing failed-run receipt becomes visible and the run is no longer active.
+    assert_eq!(result, Err("permission_invalid_metadata".into()));
+    let listing = runs.read()?;
+    assert!(listing.active.is_none());
+    assert_eq!(
+        listing.recent[0].outcome,
+        Some(crate::agent::RunOutcome::Failed)
+    );
+    assert_eq!(
+        listing.recent[0].error_summary.as_deref(),
+        Some("permission_invalid_metadata")
+    );
+    assert_eq!(
+        permissions.cancel_run("msg_run"),
+        Err("agent_run_unknown".into())
+    );
+    fs::remove_dir_all(root)?;
+    Ok(())
+}

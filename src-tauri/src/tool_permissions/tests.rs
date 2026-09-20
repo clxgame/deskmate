@@ -1,4 +1,5 @@
-use super::runtime::{pending_scoped, reply_current, resolve_pending, respond_scoped, Reply};
+use super::runtime::{reply_current, resolve_pending, respond_scoped, Reply};
+use super::scoped::pending_scoped;
 use super::{Mode, ToolPermissions};
 use crate::agent::AgentPermissionState;
 use serde_json::json;

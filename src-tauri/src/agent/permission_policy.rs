@@ -18,7 +18,27 @@ fn read_paths_allowed(
     workspace: &WorkspaceRoot,
     request: &PermissionRequest,
 ) -> Result<bool, String> {
-    Ok(request_paths(request)?.into_iter().all(|path| {
+    let metadata_path = request
+        .metadata
+        .get("path")
+        .map(|value| {
+            value
+                .as_str()
+                .filter(|path| !path.is_empty())
+                .map(Path::new)
+                .ok_or_else(|| "agent_path_metadata_missing".to_owned())
+        })
+        .transpose()?;
+    let paths = if matches!(request.permission.as_str(), "glob" | "grep" | "list") {
+        vec![metadata_path.ok_or_else(|| "agent_path_metadata_missing".to_owned())?]
+    } else {
+        let mut paths = request_paths(request)?;
+        if let Some(path) = metadata_path {
+            paths.push(path);
+        }
+        paths
+    };
+    Ok(paths.into_iter().all(|path| {
         workspace
             .resolve_opencode(path, PathIntent::Existing)
             .is_ok()

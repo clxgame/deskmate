@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::{
     collections::BTreeMap,
     io::{BufRead, BufReader},
+    path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -95,7 +96,52 @@ impl PermissionEvents {
         }
         Ok(state.requests.values().cloned().collect())
     }
+
+    pub(super) fn pending_scoped(
+        &self,
+        base: &str,
+        directory: &Path,
+        session: &str,
+    ) -> Result<Vec<PermissionRequest>, String> {
+        let requests = super::scoped::pending_scoped(base, directory).or_else(|error| {
+            if error == "permission_invalid_metadata" {
+                self.snapshot().map_err(|_| error)
+            } else {
+                Err(error)
+            }
+        })?;
+        requests
+            .into_iter()
+            .filter(|request| request.session_id == session)
+            .map(|mut request| {
+                if matches!(
+                    request.permission.as_str(),
+                    "read" | "glob" | "grep" | "list"
+                ) {
+                    let metadata = request
+                        .metadata
+                        .as_object_mut()
+                        .ok_or_else(|| "permission_invalid_metadata".to_owned())?;
+                    match metadata.get("path") {
+                        None => {
+                            metadata.insert(
+                                "path".into(),
+                                Value::String(crate::agent::opencode_wire_directory(directory)),
+                            );
+                        }
+                        Some(Value::String(path)) if !path.is_empty() => {}
+                        Some(_) => return Err("permission_invalid_metadata".to_owned()),
+                    }
+                }
+                Ok(request)
+            })
+            .collect()
+    }
 }
+
+#[cfg(test)]
+#[path = "events_scoped_tests.rs"]
+mod scoped_tests;
 
 #[cfg(test)]
 mod tests {
@@ -111,6 +157,7 @@ mod tests {
         events.accept(json!({"type":"permission.replied","properties":{"requestID":"p1"}}));
         assert!(events.snapshot().is_err());
     }
+
     #[test]
     #[ignore = "requires an isolated live OpenCode instance"]
     fn live_web_permission_without_timeout() {

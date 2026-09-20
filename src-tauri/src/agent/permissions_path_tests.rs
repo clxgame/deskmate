@@ -136,3 +136,50 @@ fn asks_for_host_observed_existing_and_new_edit_targets() -> TestResult<()> {
     fs::remove_dir_all(root).checked("remove fixture")?;
     Ok(())
 }
+
+#[test]
+fn glob_pattern_uses_its_host_defaulted_workspace_path() -> TestResult<()> {
+    // Given: a glob request whose search pattern is not itself a filesystem path.
+    let root = std::env::temp_dir().join(format!(
+        "yume-agent-glob-permission-{}",
+        uuid::Uuid::new_v4()
+    ));
+    fs::create_dir_all(&root).checked("create fixture")?;
+    let state = AgentPermissionState::default();
+    state
+        .register_run("run-a", "session-a", &root)
+        .checked("register run")?;
+
+    // When: the permission boundary evaluates defaulted and caller-supplied paths.
+    let cases = [
+        (
+            "p-inside",
+            opencode_wire_directory(&root),
+            PendingDecision::AllowOnce,
+        ),
+        (
+            "p-outside",
+            opencode_wire_directory(root.parent().checked("fixture parent")?),
+            PendingDecision::Reject,
+        ),
+    ];
+
+    // Then: the existing workspace boundary allows only the in-workspace search.
+    for (id, path, expected) in cases {
+        assert_eq!(
+            state.accept(
+                "run-a",
+                request(
+                    id,
+                    "session-a",
+                    "glob",
+                    &["**/*snake*"],
+                    json!({"path": path}),
+                ),
+            )?,
+            expected
+        );
+    }
+    fs::remove_dir_all(root)?;
+    Ok(())
+}

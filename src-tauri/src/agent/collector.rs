@@ -19,6 +19,17 @@ pub(super) struct CollectorActions<S, P, A, R> {
     pub(super) respond: R,
 }
 
+fn invalid_permission_snapshot(error: &str) -> bool {
+    matches!(
+        error,
+        "permission_invalid_metadata"
+            | "permission_invalid_response"
+            | "agent_path_metadata_missing"
+            | "agent_shell_metadata_missing"
+            | "agent_invalid_id"
+    )
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CollectionMode {
     Live,
@@ -110,6 +121,11 @@ where
                             )
                         }) {
                             Ok(replies) => automatic = replies,
+                            Err(error) if invalid_permission_snapshot(&error) => {
+                                state.fail_active(&candidate.run_id, &error)?;
+                                let _ = permissions.cancel_run(&candidate.run_id);
+                                reported_error = Some(error);
+                            }
                             Err(error) => reported_error = Some(error),
                         }
                     }
@@ -161,7 +177,15 @@ pub(crate) fn collect_active_run_once(
                 if mode == CollectionMode::Recovery {
                     Ok(Vec::new())
                 } else {
-                    crate::tool_permissions::runtime::pending_scoped(&base, &record.workspace_path)
+                    let session = record
+                        .session_id
+                        .as_deref()
+                        .ok_or_else(|| "agent_session_unknown".to_owned())?;
+                    crate::tool_permissions::runtime::pending_scoped_live(
+                        app,
+                        &record.workspace_path,
+                        session,
+                    )
                 }
             },
             archive: |record: &RunRecord, messages: &[NativeMessage]| {

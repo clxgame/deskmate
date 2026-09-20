@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use std::time::Duration;
 use tauri::Manager;
 
-pub(crate) use super::scoped::{pending_scoped, respond_scoped};
+pub(crate) use super::scoped::{pending_scoped_live, respond_scoped};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -1,6 +1,6 @@
 # YUME 设置界面第二轮改进：规划与施工方案
 
-> 状态：P0 代码实施与前端验证已完成；原生窗口验收及新安装包尚未进行。P1 材质统一与 P2 原生效果仍作为后续独立阶段。
+> 状态：P0 已完成，0.4.6 macOS 手动安装验收包已签名、公证并校验；原生窗口交互仍待实机验收。P1 材质统一与 P2 原生效果仍作为后续独立阶段。
 > 基线：YUME 0.4.5，`codex/frontend-redesign`，提交 `82c128e`。
 > 主要验收平台：macOS Apple Silicon；默认设置窗口：720 × 520。
 
@@ -301,3 +301,16 @@ bun run tauri build --no-sign --bundles app --ci
 - 快捷键预览使用较长的模拟字符串，输入框末尾需要横向查看；本轮未改快捷键显示格式。
 - 版本号继续为 0.4.5；本轮尚未生成新的签名、公证安装包。已有 0.4.5 安装包不包含此次 P0 改动。
 - P1 和 P2 尚未实施。
+
+## 12. macOS 0.4.6 验收包（2026-09-21）
+
+用户随后要求生成新包，版本统一更新为 0.4.6；对应源码提交为 `b08d08d`，包含 P0 提交 `d6c8a4d`，已推送设计分支。
+
+- macOS 发布及内置资源专项测试：14 项通过；加上本轮设置测试，共 269 项相关测试通过。
+- Tauri Apple Silicon 应用编译成功。首次专项测试受默认 Xcode 路径影响失败，指定 Command Line Tools 后重跑通过。
+- Developer ID 签名、应用和 DMG 的 Apple 公证及凭据附加、Gatekeeper、依赖可移植性、辅助程序启动检查均通过。
+- 重新打开 DMG、ZIP 和更新候选包，检查应用签名、公证、0.4.6 版本号及内容一致性，全部通过。
+- 推荐安装文件：`output/frontend-redesign-0.4.6/signed-verified/downloads/YUME_0.4.6_aarch64.dmg`。
+- 安装说明：`output/frontend-redesign-0.4.6/README.md`；最终校验值：下载目录的 `SHA256SUMS-installers.txt`。
+
+本次未创建 GitHub Release。自动更新候选包尚无仓库 updater 签名，不用于自动更新发布；DMG 和 ZIP 可手动安装。第 11 节记录的是打包前的 P0 验证状态，原生窗口交互等未验收项仍有效。

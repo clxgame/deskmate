@@ -21,6 +21,8 @@ function ApprovalCard({ request, onReply, t }: { readonly request: PermissionReq
   const cwd = metadata && typeof metadata === "object" && "cwd" in metadata && typeof metadata.cwd === "string" ? metadata.cwd : undefined;
   const details = typeof summary === "string" ? [summary, cwd].filter((item) => item !== undefined).join("\n") : request.metadata && typeof request.metadata === "object" && Object.keys(request.metadata).length > 0
     ? JSON.stringify(request.metadata, null, 2) : request.patterns.join("\n");
+  const rememberPatterns = request.always ?? [];
+  const canRemember = request.rememberScope !== undefined && rememberPatterns.length > 0;
   const respond = async (decision: PermissionReply) => {
     setSubmitting(true);
     setFailed(false);
@@ -33,9 +35,15 @@ function ApprovalCard({ request, onReply, t }: { readonly request: PermissionReq
   return <section className="chat-tool-approval" aria-label={t.permissionConfirm}>
     <strong>{t.permissionConfirm} · {key ? t.permissionLabels[key] : request.permission}</strong>
     <pre>{details}</pre>
+    {canRemember && <div className="chat-tool-approval-scope">
+      <span>{t.permissionAlwaysScope}</span>
+      {rememberPatterns.map((pattern) => <code key={pattern}>{pattern}</code>)}
+      <span title={request.rememberScope}>{request.rememberScope}</span>
+    </div>}
     {failed && <p role="alert">{t.permissionFailed}</p>}
     <div className="chat-tool-approval-actions">
       <button disabled={submitting} onClick={() => void respond("once")}>{t.permissionAllowOnce}</button>
+      {canRemember && <button disabled={submitting} onClick={() => void respond("always")}>{t.permissionAllowAlways}</button>}
       <button disabled={submitting} onClick={() => void respond("reject")}>{t.permissionCancel}</button>
     </div>
   </section>;

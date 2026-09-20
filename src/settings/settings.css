@@ -1425,3 +1425,33 @@ body,
   font-size: var(--t-head);
   font-weight: 600;
 }
+
+.set-permission-rules {
+  display: grid;
+  gap: var(--s-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.set-permission-rule {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+}
+
+.set-permission-rule span {
+  display: grid;
+  min-width: 0;
+  gap: var(--s-1);
+  overflow-wrap: anywhere;
+}
+
+.set-permission-rule small {
+  color: var(--text-dim);
+}

@@ -17,6 +17,20 @@
   font: inherit;
   color: var(--text-dim);
 }
+.chat-tool-approval-scope {
+  display: grid;
+  gap: var(--s-1);
+  margin-block: var(--s-2);
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+.chat-tool-approval-scope code {
+  padding: var(--s-1) var(--s-2);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  color: var(--text);
+  white-space: pre-wrap;
+}
 .chat-tool-approval-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); }
 .chat-tool-approval-actions button {
   padding: var(--s-1) var(--s-3);

@@ -56,6 +56,7 @@ use crate::tool_permissions::runtime::{PermissionRequest, Reply};
 #[serde(rename_all = "snake_case")]
 pub(crate) enum AgentReply {
     Once,
+    Always,
     Reject,
 }
 
@@ -65,6 +66,7 @@ pub(crate) struct AgentPendingPermission {
     request_id: String,
     permission: String,
     patterns: Vec<String>,
+    always: Vec<String>,
     metadata: serde_json::Value,
     command: Option<String>,
     cwd: String,
@@ -93,12 +95,8 @@ fn process_reply(
     run_id: &str,
     request_id: &str,
     reply: AgentReply,
-) -> Result<(PermissionRequest, Reply), String> {
+) -> Result<(PermissionRequest, AgentReply), String> {
     let request = state.take_reply(run_id, request_id)?;
-    let reply = match reply {
-        AgentReply::Once => Reply::Once,
-        AgentReply::Reject => Reply::Reject,
-    };
     Ok((request, reply))
 }
 
@@ -110,7 +108,7 @@ fn process_current_reply(
     run_id: &str,
     request_id: &str,
     reply: AgentReply,
-) -> Result<(PermissionRequest, Reply, std::path::PathBuf), String> {
+) -> Result<(PermissionRequest, AgentReply, std::path::PathBuf), String> {
     let record = run_state
         .active_record(run_id)
         .map_err(|_| STALE_PERMISSION.to_owned())?;
@@ -150,8 +148,8 @@ fn pending_projection(
     }
 }
 
-fn mark_rejected_run(state: &AgentRunState, run_id: &str, reply: Reply) -> Result<(), String> {
-    if matches!(reply, Reply::Reject) {
+fn mark_rejected_run(state: &AgentRunState, run_id: &str, reply: AgentReply) -> Result<(), String> {
+    if matches!(reply, AgentReply::Reject) {
         state.request_finish(run_id, RunOutcome::Cancelled, None)?;
     }
     Ok(())
@@ -182,7 +180,7 @@ pub(crate) async fn agent_permission_reply(
             .map_err(|_| STALE_PERMISSION.to_owned())?;
         let state = app.state::<AgentRunState>();
         let base = crate::tool_permissions::runtime::endpoint(&app);
-        let (request, reply, workspace) = {
+        let (request, decision, workspace) = {
             let _operation = state.lock_operation()?;
             process_current_reply(
                 &state,
@@ -192,12 +190,26 @@ pub(crate) async fn agent_permission_reply(
                 reply,
             )?
         };
-        crate::tool_permissions::runtime::respond_scoped(&base, &request, reply, &workspace)?;
+        if matches!(decision, AgentReply::Always) {
+            crate::settings::remember_agent_permission(&app, &workspace, &request)?;
+            app.state::<AgentPermissionState>()
+                .remember_approval(&run_id, &request)?;
+        }
+        let engine_reply = match decision {
+            AgentReply::Once | AgentReply::Always => Reply::Once,
+            AgentReply::Reject => Reply::Reject,
+        };
+        crate::tool_permissions::runtime::respond_scoped(
+            &base,
+            &request,
+            engine_reply,
+            &workspace,
+        )?;
         {
             let _operation = state.lock_operation()?;
-            mark_rejected_run(&state, &run_id, reply)?;
+            mark_rejected_run(&state, &run_id, decision)?;
         }
-        if matches!(reply, Reply::Reject) {
+        if matches!(decision, AgentReply::Reject) {
             collector::collect_active_run_once(&app, collector::CollectionMode::Live)?;
         }
         Ok(())

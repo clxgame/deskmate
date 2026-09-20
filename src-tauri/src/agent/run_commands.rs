@@ -71,9 +71,10 @@ pub(crate) async fn agent_run_start(
                     .collect::<Vec<_>>()
                     .join("\n\n"),
                 snapshot,
+                settings.agent_permission_approvals.clone(),
             ))
         })();
-        let (system, settings) = match prepared {
+        let (system, settings, approvals) = match prepared {
             Ok(prepared) => prepared,
             Err(error) => {
                 let _ = state.fail_active(&run_id, &error);
@@ -108,7 +109,7 @@ pub(crate) async fn agent_run_start(
         };
         if let Err(error) = state.bind_session_with(&run_id, &session, || {
             app.state::<AgentPermissionState>()
-                .register_run(&run_id, &session, &workspace)
+                .register_run_with_approvals(&run_id, &session, &workspace, &approvals)
         }) {
             let _ = app.state::<AgentPermissionState>().cancel_run(&run_id);
             let _ = state.fail_active(&run_id, &error);

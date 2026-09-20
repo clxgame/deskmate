@@ -1329,6 +1329,7 @@ pub fn run() {
             tool_permissions::runtime::tool_permission_pending,
             tool_permissions::runtime::tool_permission_reply,
             tool_permissions::runtime::tool_permission_cancel,
+            settings::agent_permission_approval_remove,
             pet_visibility::acknowledge_pet_visibility,
             pet_visibility::register_pet_visibility,
             pet_visibility::get_pet_visibility,
@@ -1474,7 +1475,10 @@ pub fn run() {
                 &app.state::<HistoryState>(),
                 &agent_runs.all_records()?,
             )?;
-            agent_runs.restore_permission_ownership(&app.state::<agent::AgentPermissionState>())?;
+            agent_runs.restore_permission_ownership(
+                &app.state::<agent::AgentPermissionState>(),
+                &loaded.agent_permission_approvals,
+            )?;
             app.manage(agent_runs);
             app.manage(worklog::commands::WorklogState::initialize(&handle));
             app.manage(worklog::bridge::WorklogBridge::initialize(&handle));

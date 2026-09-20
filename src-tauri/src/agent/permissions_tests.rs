@@ -1,6 +1,6 @@
 use super::super::test_support::{Checked, TestResult};
 use super::{AgentPermissionState, PendingDecision};
-use crate::tool_permissions::runtime::PermissionRequest;
+use crate::tool_permissions::{runtime::PermissionRequest, AgentPermissionApproval};
 use serde_json::json;
 use std::fs;
 
@@ -16,6 +16,7 @@ fn request(
         session_id: session.into(),
         permission: permission.into(),
         patterns: patterns.iter().map(|value| (*value).into()).collect(),
+        always: Vec::new(),
         metadata,
         tool: None,
     }
@@ -239,5 +240,80 @@ fn a_new_turn_on_the_same_session_drops_old_permission_ownership() -> TestResult
         )
         .is_ok());
     fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
+fn remembered_shell_pattern_is_scoped_to_its_workspace_and_can_be_added_live() -> TestResult<()> {
+    let root = std::env::temp_dir().join(format!(
+        "yume-agent-permission-remember-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let other = std::env::temp_dir().join(format!(
+        "yume-agent-permission-other-{}",
+        uuid::Uuid::new_v4()
+    ));
+    fs::create_dir_all(&root)?;
+    fs::create_dir_all(&other)?;
+    let canonical = root.canonicalize()?;
+    let approval = AgentPermissionApproval {
+        workspace_path: canonical.clone(),
+        permission: "bash".into(),
+        pattern: "Get-ChildItem *".into(),
+    };
+    let mut shell = request(
+        "p-shell",
+        "session-a",
+        "bash",
+        &[],
+        json!({"command":"Get-ChildItem -Force"}),
+    );
+    shell.always = vec!["Get-ChildItem *".into()];
+
+    let remembered = AgentPermissionState::default();
+    remembered.register_run_with_approvals(
+        "run-a",
+        "session-a",
+        &root,
+        std::slice::from_ref(&approval),
+    )?;
+    assert_eq!(
+        remembered.accept("run-a", shell.clone())?,
+        PendingDecision::AllowOnce
+    );
+
+    let live = AgentPermissionState::default();
+    live.register_run("run-b", "session-b", &root)?;
+    let mut live_shell = shell.clone();
+    live_shell.id = "p-live".into();
+    live_shell.session_id = "session-b".into();
+    assert!(matches!(
+        live.accept("run-b", live_shell.clone())?,
+        PendingDecision::Ask(_)
+    ));
+    live.remember_approval("run-b", &live_shell)?;
+    let mut repeated = live_shell;
+    repeated.id = "p-repeat".into();
+    assert_eq!(live.accept("run-b", repeated)?, PendingDecision::AllowOnce);
+    live.forget_approval(&approval)?;
+    let mut revoked = shell.clone();
+    revoked.id = "p-revoked".into();
+    revoked.session_id = "session-b".into();
+    assert!(matches!(
+        live.accept("run-b", revoked)?,
+        PendingDecision::Ask(_)
+    ));
+
+    let isolated = AgentPermissionState::default();
+    isolated.register_run_with_approvals("run-c", "session-c", &other, &[approval])?;
+    let mut other_shell = shell;
+    other_shell.id = "p-other".into();
+    other_shell.session_id = "session-c".into();
+    assert!(matches!(
+        isolated.accept("run-c", other_shell)?,
+        PendingDecision::Ask(_)
+    ));
+    fs::remove_dir_all(root)?;
+    fs::remove_dir_all(other)?;
     Ok(())
 }

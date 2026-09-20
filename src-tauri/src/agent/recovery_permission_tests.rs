@@ -35,7 +35,7 @@ fn recovered_active_session_blocks_all_legacy_permission_commands() -> TestResul
     let recovered = AgentRunState::load(store).checked("load active run")?;
     let permissions = AgentPermissionState::default();
     recovered
-        .restore_permission_ownership(&permissions)
+        .restore_permission_ownership(&permissions, &[])
         .checked("restore permission ownership")?;
 
     for _legacy_command in ["pending", "reply", "cancel"] {
@@ -55,7 +55,7 @@ fn recovered_terminal_agent_sessions_remain_excluded_from_legacy_permissions() -
     state.fail_active("msg_recovered", "done")?;
     let recovered = AgentRunState::load(store)?;
     let permissions = AgentPermissionState::default();
-    recovered.restore_permission_ownership(&permissions)?;
+    recovered.restore_permission_ownership(&permissions, &[])?;
     assert_eq!(
         permissions.reject_legacy_session("ses_recovered"),
         Err("permission_agent_session_scoped".to_owned())
@@ -71,7 +71,7 @@ fn invalid_recovered_workspace_is_interrupted_but_session_stays_blocked() -> Tes
     let recovered = AgentRunState::load(store).checked("load invalid active run")?;
     let permissions = AgentPermissionState::default();
     recovered
-        .restore_permission_ownership(&permissions)
+        .restore_permission_ownership(&permissions, &[])
         .checked("fail closed recovered ownership")?;
 
     let listing = recovered.read().checked("read interrupted run")?;
@@ -102,7 +102,7 @@ fn recovered_preparation_stays_idle_and_can_be_cancelled_for_retry() -> TestResu
 
     let recovered = AgentRunState::load(store)?;
     let permissions = AgentPermissionState::default();
-    recovered.restore_permission_ownership(&permissions)?;
+    recovered.restore_permission_ownership(&permissions, &[])?;
     let active = recovered
         .read()?
         .active
@@ -137,7 +137,7 @@ fn snapshot_transport_failure_keeps_run_active_for_retry() -> TestResult<()> {
     let state = AgentRunState::load(store).checked("load active run")?;
     let permissions = AgentPermissionState::default();
     state
-        .restore_permission_ownership(&permissions)
+        .restore_permission_ownership(&permissions, &[])
         .checked("restore ownership")?;
 
     let result = collect_once_with(

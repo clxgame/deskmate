@@ -52,6 +52,7 @@ impl AgentRunState {
     pub(crate) fn restore_permission_ownership(
         &self,
         permissions: &AgentPermissionState,
+        approvals: &[crate::tool_permissions::AgentPermissionApproval],
     ) -> Result<(), String> {
         for session_id in self
             .all_records()?
@@ -73,7 +74,12 @@ impl AgentRunState {
             return self.interrupt_active("submission_not_confirmed");
         };
         if permissions
-            .register_run(&record.run_id, &session_id, &record.workspace_path)
+            .register_run_with_approvals(
+                &record.run_id,
+                &session_id,
+                &record.workspace_path,
+                approvals,
+            )
             .is_ok()
         {
             return Ok(());

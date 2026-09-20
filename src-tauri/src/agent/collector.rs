@@ -208,6 +208,9 @@ pub(super) fn cached_permissions(
         .into_iter()
         .map(|waiting| {
             Ok(AgentPendingPermission {
+                always: crate::tool_permissions::rememberable_agent_patterns(&waiting.request)
+                    .unwrap_or_default()
+                    .to_vec(),
                 request_id: waiting.request.id,
                 permission: waiting.request.permission,
                 patterns: waiting.request.patterns,

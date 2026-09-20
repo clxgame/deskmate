@@ -106,6 +106,7 @@ fn collector_auto_allows_reads_but_caches_write_for_user() -> TestResult<()> {
         session_id: "ses_run".into(),
         permission: "read".into(),
         patterns: vec![file.to_string_lossy().into_owned()],
+        always: Vec::new(),
         metadata: serde_json::json!({}),
         tool: Some(PermissionTool {
             message_id: "msg_native".into(),
@@ -182,6 +183,7 @@ fn cancel_evicts_cached_approval_and_automatic_reply_runs_without_locks() -> Tes
                     session_id: "ses_run".into(),
                     permission: "read".into(),
                     patterns: vec![file.to_string_lossy().into_owned()],
+                    always: Vec::new(),
                     metadata: serde_json::json!({}),
                     tool: Some(crate::tool_permissions::runtime::PermissionTool {
                         message_id: "msg_native".into(),

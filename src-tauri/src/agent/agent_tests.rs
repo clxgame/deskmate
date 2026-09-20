@@ -26,6 +26,7 @@ fn real_bash_request(id: &str, session_id: &str) -> TestResult<PermissionRequest
         "sessionID": session_id,
         "permission": "bash",
         "patterns": ["bun -e \"await Bun.write('command.exit','0')\""],
+        "always": ["bun *"],
         "metadata": {"command": "bun -e \"await Bun.write('command.exit','0')\""},
         "tool": {"messageID": "msg_fixture", "callID": "call_bash"}
     }))
@@ -54,6 +55,7 @@ fn command_boundary_uses_owned_state_and_renderer_ids_only() -> TestResult<()> {
     let waiting = cached_permissions(&state, "run-a")?;
     assert_eq!(waiting.len(), 1);
     assert_eq!(waiting[0].request_id, "permission-a");
+    assert_eq!(waiting[0].always, vec!["bun *"]);
     assert_eq!(
         waiting[0].command.as_deref(),
         Some("bun -e \"await Bun.write('command.exit','0')\"")
@@ -67,6 +69,22 @@ fn command_boundary_uses_owned_state_and_renderer_ids_only() -> TestResult<()> {
     assert!(process_reply(&state, "run-b", "permission-a", super::AgentReply::Once).is_err());
     assert!(process_reply(&state, "run-a", "permission-a", super::AgentReply::Once).is_ok());
     assert!(process_reply(&state, "run-a", "permission-a", super::AgentReply::Reject).is_err());
+
+    process_fixture_pending(
+        &state,
+        "run-a",
+        vec![real_bash_request("permission-always", "session-a")?],
+    )?;
+    assert_eq!(
+        process_reply(
+            &state,
+            "run-a",
+            "permission-always",
+            super::AgentReply::Always,
+        )?
+        .1,
+        AgentReply::Always
+    );
 
     let old = real_bash_request("permission-old", "session-a")?;
     process_fixture_pending(&state, "run-a", vec![old]).checked("store old request")?;

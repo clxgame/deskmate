@@ -152,6 +152,7 @@ fn intermediate_tool_calls_keep_run_active_until_explicit_terminal_message() -> 
                     session_id: "ses_run".into(),
                     permission: "edit".into(),
                     patterns: vec![workspace.join("same.txt").to_string_lossy().into_owned()],
+                    always: Vec::new(),
                     metadata: serde_json::json!({
                         "filepath": workspace.join("same.txt").to_string_lossy()
                     }),

@@ -2,7 +2,9 @@ use super::{
     permissions::{ApprovalDetail, PendingDecision},
     workspace::{PathIntent, WorkspaceRoot},
 };
-use crate::tool_permissions::runtime::PermissionRequest;
+use crate::tool_permissions::{
+    agent_request_is_approved, runtime::PermissionRequest, AgentPermissionApproval,
+};
 use std::path::Path;
 
 fn request_paths(request: &PermissionRequest) -> Result<Vec<&Path>, String> {
@@ -58,24 +60,29 @@ fn mutation_paths_allowed(
     }))
 }
 
-pub(super) fn decision(
+pub(super) fn decision_with_approvals(
     workspace: &WorkspaceRoot,
     request: &PermissionRequest,
+    approvals: &[AgentPermissionApproval],
 ) -> Result<PendingDecision, String> {
-    match request.permission.as_str() {
-        "read" | "glob" | "grep" | "list" => Ok(if read_paths_allowed(workspace, request)? {
-            PendingDecision::AllowOnce
-        } else {
-            PendingDecision::Reject
-        }),
-        "edit" | "write" | "patch" => Ok(if mutation_paths_allowed(workspace, request)? {
-            PendingDecision::Ask(ApprovalDetail {
-                command: None,
-                cwd: workspace.path().to_path_buf(),
-            })
-        } else {
-            PendingDecision::Reject
-        }),
+    let decision = match request.permission.as_str() {
+        "read" | "glob" | "grep" | "list" => {
+            if read_paths_allowed(workspace, request)? {
+                PendingDecision::AllowOnce
+            } else {
+                PendingDecision::Reject
+            }
+        }
+        "edit" | "write" | "patch" => {
+            if mutation_paths_allowed(workspace, request)? {
+                PendingDecision::Ask(ApprovalDetail {
+                    command: None,
+                    cwd: workspace.path().to_path_buf(),
+                })
+            } else {
+                PendingDecision::Reject
+            }
+        }
         "bash" | "shell" => {
             let Some(command) = request
                 .metadata
@@ -87,16 +94,23 @@ pub(super) fn decision(
             if command.is_empty() {
                 return Err("agent_shell_metadata_missing".into());
             }
-            Ok(PendingDecision::Ask(ApprovalDetail {
+            PendingDecision::Ask(ApprovalDetail {
                 command: Some(command.to_owned()),
                 cwd: workspace.path().to_path_buf(),
-            }))
+            })
         }
-        "webfetch" | "websearch" => Ok(PendingDecision::Ask(ApprovalDetail {
+        "webfetch" | "websearch" => PendingDecision::Ask(ApprovalDetail {
             command: None,
             cwd: workspace.path().to_path_buf(),
-        })),
-        "external_directory" | "question" | "task" | "doom_loop" => Ok(PendingDecision::Reject),
-        _ => Ok(PendingDecision::Reject),
+        }),
+        "external_directory" | "question" | "task" | "doom_loop" => PendingDecision::Reject,
+        _ => PendingDecision::Reject,
+    };
+    if matches!(decision, PendingDecision::Ask(_))
+        && agent_request_is_approved(approvals, workspace.path(), request)
+    {
+        Ok(PendingDecision::AllowOnce)
+    } else {
+        Ok(decision)
     }
 }

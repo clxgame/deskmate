@@ -12,6 +12,7 @@ import {
   emitPetScalePreview,
   previewPetScale,
   setSettings,
+  onSettingsChanged,
   type Settings,
 } from "../lib/settings";
 import { listen } from "@tauri-apps/api/event";
@@ -153,6 +154,19 @@ export default function SettingsApp() {
     })();
     return () => {
       closed = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const unlisten = onSettingsChanged((next) => {
+      const current = settingsRef.current;
+      if (current === null) return;
+      const merged = { ...current, agentPermissionApprovals: next.agentPermissionApprovals };
+      settingsRef.current = merged;
+      setLocalSettings(merged);
+    });
+    return () => {
+      void unlisten.then((stopListening) => stopListening());
     };
   }, []);
 

@@ -55,6 +55,7 @@ fn lifecycle_registration_and_completion_clear_permission_ownership() -> TestRes
         session_id: "ses_run".into(),
         permission: "read".into(),
         patterns: vec![workspace.join("file.txt").to_string_lossy().into_owned()],
+        always: Vec::new(),
         metadata: serde_json::json!({}),
         tool: None,
     };

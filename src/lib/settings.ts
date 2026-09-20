@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ThemeId } from "../settings/theme";
 import type { PomodoroPreferences } from "./pomodoro";
+import type { AgentPermissionApproval } from "./toolPermissions";
 
 /** A scheduled task: at `time` (HH:MM, daily), auto-send `prompt` to the AI. */
 export interface ScheduledTask {
@@ -37,6 +38,7 @@ export interface Settings {
   modelId: string;
   yolo: boolean;
   readonly toolPermissions?: import("./toolPermissions").ToolPermissions;
+  readonly agentPermissionApprovals?: readonly AgentPermissionApproval[];
   baseUrl: string;
   apiKey: string;
   readonly providers: readonly AiProvider[];

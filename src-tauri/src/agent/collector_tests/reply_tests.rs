@@ -15,7 +15,7 @@ use std::{cell::Cell, fs};
 fn rejected_permission_archives_final_snapshot_before_cancelling() -> TestResult<()> {
     let (root, workspace) = fixture("permission-reject")?;
     let (runs, permissions) = active(&root, &workspace)?;
-    mark_rejected_run(&runs, "msg_run", Reply::Reject)?;
+    mark_rejected_run(&runs, "msg_run", AgentReply::Reject)?;
     assert_eq!(
         runs.read()?
             .active

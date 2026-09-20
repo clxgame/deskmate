@@ -16,6 +16,8 @@ pub struct PermissionRequest {
     pub permission: String,
     pub patterns: Vec<String>,
     #[serde(default)]
+    pub always: Vec<String>,
+    #[serde(default)]
     pub metadata: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<PermissionTool>,

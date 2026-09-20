@@ -16,6 +16,7 @@ fn request(
         session_id: session.into(),
         permission: permission.into(),
         patterns: patterns.iter().map(|value| (*value).into()).collect(),
+        always: Vec::new(),
         metadata,
         tool: None,
     }

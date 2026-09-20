@@ -51,6 +51,7 @@ fn old_settings_receive_safe_defaults_and_invalid_modes_are_rejected() {
         serde_json::from_value(json!({"yolo":true})).expect("old settings");
     assert_eq!(old.tool_permissions, ToolPermissions::default());
     assert_eq!(old.tool_permissions.shell, Mode::Ask);
+    assert!(old.agent_permission_approvals.is_empty());
     assert!(serde_json::from_value::<ToolPermissions>(json!({"shell":"always"})).is_err());
     let policy = ToolPermissions {
         worklog_read: Mode::Deny,
@@ -62,6 +63,28 @@ fn old_settings_receive_safe_defaults_and_invalid_modes_are_rejected() {
         )
         .expect("deserialize"),
         policy
+    );
+}
+
+#[test]
+fn remembered_agent_approvals_round_trip_with_settings() {
+    let workspace = std::path::PathBuf::from(r"E:\Codex\yume\snake");
+    let mut settings = crate::settings::Settings::default();
+    settings.agent_permission_approvals = vec![super::AgentPermissionApproval {
+        workspace_path: workspace.clone(),
+        permission: "bash".into(),
+        pattern: "Get-ChildItem *".into(),
+    }];
+    let restored: crate::settings::Settings =
+        serde_json::from_value(serde_json::to_value(&settings).expect("serialize settings"))
+            .expect("deserialize settings");
+    assert_eq!(
+        restored.agent_permission_approvals,
+        settings.agent_permission_approvals
+    );
+    assert_eq!(
+        restored.agent_permission_approvals[0].workspace_path,
+        workspace
     );
 }
 #[test]
@@ -148,6 +171,20 @@ fn allow_once_and_cancel_use_only_the_selected_request() {
         let calls = server.join().expect("finished");
         assert!(calls[1].contains(&format!("\"reply\":\"{expected}\"")));
     }
+}
+
+#[test]
+fn permission_request_keeps_engine_proposed_always_patterns() {
+    let request: super::runtime::PermissionRequest = serde_json::from_value(json!({
+        "id":"p1",
+        "sessionID":"ses_a",
+        "permission":"bash",
+        "patterns":["Get-ChildItem -Force"],
+        "always":["Get-ChildItem *"],
+        "metadata":{"command":"Get-ChildItem -Force"}
+    }))
+    .expect("permission request");
+    assert_eq!(request.always, vec!["Get-ChildItem *"]);
 }
 
 #[test]

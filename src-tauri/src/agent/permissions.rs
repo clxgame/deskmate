@@ -1,9 +1,14 @@
 use super::{
-    permission_policy::decision,
+    permission_policy::decision_with_approvals,
     permission_provenance::{matches_current_tool, validate_request},
     workspace::WorkspaceRoot,
 };
-use crate::{tool_permissions::runtime::PermissionRequest, worklog::bridge::safe_id};
+use crate::{
+    tool_permissions::{
+        approvals_for_request, runtime::PermissionRequest, AgentPermissionApproval,
+    },
+    worklog::bridge::safe_id,
+};
 use std::{collections::HashMap, path::Path, sync::Mutex};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,6 +27,7 @@ pub(super) struct ApprovalDetail {
 struct OwnedRun {
     session_id: String,
     workspace: WorkspaceRoot,
+    approvals: Vec<AgentPermissionApproval>,
 }
 
 struct OwnedRequest {
@@ -52,12 +58,23 @@ impl AgentPermissionState {
         session_id: &str,
         workspace: impl AsRef<Path>,
     ) -> Result<(), String> {
+        self.register_run_with_approvals(run_id, session_id, workspace, &[])
+    }
+
+    pub(crate) fn register_run_with_approvals(
+        &self,
+        run_id: &str,
+        session_id: &str,
+        workspace: impl AsRef<Path>,
+        approvals: &[AgentPermissionApproval],
+    ) -> Result<(), String> {
         if !safe_id(run_id) || !safe_id(session_id) {
             return Err("agent_invalid_id".into());
         }
         let run = OwnedRun {
             session_id: session_id.to_owned(),
             workspace: WorkspaceRoot::open(workspace).map_err(|error| error.to_string())?,
+            approvals: approvals.to_vec(),
         };
         let mut data = self
             .0
@@ -97,7 +114,7 @@ impl AgentPermissionState {
         if run.session_id != request.session_id {
             return Err("agent_session_mismatch".into());
         }
-        let result = decision(&run.workspace, &request)?;
+        let result = decision_with_approvals(&run.workspace, &request, &run.approvals)?;
         if let PendingDecision::Ask(detail) = &result {
             if let Some(existing) = data.pending.get(&request.id) {
                 return if existing.run_id == run_id {
@@ -149,7 +166,7 @@ impl AgentPermissionState {
             if !matches_current_tool(&request, message_ids, call_ids) {
                 continue;
             }
-            let result = decision(&run.workspace, &request)?;
+            let result = decision_with_approvals(&run.workspace, &request, &run.approvals)?;
             evaluated.push((request, result));
         }
         for (request, result) in &evaluated {
@@ -211,6 +228,41 @@ impl AgentPermissionState {
             .remove(request_id)
             .map(|owned| owned.request)
             .ok_or_else(|| "agent_permission_expired".to_owned())
+    }
+
+    pub(crate) fn remember_approval(
+        &self,
+        run_id: &str,
+        request: &PermissionRequest,
+    ) -> Result<(), String> {
+        if !safe_id(run_id) || !safe_id(&request.id) {
+            return Err("agent_invalid_id".into());
+        }
+        let mut data = self
+            .0
+            .lock()
+            .map_err(|_| "agent_permission_unavailable".to_owned())?;
+        let run = data
+            .runs
+            .get_mut(run_id)
+            .ok_or_else(|| "agent_run_unknown".to_owned())?;
+        for approval in approvals_for_request(run.workspace.path(), request)? {
+            if !run.approvals.contains(&approval) {
+                run.approvals.push(approval);
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn forget_approval(&self, approval: &AgentPermissionApproval) -> Result<(), String> {
+        let mut data = self
+            .0
+            .lock()
+            .map_err(|_| "agent_permission_unavailable".to_owned())?;
+        for run in data.runs.values_mut() {
+            run.approvals.retain(|saved| saved != approval);
+        }
+        Ok(())
     }
 
     pub(crate) fn cancel_run(&self, run_id: &str) -> Result<(), String> {

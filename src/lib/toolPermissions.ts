@@ -15,9 +15,16 @@ export type PermissionRequest = {
   readonly sessionID: string;
   readonly permission: string;
   readonly patterns: readonly string[];
+  readonly always?: readonly string[];
+  readonly rememberScope?: string;
   readonly metadata: unknown;
 };
-export type PermissionReply = "once" | "reject";
+export type PermissionReply = "once" | "always" | "reject";
+export type AgentPermissionApproval = {
+  readonly workspacePath: string;
+  readonly permission: string;
+  readonly pattern: string;
+};
 export function pendingPermissions(sessionId: string): Promise<readonly PermissionRequest[]> {
   return invoke("tool_permission_pending", { sessionId });
 }
@@ -26,6 +33,9 @@ export function replyPermission(sessionId: string, requestId: string, reply: Per
 }
 export function cancelPermissions(sessionId: string): Promise<void> {
   return invoke("tool_permission_cancel", { sessionId });
+}
+export function removeAgentPermissionApproval(approval: AgentPermissionApproval): Promise<readonly AgentPermissionApproval[]> {
+  return invoke("agent_permission_approval_remove", { approval });
 }
 export function permissionKey(tool: string): keyof ToolPermissions | null {
   switch (tool) {

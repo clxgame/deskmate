@@ -17,7 +17,7 @@ mock.module("@tauri-apps/api/core", () => ({
     if (command === "agent_run_start") { projection = { active: run, recent: [], artifacts: [] }; return run; }
     if (command === "agent_permission_pending") {
       if ((args as { runId?: string } | undefined)?.runId === "msg_preparing") return [];
-      return [{ requestId: "req_one", permission: "bash", patterns: [], metadata: {}, command: "bun test", cwd: "C:\workspace" }];
+      return [{ requestId: "req_one", permission: "bash", patterns: [], always: ["bun *"], metadata: {}, command: "bun test", cwd: "C:\workspace" }];
     }
     if (command === "agent_run_cancel") projection = { active: null, recent: [{ ...run, outcome: "cancelled" }], artifacts: [] };
     return undefined;
@@ -68,6 +68,16 @@ test("keeps recovered preparation visible with empty approvals and Stop cancels 
   expect(screen.queryByRole("button", { name: "允许这一次" })).toBeNull();
   fireEvent.click(stop);
   await waitFor(() => expect(calls.some((item) => item.command === "agent_run_cancel" && JSON.stringify(item.args) === JSON.stringify({ runId: "msg_preparing" }))).toBe(true));
+});
+test("always approval uses the host-owned workspace permission command", async () => {
+  render(<WorkspaceHarness prompt="执行检查" />);
+  fireEvent.click(screen.getByRole("button", { name: "选择工作文件夹" }));
+  await screen.findByText("C:\\workspace");
+  fireEvent.click(screen.getByTestId("composer-submit"));
+  const always = await screen.findByRole("button", { name: "在此文件夹始终允许这类命令" });
+  fireEvent.click(always);
+  await waitFor(() => expect(calls.some((item) => item.command === "agent_permission_reply" && JSON.stringify(item.args) === JSON.stringify({ runId: "msg_run", requestId: "req_one", reply: "always" }))).toBe(true));
+  expect(calls.some((item) => item.command === "tool_permission_reply")).toBe(false);
 });
 test("picker cancellation submits nothing", async () => {
   selected = null;

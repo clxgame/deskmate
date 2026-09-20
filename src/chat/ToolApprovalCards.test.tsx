@@ -16,6 +16,19 @@ test("allow and cancel target only the requested call", async()=>{
   fireEvent.click(ui.getByRole("button",{name:"允许这一次"}));
   await waitFor(()=>expect(calls).toEqual([{item:request,reply:"once"}]));
 });
+test("always approval shows the saved project scope and replies with always", async()=>{
+  const calls:unknown[]=[];
+  const scopedRequest: PermissionRequest={
+    ...request,
+    always:["Get-ChildItem *"],
+    rememberScope:"E:\\Codex\\yume\\snake",
+  };
+  const ui=render(<ToolApprovalCards requests={[scopedRequest]} error={false} onReply={async(item,reply)=>{calls.push({item,reply});}} t={dict("zh-CN")} />);
+  expect(ui.getByText("Get-ChildItem *")).toBeDefined();
+  expect(ui.getByText("E:\\Codex\\yume\\snake")).toBeDefined();
+  fireEvent.click(ui.getByRole("button",{name:"在此文件夹始终允许这类命令"}));
+  await waitFor(()=>expect(calls).toEqual([{item:scopedRequest,reply:"always"}]));
+});
 test("cancel sends rejection, and failed submission stays retryable",async()=>{
   let fail=true;const replies:string[]=[];
   const ui=render(<ToolApprovalCards requests={[request]} error={false} onReply={async(_,reply)=>{replies.push(reply);if(fail)throw new Error("synthetic offline");}} t={dict("zh-CN")} />);

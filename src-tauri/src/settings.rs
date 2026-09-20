@@ -199,6 +199,7 @@ pub struct Settings {
     pub model_id: String,
     pub yolo: bool,
     pub tool_permissions: crate::tool_permissions::ToolPermissions,
+    pub agent_permission_approvals: Vec<crate::tool_permissions::AgentPermissionApproval>,
     pub base_url: String,
     pub api_key: String,
     /// Configured gateways; the first is the legacy-migrated one.
@@ -249,6 +250,7 @@ impl Default for Settings {
             model_id: String::new(),
             yolo: false,
             tool_permissions: crate::tool_permissions::ToolPermissions::default(),
+            agent_permission_approvals: Vec::new(),
             base_url: DEFAULT_AI_BASE_URL.into(),
             api_key: String::new(),
             providers: Vec::new(),
@@ -1199,6 +1201,7 @@ pub fn set_settings(
     settings.api_key = settings.api_key.trim().to_string();
     // SAFE-UNWRAP: a poisoned settings mutex means an earlier command panicked.
     let old = { state.0.lock().unwrap().clone() };
+    settings.agent_permission_approvals = old.agent_permission_approvals.clone();
     for provider in &mut settings.providers {
         provider.base_url = normalize_base_url(&provider.base_url);
         let key = provider.api_key.trim().to_owned();
@@ -1224,6 +1227,74 @@ pub fn set_settings(
     // Notify every window (pet scale, persona, model...) of the change.
     let _ = app.emit("deskmate://settings-changed", &current);
     Ok(())
+}
+
+const MAX_AGENT_PERMISSION_APPROVALS: usize = 256;
+
+fn publish_agent_permission_approvals(
+    app: &tauri::AppHandle,
+    update: impl FnOnce(
+        &mut Vec<crate::tool_permissions::AgentPermissionApproval>,
+    ) -> Result<bool, String>,
+) -> Result<Vec<crate::tool_permissions::AgentPermissionApproval>, String> {
+    let state = app.state::<SettingsState>();
+    let mut current = state
+        .0
+        .lock()
+        .map_err(|_| "settings_unavailable".to_owned())?;
+    let old = current.clone();
+    let mut next = old.clone();
+    if !update(&mut next.agent_permission_approvals)? {
+        return Ok(next.agent_permission_approvals);
+    }
+    if next.agent_permission_approvals.len() > MAX_AGENT_PERMISSION_APPROVALS {
+        return Err("agent_permission_approval_limit".into());
+    }
+    persist_settings_update(&AppSettingsTransactionOps { app }, &old, &next)?;
+    *current = next.clone();
+    drop(current);
+    let _ = app.emit("deskmate://settings-changed", &next);
+    Ok(next.agent_permission_approvals)
+}
+
+pub(crate) fn remember_agent_permission(
+    app: &tauri::AppHandle,
+    workspace: &Path,
+    request: &crate::tool_permissions::runtime::PermissionRequest,
+) -> Result<(), String> {
+    let additions = crate::tool_permissions::approvals_for_request(workspace, request)?;
+    publish_agent_permission_approvals(app, |approvals| {
+        let mut changed = false;
+        for approval in additions {
+            if !approvals.contains(&approval) {
+                approvals.push(approval);
+                changed = true;
+            }
+        }
+        approvals.sort_by(|left, right| {
+            left.workspace_path
+                .cmp(&right.workspace_path)
+                .then_with(|| left.permission.cmp(&right.permission))
+                .then_with(|| left.pattern.cmp(&right.pattern))
+        });
+        Ok(changed)
+    })?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn agent_permission_approval_remove(
+    app: tauri::AppHandle,
+    approval: crate::tool_permissions::AgentPermissionApproval,
+) -> Result<Vec<crate::tool_permissions::AgentPermissionApproval>, String> {
+    let remaining = publish_agent_permission_approvals(&app, |approvals| {
+        let previous = approvals.len();
+        approvals.retain(|saved| saved != &approval);
+        Ok(previous != approvals.len())
+    })?;
+    app.state::<crate::agent::AgentPermissionState>()
+        .forget_approval(&approval)?;
+    Ok(remaining)
 }
 
 fn model_catalog_path(app: &tauri::AppHandle) -> PathBuf {

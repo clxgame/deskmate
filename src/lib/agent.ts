@@ -65,7 +65,9 @@ export async function pendingAgentPermissions(run: AgentRun): Promise<readonly P
   return value.map((entry) => {
     const item = record(entry);
     const patterns = strings(item.patterns);
-    return { id: text(item.requestId), sessionID: run.sessionId ?? "", permission: text(item.permission), patterns, metadata: { native: item.metadata, command: item.command, cwd: item.cwd } };
+    const always = item.always === undefined ? [] : strings(item.always);
+    const cwd = text(item.cwd);
+    return { id: text(item.requestId), sessionID: run.sessionId ?? "", permission: text(item.permission), patterns, always, rememberScope: always.length > 0 ? cwd : undefined, metadata: { native: item.metadata, command: item.command, cwd } };
   });
 }
 export function replyAgentPermission(runId: string, requestId: string, reply: PermissionReply): Promise<void> {

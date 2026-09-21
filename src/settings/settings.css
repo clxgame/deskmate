@@ -209,8 +209,6 @@ body,
   width: var(--sidebar-w);
   padding: var(--s-3) var(--s-2);
   background: var(--surface-sidebar);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
   border-right: 1px solid var(--line);
 }
 
@@ -271,7 +269,7 @@ body,
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  padding: var(--s-5) var(--s-6);
+  padding: var(--s-4) var(--s-5);
   background: transparent;
 }
 
@@ -316,7 +314,7 @@ body,
 }
 
 .set-panel-head {
-  margin: 0 0 var(--s-5);
+  margin: 0 0 var(--s-4);
   font-size: var(--t-head);
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -326,13 +324,11 @@ body,
 
 .set-bento-card {
   background: var(--surface-card);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-card);
-  padding: var(--s-4) var(--s-5);
-  margin-bottom: var(--s-4);
+  padding: var(--s-3) var(--s-4);
+  margin-bottom: var(--s-3);
   transition: border-color var(--ease), box-shadow var(--ease);
 }
 
@@ -519,6 +515,8 @@ body,
   font-size: var(--t-small);
   font-weight: 500;
   text-align: left;
+  white-space: normal;
+  line-height: 1.35;
   cursor: pointer;
   transition:
     background var(--ease),
@@ -722,7 +720,7 @@ body,
 /* ---------- about (Frosted Bento) ---------- */
 
 .set-bento-about {
-  padding: var(--s-5) var(--s-6);
+  padding: var(--s-4) var(--s-5);
 }
 
 .set-about-hero {

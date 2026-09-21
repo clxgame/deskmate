@@ -75,9 +75,9 @@
 .chat-markdown-image-alt { color: var(--text-dim); }
 
 .chat-code-block {
-  --code-card-radius: 20px;
-  --code-card-padding: 16px;
-  --code-action-size: 28px;
+  --code-card-radius: 12px;
+  --code-card-padding: 12px;
+  --code-action-size: 26px;
   min-width: 0;
   max-width: 100%;
   background: var(--surface-sunken);

@@ -41,14 +41,18 @@ let sessionCreateRequests = 0;
 let agentStartError: string | null = null;
 let activeEventSource: { onmessage: ((message: MessageEvent) => void) | null } | null = null;
 
-mock.module("@tauri-apps/api/core", () => ({ ...tauriCore, invoke }));
-mock.module("@tauri-apps/api/event", () => ({
-  emit: () => Promise.resolve(),
-  listen: () => Promise.resolve(() => {}),
-}));
-mock.module("@tauri-apps/plugin-dialog", () => ({
-  open: () => Promise.resolve(selectedWorkspace),
-}));
+function installNativeMocks(): void {
+  mock.module("@tauri-apps/api/core", () => ({ ...tauriCore, invoke }));
+  mock.module("@tauri-apps/api/event", () => ({
+    emit: () => Promise.resolve(),
+    listen: () => Promise.resolve(() => {}),
+  }));
+  mock.module("@tauri-apps/plugin-dialog", () => ({
+    open: () => Promise.resolve(selectedWorkspace),
+  }));
+}
+
+installNativeMocks();
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -124,6 +128,9 @@ const SETTINGS = {
 
 export function registerChatAttachmentHarness(): void {
   beforeEach(() => {
+  // Bun may discover this helper before running other files that replace the
+  // same modules. Resetting invoke alone does not restore their live exports.
+  installNativeMocks();
   invoke.mockReset();
   promptRequests.length = 0;
   agentProjection = { active: null, recent: [], artifacts: [] };

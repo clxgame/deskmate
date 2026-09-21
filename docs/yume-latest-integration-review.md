@@ -44,9 +44,9 @@ SettingsApp.tsx、settingsPrimitives.tsx 无需为了匹配 ZIP 文件清单而�
 | `bun run typecheck` | 生产与测试 TypeScript 检查通过。 |
 | `bun test src/settings/` | 263 pass，0 fail，31 个文件。 |
 | `bun test src/lib/` | 38 pass，0 fail，8 个文件。 |
-| `bun test src/chat/` | 352 pass，10 fail，43 个文件；不是全绿。 |
-| `bun test src/settings/ src/lib/ src/chat/` | 当前分支与未修改 main 快照均为 653 pass、10 fail，82 个文件；失败用例一致。 |
-| 单独运行 `src/chat/chatAttachmentSend.test.tsx` | 14 pass，0 fail，包含上述 10 个在批量运行中失败的用例。符合跨文件 mock/模块状态干扰的表现，根因修复另行处理。 |
+| `bun test src/chat/` | 初次审查时为 352 pass、10 fail。后续已修复测试模拟接口绑定，完整目录组合运行的 663 项均通过。 |
+| `bun test src/settings/ src/lib/ src/chat/` | 修复后 **663 pass、0 fail**，82 个文件。修复前与未修改 main 对照均为 653 pass、10 fail。 |
+| 单独运行 `src/chat/chatAttachmentSend.test.tsx` | 14 pass，0 fail，包含上述 10 个在批量运行中失败的用例。这些批量失败现已修复，详见下文。 |
 | 单独运行 `src/chat/useAgentHistoryView.test.tsx` | 3 pass，0 fail。 |
 | `bun test scripts/bundled-personas.test.ts` | 最终代码生产构建通过；3 项资产/生产包检查通过，22 次断言。此测试内部运行构建。 |
 | `git diff --check` | 通过。 |
@@ -60,11 +60,41 @@ SettingsApp.tsx、settingsPrimitives.tsx 无需为了匹配 ZIP 文件清单而�
 - 设置窗口边界 720×520；中英文通用页无纵向滚动，四个主题名称无横向溢出；英文深色和薰衣草主题另有截图。
 - 无更新时底栏仅显示 v0.4.7；更新下载条件行为由现有测试覆盖。
 
-本地交接截图与日志位于 `output/yume-latest-review/`，不进入应用生产包。浏览器截图不能证明 Windows WebView2/macOS WKWebView 下的原生透明、拖拽、缩放或 GPU 性能；此次未执行双端安装包验证。减少模糊层数也不等同于已测得性能提升。
+本地交接截图与日志位于 `output/yume-latest-review/`，不进入应用生产包。浏览器截图不能证明 Windows WebView2/macOS WKWebView 下的原生透明、拖拽、缩放或 GPU 性能；后续已完成下述 macOS 原生测试应用检查；Windows 实机、签名公证安装包与系统缩放验收仍未完成。减少模糊层数也不等同于已测得性能提升。
 
 ## 后续建议
 
-1. 优先隔离对话测试的全局 mock 和模块缓存，让按目录运行的测试恢复稳定；不能长期用单文件通过替代套件全绿。
+1. 继续按目录运行测试，保持模拟接口在用例开始前明确绑定；不要依赖辅助文件第一次被发现的顺序。此次已修复附件发送测试辅助文件的绑定问题。
 2. 后续给 Gemini 提供最新提交号与差异文件，要求交付 diff 和真实测试日志，避免旧工程整包覆盖。
 3. 在独立窗口验证设计，覆盖窄窗口、长文本、四主题、中文/英文及附件提示；聚合展示页只用于设计沟通。
 4. 发布前在 macOS、Windows 各检查一次原生拖拽/关闭、焦点、系统缩放和透明背景，确认材质可读性，再评估是否需要原生 Vibrancy/Mica。
+
+## 后续：测试隔离修复
+
+`chatAttachmentSendHarness.test.tsx` 同时被测试发现机制和其他测试导入。它初次加载时注册的 Tauri 模块模拟，可以在真正运行用例前被别的文件覆盖。`invoke.mockReset()` 只重置本地模拟函数，不能将模块当前导出的 invoke 指回它；因此用例有时读取了另一组默认设置和历史/Agent 接口。
+
+修复在 `beforeEach` 中重新绑定 core、event 和文件夹选择器模拟，然后重置每个用例的数据；保留真实 ChatApp 和原有行为断言，不通过跳过用例或增加等待时间规避失败。
+
+针对性重现命令：
+
+```sh
+bun test ./src/chat/chatAttachmentSendHarness.test.tsx ./src/chat/chatAttachmentFlow.test.tsx ./src/chat/chatAttachmentSend.test.tsx
+```
+
+在未修改 main 快照上为 **9 pass、10 fail**，修复后为 **19 pass、0 fail**。完整设置/公共库/对话组合为 **663 pass、0 fail**；生产与测试 TypeScript 检查通过。
+
+## 后续：macOS 原生窗口检查
+
+使用当前前端构建独立 `YUME UI QA.app`，应用标识及数据目录与正式版分离，包含真实 Tauri/WKWebView 窗口。该应用仅作本机测试，采用临时本地签名，未公证或作为正式安装包发布。Rust 编译存在已有的未使用代码等警告，构建成功不代表零警告。
+
+已确认：
+
+- 720×520 设置窗口中，通用设置和四个主题完整显示；深色、薰衣草主题截图已保存。
+- Cmd+8 切换关于页，Cmd+1 返回通用页；Tab 焦点依次移动，焦点描边可见。
+- 420×560 聊天窗口中，中英文混合两行草稿完整显示，附件与发送按钮对齐。
+- 聊天和设置关闭后应用继续运行；经桌宠重开聊天，草稿保持，设置主题同步至聊天；聊天内可重新打开设置。
+- 仅编辑合成草稿，未调用模型发送测试消息。
+
+未完成：标题栏拖拽自动化返回 `windowNotFoundAtPosition`，不能作为拖拽通过或应用缺陷的证据，需要人工拖动确认。Windows WebView2、不同系统缩放、原生桌面模糊与 GPU 性能仍待实机验收。
+
+截图位于 `output/yume-latest-review/native-macos/`。

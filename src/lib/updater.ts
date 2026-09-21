@@ -41,6 +41,11 @@ export function getUpdateStatus(): Promise<UpdateStatus> {
   return invoke<UpdateStatus>("update_status");
 }
 
+/** Check only; downloading and installing still require an explicit click. */
+export function checkUpdate(repo: string): Promise<string | null> {
+  return invoke<string | null>("check_update", { repo });
+}
+
 export function cancelUpdate(): Promise<void> {
   return invoke<void>("cancel_update");
 }

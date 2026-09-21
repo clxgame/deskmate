@@ -1416,6 +1416,7 @@ pub fn run() {
             memory::commands::memory_unlink_task,
             memory::commands::memory_unlink_deleted_task,
             updater::update_app,
+            updater::check_update,
             updater::update_status,
             updater::cancel_update
         ])

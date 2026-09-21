@@ -345,13 +345,31 @@ pub async fn update_app(
     result
 }
 
-async fn automatic_update(
+// Availability checks intentionally do not change installation status or acquire
+// the installation guard. No payload is downloaded until update_app is called.
+#[tauri::command]
+pub async fn check_update(
     app: AppHandle,
-    repository: Repository,
-    on_event: Channel<UpdateEvent>,
-) -> Result<UpdateOutcome, UpdateError> {
-    let update = app
-        .updater_builder()
+    window: tauri::WebviewWindow,
+    repo: String,
+) -> Result<Option<String>, UpdateError> {
+    require_settings(&window)?;
+    let repository = Repository::parse(&repo)?;
+    Ok(find_update(&app, &repository, Some(Duration::from_secs(30)))
+        .await?
+        .map(|update| update.version))
+}
+
+async fn find_update(
+    app: &AppHandle,
+    repository: &Repository,
+    timeout: Option<Duration>,
+) -> Result<Option<tauri_plugin_updater::Update>, UpdateError> {
+    let mut builder = app.updater_builder();
+    if let Some(timeout) = timeout {
+        builder = builder.timeout(timeout);
+    }
+    builder
         .endpoints(vec![repository.endpoint()?])
         .map_err(UpdateError::from)?
         .build()
@@ -361,7 +379,17 @@ async fn automatic_update(
         .map_err(|error| {
             eprintln!("update check failed: {error}");
             UpdateError::from(error)
-        })?;
+        })
+}
+
+async fn automatic_update(
+    app: AppHandle,
+    repository: Repository,
+    on_event: Channel<UpdateEvent>,
+) -> Result<UpdateOutcome, UpdateError> {
+    // The returned Update carries its timeout into downloads. Only background
+    // checks have a short deadline; preserve the existing download behavior.
+    let update = find_update(&app, &repository, None).await?;
     let Some(update) = update else {
         let current_version = app.package_info().version.to_string();
         set_status(UpdateStatus::UpToDate {

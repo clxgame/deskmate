@@ -5,6 +5,19 @@
   },
   "bundle": {
     "targets": ["app", "dmg"],
-    "createUpdaterArtifacts": false
+    "createUpdaterArtifacts": false,
+    "resources": [
+      "resources/THIRD_PARTY_NOTICES.md",
+      "resources/opencode/**/*",
+      "resources/ncmdump/**/*",
+      "resources/opencode-tools/**/*",
+      "resources/worklog-bridge.ts",
+      "resources/personas/xiaozhu/**/*",
+      "resources/personas/xiaozhu-nidaime/**/*",
+      "resources/personas/xiaozhu-sandaime/**/*",
+      "resources/skills/xiaozhu/**/*",
+      "resources/skills/xiaozhu-nidaime/**/*",
+      "resources/skills/xiaozhu-sandaime/**/*"
+    ]
   }
 }

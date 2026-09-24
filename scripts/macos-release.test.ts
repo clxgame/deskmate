@@ -38,6 +38,14 @@ test("CI Mac checks use the deterministic updater/release suite", async () => {
   expect(workflow).not.toMatch(/^\s*bun test\s*$/m);
 });
 
+test("Mac bundle excludes Windows-only MCP resources", async () => {
+  const base = JSON.parse(await readFile(join(root, "src-tauri/tauri.conf.json"), "utf8"));
+  const mac = JSON.parse(await readFile(join(root, "src-tauri/tauri.macos.conf.json"), "utf8"));
+  expect(mac.bundle.resources).toEqual(
+    base.bundle.resources.filter((path: string) => !path.startsWith("resources/windows-mcp/")),
+  );
+});
+
 test("Mac updater metadata is merged without losing signed Windows targets", () => {
   const windows = {
     version: "0.4.4",

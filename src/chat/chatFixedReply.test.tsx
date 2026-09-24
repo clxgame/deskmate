@@ -31,6 +31,7 @@ let eventHandler: ((event: OpenCodeEvent) => void) | null = null;
 let ownershipChanged: (() => void) | null = null;
 let workbenchOwned = false;
 let workbenchState: "busy" | "idle" | "unavailable" = "idle";
+let workbenchOpenFailure: "history_native_missing" | "history_native_timeout" | Error | null = null;
 const originalFetch = globalThis.fetch;
 let localMessages: HistoryMessage[] = [];
 let catalogUnavailable = false;
@@ -139,6 +140,7 @@ beforeEach(() => {
   ownershipChanged = null;
   workbenchOwned = false;
   workbenchState = "idle";
+  workbenchOpenFailure = null;
   listen.mockReset();
   listen.mockImplementation((event: string, callback: () => void) => {
     if (event === "workbench://ownership-changed") ownershipChanged = callback;
@@ -179,6 +181,8 @@ beforeEach(() => {
         return Promise.resolve(workbenchOwned);
       case "workbench_session_status":
         return Promise.resolve({ state: workbenchState });
+      case "workbench_open_session":
+        return workbenchOpenFailure ? Promise.reject(workbenchOpenFailure) : Promise.resolve();
       default:
         return Promise.resolve(undefined);
     }
@@ -193,6 +197,21 @@ afterEach(() => {
 });
 
 describe("小著固定名字由来回复", () => {
+  test.each([
+    ["history_native_missing", "这段会话已不存在，无法在工作台打开。请新建会话或刷新历史。"],
+    [new Error("history_native_missing"), "这段会话已不存在，无法在工作台打开。请新建会话或刷新历史。"],
+    ["history_native_timeout", "工作台打开失败，请稍后重试。"],
+  ] as const)("shows a visible error when the workbench rejects %s", async (failure, expected) => {
+    workbenchOpenFailure = failure;
+    render(<ChatApp />);
+    const button = await screen.findByRole<HTMLButtonElement>("button", { name: "在工作台打开" });
+    await waitFor(() => expect(button.disabled).toBe(false));
+
+    fireEvent.click(button);
+
+    expect((await screen.findByText(expected)).closest('[role="alert"]')).not.toBeNull();
+  });
+
   test("a newly registered unknown session refreshes host capabilities before the first send", async () => {
     render(<ChatApp />);
     const input = await screen.findByPlaceholderText("输入消息,Enter 发送");

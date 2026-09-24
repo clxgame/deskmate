@@ -69,7 +69,7 @@
   --accent-ink-hover: #195840;
   --focus-ring: rgba(31, 107, 79, 0.28);
   --success: #35755b;
-  --danger: #b24d5e;
+  --danger: #973446;
   --warn: #8a5b20;
   --dialog-backdrop: rgba(24, 46, 33, 0.32);
   --shadow-focus: 0 0 0 3px var(--focus-ring);
@@ -108,7 +108,7 @@
   --accent-ink-hover: #733123;
   --focus-ring: rgba(135, 62, 47, 0.28);
   --success: #35755b;
-  --danger: #b24d5e;
+  --danger: #973446;
   --warn: #8a5b20;
   --dialog-backdrop: rgba(84, 60, 47, 0.32);
   --shadow-focus: 0 0 0 3px var(--focus-ring);
@@ -147,7 +147,7 @@
   --accent-ink-hover: #4e3687;
   --focus-ring: rgba(93, 68, 153, 0.28);
   --success: #35755b;
-  --danger: #b24d5e;
+  --danger: #973446;
   --warn: #806131;
   --dialog-backdrop: rgba(72, 58, 95, 0.32);
   --shadow-focus: 0 0 0 3px var(--focus-ring);

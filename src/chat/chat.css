@@ -455,6 +455,11 @@
   padding: 8px 12px;
 }
 
+.chat-memory-notice[role="alert"] {
+  color: var(--danger);
+  font-size: var(--t-body);
+}
+
 .history-memory-option {
   align-items: center;
   color: var(--text-dim);

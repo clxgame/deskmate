@@ -223,6 +223,22 @@ export default function ChatApp() {
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [isDragActive, setIsDragActive] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [workbenchOpenError, setWorkbenchOpenError] = useState<{
+    readonly sessionId: string;
+    readonly reason: "missing" | "failed";
+  } | null>(null);
+  const openInWorkbench = useCallback(async (sessionId: string, directory?: string) => {
+    setWorkbenchOpenError(null);
+    try {
+      await invoke("workbench_open_session", { sessionId, directory });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      setWorkbenchOpenError({
+        sessionId,
+        reason: message === "history_native_missing" ? "missing" : "failed",
+      });
+    }
+  }, []);
   const [isCancelling, setIsCancelling] = useState(false);
   /** Whether the current session's input is owned by the workbench (§8.1):
    * the light chat then defers its send/approve/cancel handlers for it. */
@@ -1548,7 +1564,7 @@ export default function ChatApp() {
           disabled={!currentSessionId}
           onClick={() => {
             if (currentSessionId) {
-              void invoke("workbench_open_session", { sessionId: currentSessionId, directory: currentDirectory });
+              void openInWorkbench(currentSessionId, currentDirectory);
             }
           }}
           aria-label={t.openInWorkbench}
@@ -1580,6 +1596,11 @@ export default function ChatApp() {
           <AppIcon name="close" size={18} />
         </button>
       </header>
+      {workbenchOpenError?.sessionId === currentSessionId && (
+        <div className="chat-memory-notice" role="alert">
+          {workbenchOpenError.reason === "missing" ? t.workbenchSessionMissing : t.workbenchOpenFailed}
+        </div>
+      )}
 
       {view === "history" ? (
         <HistoryOrganizer language={lang} onOpen={resumeSession} onClose={() => setView("chat")} onNewChat={newChat} onChanged={refreshSelectedConversation}
@@ -1800,7 +1821,7 @@ export default function ChatApp() {
                 disabled={!currentSessionId}
                 onClick={() => {
                   if (currentSessionId) {
-                    void invoke("workbench_open_session", { sessionId: currentSessionId, directory: currentDirectory });
+                    void openInWorkbench(currentSessionId, currentDirectory);
                   }
                 }}
               >

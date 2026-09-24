@@ -235,8 +235,9 @@ export function memoryClear(options: {
  */
 export function memoryForgetConversation(
   conversationId: string,
+  catalogKey?: string,
 ): Promise<number> {
-  return invoke<number>("memory_forget_conversation", { conversationId });
+  return invoke<number>("memory_forget_conversation", { conversationId, ...(catalogKey ? { catalogKey } : {}) });
 }
 
 /**
@@ -331,3 +332,4 @@ export function onMemoryChanged(
     if (change) callback(change);
   });
 }
+

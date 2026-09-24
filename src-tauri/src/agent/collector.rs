@@ -19,17 +19,6 @@ pub(super) struct CollectorActions<S, P, A, R> {
     pub(super) respond: R,
 }
 
-fn invalid_permission_snapshot(error: &str) -> bool {
-    matches!(
-        error,
-        "permission_invalid_metadata"
-            | "permission_invalid_response"
-            | "agent_path_metadata_missing"
-            | "agent_shell_metadata_missing"
-            | "agent_invalid_id"
-    )
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CollectionMode {
     Live,
@@ -70,6 +59,9 @@ where
             return Ok(());
         }
         let current = state.active_record(&candidate.run_id)?;
+        if current.pending_outcome != candidate.pending_outcome {
+            return Ok(());
+        }
         if matches!(snapshot, Ok(SnapshotRead::SidecarLost)) {
             let (outcome, error) = current
                 .pending_outcome
@@ -87,12 +79,26 @@ where
         }
 
         match snapshot {
-            Err(_) => {
-                state.set_collection_error(&candidate.run_id, Some("agent_read_failed"))?;
-                reported_error = Some("agent_read_failed".to_owned());
+            Err(error) => {
+                eprintln!("agent snapshot {}: {error}", candidate.run_id);
+                let summary = match error.as_str() {
+                    "agent_tool_timeout" | "agent_tools_unsettled" => error.as_str(),
+                    _ => "agent_read_failed",
+                };
+                state.set_collection_error(&candidate.run_id, Some(summary))?;
+                reported_error = Some(summary.to_owned());
             }
             Ok(SnapshotRead::Messages(messages)) => {
-                if (actions.archive)(&current, &messages).is_err() {
+                if current.pending_outcome.is_some()
+                    && messages.iter().any(|message| {
+                        message.parent_id.as_deref() == Some(&current.run_id)
+                            && super::supervision::in_flight(message)
+                    })
+                {
+                    return Err("agent_tools_unsettled".into());
+                }
+                if let Err(error) = (actions.archive)(&current, &messages) {
+                    eprintln!("agent archive {}: {error}", candidate.run_id);
                     state
                         .set_collection_error(&candidate.run_id, Some("history_storage_failed"))?;
                     reported_error = Some("history_storage_failed".to_owned());
@@ -111,6 +117,9 @@ where
                         let _ = permissions.cancel_run(&candidate.run_id);
                     } else if let Some(pending) = pending {
                         let current = state.active_record(&candidate.run_id)?;
+                        if current.pending_outcome != candidate.pending_outcome {
+                            return Ok(());
+                        }
                         match pending.and_then(|requests| {
                             super::process_pending(
                                 permissions,
@@ -121,12 +130,10 @@ where
                             )
                         }) {
                             Ok(replies) => automatic = replies,
-                            Err(error) if invalid_permission_snapshot(&error) => {
-                                state.fail_active(&candidate.run_id, &error)?;
-                                let _ = permissions.cancel_run(&candidate.run_id);
+                            Err(error) => {
+                                state.set_collection_error(&candidate.run_id, Some(&error))?;
                                 reported_error = Some(error);
                             }
-                            Err(error) => reported_error = Some(error),
                         }
                     }
                 }
@@ -140,7 +147,12 @@ where
             if !state.matches_active(&candidate)? {
                 break;
             }
-            (actions.respond)(&candidate, &request, reply)?;
+            if let Err(error) = (actions.respond)(&candidate, &request, reply) {
+                if error != "permission_expired" {
+                    return Err(error);
+                }
+                eprintln!("agent permission {} already settled", request.id);
+            }
         }
     }
     match reported_error {
@@ -156,22 +168,43 @@ pub(crate) fn collect_active_run_once(
     let state = app.state::<AgentRunState>();
     let permissions = app.state::<AgentPermissionState>();
     let base = crate::tool_permissions::runtime::endpoint(app);
-    collect_once_with(
+    let candidate = state.read()?.active;
+    let result = collect_once_with(
         &state,
         &permissions,
         CollectorActions {
             snapshot: |record: &RunRecord| {
                 if !crate::sidecar_owned_running(app)? {
-                    return Ok(SnapshotRead::SidecarLost);
+                    let _operation = state.lock_operation()?;
+                    if !state.matches_active(record)? {
+                        return Ok(SnapshotRead::Messages(Vec::new()));
+                    }
+                    let current = state.active_record(&record.run_id)?;
+                    let (outcome, error) = current
+                        .pending_outcome
+                        .clone()
+                        .map(|outcome| (outcome, current.pending_error_summary.clone()))
+                        .unwrap_or_else(|| {
+                            (
+                                RunOutcome::Interrupted,
+                                Some("sidecar_process_lost".to_owned()),
+                            )
+                        });
+                    let messages = super::supervision::settle(
+                        app,
+                        &current,
+                        error.as_deref().unwrap_or("agent_cancelled"),
+                    )?;
+                    state.request_finish(&current.run_id, outcome, error)?;
+                    return Ok(SnapshotRead::Messages(messages));
                 }
-                let session = record
-                    .session_id
-                    .as_deref()
-                    .ok_or_else(|| "agent_session_unknown".to_owned())?;
                 let settings = super::run_commands::current_start_settings(app)?;
-                super::run_commands::lifecycle_client(app, &settings, &record.workspace_path)
-                    .snapshot(session)
-                    .map(SnapshotRead::Messages)
+                super::supervision::snapshot(
+                    &super::run_commands::lifecycle_client(app, &settings, &record.workspace_path),
+                    &state,
+                    record,
+                )
+                .map(SnapshotRead::Messages)
             },
             pending: |record: &RunRecord| {
                 if mode == CollectionMode::Recovery {
@@ -195,7 +228,7 @@ pub(crate) fn collect_active_run_once(
                     .ok_or_else(|| "agent_session_unknown".to_owned())?;
                 crate::history::save_agent_snapshot(
                     app,
-                    &app.state::<crate::history::HistoryState>(),
+                    &record.workspace_path,
                     crate::history::AgentHistorySnapshot {
                         session_id: session,
                         messages,
@@ -211,7 +244,18 @@ pub(crate) fn collect_active_run_once(
                 )
             },
         },
-    )
+    );
+    if let Err(ref error) = result {
+        if let Some(candidate) = candidate {
+            super::supervision::collection_failed(app, &candidate, error)?;
+        }
+    } else {
+        *state
+            .collection_failure
+            .lock()
+            .map_err(|_| "agent_state_unavailable")? = None;
+    }
+    result
 }
 
 pub(crate) fn start_collector(app: tauri::AppHandle) {
@@ -245,3 +289,4 @@ pub(super) fn cached_permissions(
         })
         .collect()
 }
+

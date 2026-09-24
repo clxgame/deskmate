@@ -80,6 +80,7 @@ pub(super) fn merge_agent_messages(
             upsert_message(
                 &mut session.messages,
                 HistoryMessage {
+                    local_only: false,
                     role: role.to_owned(),
                     text: text.to_owned(),
                     time: created,
@@ -95,3 +96,5 @@ pub(super) fn merge_agent_messages(
         .map_or(session.updated, |message| message.time);
     Ok(())
 }
+
+

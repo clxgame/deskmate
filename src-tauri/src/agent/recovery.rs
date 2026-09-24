@@ -14,6 +14,9 @@ pub(crate) fn read_session_snapshot(
     workspace: &std::path::Path,
     session_id: &str,
 ) -> Result<Vec<super::NativeMessage>, String> {
+    crate::history::commands::client(app)?
+        .get(&workspace.to_string_lossy(), session_id)
+        .map_err(|error| error.to_string())?;
     let settings = super::run_commands::current_start_settings(app)?;
     super::run_commands::lifecycle_client(app, &settings, workspace).snapshot(session_id)
 }

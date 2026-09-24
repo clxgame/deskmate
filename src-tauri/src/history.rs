@@ -7,12 +7,28 @@ use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
 mod archive;
+pub(crate) mod native_api;
+pub(crate) mod catalog_model;
+mod catalog;
+mod catalog_query;
+mod catalog_details;
+pub(crate) mod catalog_local;
+mod catalog_import;
+mod reconcile;
+pub(crate) mod commands;
+pub(crate) mod catalog_mutation;
+#[cfg(test)]
+mod catalog_tests;
+#[cfg(test)]
+mod catalog_migration_tests;
+mod native_index;
 mod recovery;
 mod storage;
 pub(crate) mod view;
 
 use archive::{upsert_agent_snapshot, upsert_message};
 
+pub(crate) use native_index::NativeSessionIndex;
 use storage::{load_path, persist_path};
 pub(crate) use view::continuation_origin;
 
@@ -22,6 +38,8 @@ mod history_tests;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryMessage {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub local_only: bool,
     pub role: String,
     pub text: String,
     pub time: u64,
@@ -34,6 +52,8 @@ pub struct HistoryMessage {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct HistorySession {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) local_link: Option<catalog_model::CatalogIdentity>,
     pub id: String,
     pub title: String,
     pub created: u64,
@@ -55,6 +75,12 @@ pub struct HistorySummary {
     pub count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_details: Option<recovery::AgentHistoryDetails>,
+    /// True when this entry lives only on the managed OpenCode sidecar (e.g. a
+    /// session created in the native workbench) rather than in YUME's
+    /// history.json projection (§8.1: native sessions stay native; the light
+    /// chat shows them as projections and hands off to the workbench).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub native: bool,
 }
 
 pub struct HistoryState(pub Mutex<Vec<HistorySession>>);
@@ -66,6 +92,31 @@ fn history_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .map_err(|_| "history_storage_unavailable".to_owned())
 }
 
+fn native_index_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|path| path.join("native-session-index.json"))
+        .map_err(|_| "native_session_index_unavailable".to_owned())
+}
+
+pub(crate) fn load_native_index(
+    app: &tauri::AppHandle,
+    state: &NativeSessionIndex,
+) -> Result<(), String> {
+    native_index::load_into(&native_index_path(app)?, state)
+}
+
+#[tauri::command]
+pub(crate) fn history_register_native_session(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    session_id: String,
+    source: String,
+    directory: Option<String>,
+) -> Result<catalog_query::CatalogRow, String> {
+    native_api::authorize_history_window(window.label()).map_err(|error| error.to_string())?;
+    commands::register_native(&app, &session_id, &source, directory.as_deref())
+}
 pub fn load(app: &tauri::AppHandle) -> Result<Vec<HistorySession>, String> {
     load_path(&history_path(app)?)
 }
@@ -89,6 +140,7 @@ pub(super) fn save_renderer_to_path(
     list: &mut Vec<HistorySession>,
     request: RendererHistorySave<'_>,
 ) -> Result<(), String> {
+    if request.session.local_link.is_some() { return Err("history_local_metadata_forbidden".into()); }
     let existing = list.iter().find(|item| item.id == request.session.id);
     if request.trusted_origin_run_id.is_some()
         || request.session.origin_run_id.is_some()
@@ -208,6 +260,15 @@ pub(crate) struct AgentHistorySnapshot<'a> {
     pub(crate) messages: &'a [crate::agent::NativeMessage],
 }
 
+#[cfg(test)]
+pub(crate) fn archive_snapshot_for_test(
+    path: &Path,
+    list: &mut Vec<HistorySession>,
+    snapshot: AgentHistorySnapshot<'_>,
+) -> Result<(), String> {
+    upsert_agent_snapshot(path, list, snapshot)
+}
+
 pub(crate) fn save_agent_input(
     app: &tauri::AppHandle,
     state: &HistoryState,
@@ -219,6 +280,7 @@ pub(crate) fn save_agent_input(
         .find(|session| session.id == input.session_id)
         .cloned()
         .unwrap_or_else(|| HistorySession {
+            local_link: None,
             id: input.session_id.to_owned(),
             title: input.text.to_owned(),
             created: input.created,
@@ -227,15 +289,18 @@ pub(crate) fn save_agent_input(
             origin_run_id: Some(input.run_id.to_owned()),
             deleted: false,
         });
+    let records = app.state::<crate::agent::AgentRunState>().all_records()?;
+    let current = records.iter().find(|record| record.run_id == input.run_id && record.session_id.as_deref() == Some(input.session_id)).ok_or("history_agent_origin_unknown")?;
+    if recovery::snapshot_write(&session, &records, &current.workspace_path)? == recovery::SnapshotWrite::UnrelatedIdentity {
+        return Ok(());
+    }
     if session.deleted {
         return Err("history_deleted".to_owned());
-    }
-    if session.origin_run_id.is_none() {
-        return Err("history_agent_owned".to_owned());
     }
     upsert_message(
         &mut session.messages,
         HistoryMessage {
+            local_only: false,
             role: "user".to_owned(),
             text: input.text.to_owned(),
             time: input.created,
@@ -249,9 +314,27 @@ pub(crate) fn save_agent_input(
 
 pub(crate) fn save_agent_snapshot(
     app: &tauri::AppHandle,
-    state: &HistoryState,
+    workspace: &Path,
     snapshot: AgentHistorySnapshot<'_>,
 ) -> Result<(), String> {
+    let records = app.state::<crate::agent::AgentRunState>().all_records()?;
+    let state = app.state::<HistoryState>();
     let mut list = state.0.lock().map_err(|_| "history_state_unavailable")?;
-    upsert_agent_snapshot(&history_path(app)?, &mut list, snapshot)
+    save_scoped_snapshot(&history_path(app)?, &mut list, &records, workspace, snapshot).map(|_| ())
 }
+
+fn save_scoped_snapshot(path: &Path, list: &mut Vec<HistorySession>, records: &[crate::agent::RunRecord], workspace: &Path, snapshot: AgentHistorySnapshot<'_>) -> Result<recovery::SnapshotWrite, String> {
+    let session = list.iter().find(|session| session.id == snapshot.session_id).ok_or("history_not_found")?;
+    let disposition = recovery::snapshot_write(session, records, workspace)?;
+    if disposition == recovery::SnapshotWrite::Allowed {
+        upsert_agent_snapshot(path, list, snapshot)?;
+    }
+    Ok(disposition)
+}
+
+
+
+
+
+
+

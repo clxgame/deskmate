@@ -1,3 +1,4 @@
+import { catalogPageFixture, historyArgument, nativeHistoryFixture, registeredHistoryFixture } from "../testing/historyCatalogFixtures";
 // allow: SIZE_OK — chat memory acceptance cases share one end-to-end ChatApp harness.
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import * as tauriCore from "@tauri-apps/api/core";
@@ -42,7 +43,7 @@ function jsonResponse(body: unknown): Response {
 
 function installOpenCodeTransport(): void {
   const fetchMock = mock((input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
+    const url = new URL(String(input)).pathname;
     if (url.endsWith("/session") && init?.method === "GET") {
       return Promise.resolve(new Response(null, { status: 200 }));
     }
@@ -128,9 +129,19 @@ function storedMemory(overrides: Record<string, unknown> = {}) {
 
 /** Route each command to its handler, defaulting to the real-ish response. */
 function handleInvoke(handlers: Record<string, () => Promise<unknown>>) {
-  invoke.mockImplementation((command: string) => {
+  invoke.mockImplementation((command: string, args?: unknown) => {
     if (handlers[command]) return handlers[command]();
     switch (command) {
+      case "history_register_native_session":
+        return Promise.resolve(registeredHistoryFixture({ sessionId: "ses_1", directory: "." }));
+      case "history_catalog_list":
+        return Promise.resolve(catalogPageFixture([nativeHistoryFixture("ses_old", ".", "旧会话")]));
+      case "history_catalog_load": {
+        const isOld = historyArgument(args, "key") === nativeHistoryFixture("ses_old").key;
+        return Promise.resolve({ entry: nativeHistoryFixture(isOld ? "ses_old" : "ses_1", ".", isOld ? "旧会话" : "t"), messages: isOld ? [{ role: "user", text: "你好", time: 1 }] : [] });
+      }
+      case "history_catalog_mutate":
+        return Promise.resolve(null);
       case "sidecar_base_url":
         return Promise.resolve("http://127.0.0.1:48888");
       case "get_settings":
@@ -366,9 +377,19 @@ describe("explicit memory controls in chat", () => {
 describe("deleting a conversation", () => {
   test("by default it also drops memories that came only from it", async () => {
     invoke.mockReset();
-    invoke.mockImplementation((command: string) => {
+    invoke.mockImplementation((command: string, args?: unknown) => {
       switch (command) {
-        case "sidecar_base_url":
+        case "history_register_native_session":
+        return Promise.resolve(registeredHistoryFixture({ sessionId: "ses_1", directory: "." }));
+      case "history_catalog_list":
+        return Promise.resolve(catalogPageFixture([nativeHistoryFixture("ses_old", ".", "旧会话")]));
+      case "history_catalog_load": {
+        const isOld = historyArgument(args, "key") === nativeHistoryFixture("ses_old").key;
+        return Promise.resolve({ entry: nativeHistoryFixture(isOld ? "ses_old" : "ses_1", ".", isOld ? "旧会话" : "t"), messages: isOld ? [{ role: "user", text: "你好", time: 1 }] : [] });
+      }
+      case "history_catalog_mutate":
+        return Promise.resolve(null);
+      case "sidecar_base_url":
           return Promise.resolve("http://127.0.0.1:48888");
         case "get_settings":
           return Promise.resolve(SETTINGS);
@@ -388,27 +409,39 @@ describe("deleting a conversation", () => {
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole("button", { name: "历史" }));
+    await user.click(await screen.findByRole("button", { name: "会话操作 旧会话" }));
+    await user.click(screen.getByRole("button", { name: "删除" }));
     const option = await screen.findByLabelText(
       "同时删除仅由此对话产生的记忆",
     );
     expect((option as HTMLInputElement).checked).toBe(true);
 
-    await user.click(screen.getByRole("button", { name: "删除" }));
+    await user.click(screen.getByRole("button", { name: "永久删除" }));
 
     await waitFor(() => {
       const call = invoke.mock.calls.find(
         ([command]) => command === "memory_forget_conversation",
       );
       expect(call).toBeDefined();
-      expect(call![1]).toEqual({ conversationId: "ses_old" });
+      expect(call![1]).toEqual({ conversationId: "ses_old", catalogKey: nativeHistoryFixture("ses_old").key });
     });
   });
 
   test("unchecking the option leaves memories alone", async () => {
     invoke.mockReset();
-    invoke.mockImplementation((command: string) => {
+    invoke.mockImplementation((command: string, args?: unknown) => {
       switch (command) {
-        case "sidecar_base_url":
+        case "history_register_native_session":
+        return Promise.resolve(registeredHistoryFixture({ sessionId: "ses_1", directory: "." }));
+      case "history_catalog_list":
+        return Promise.resolve(catalogPageFixture([nativeHistoryFixture("ses_old", ".", "旧会话")]));
+      case "history_catalog_load": {
+        const isOld = historyArgument(args, "key") === nativeHistoryFixture("ses_old").key;
+        return Promise.resolve({ entry: nativeHistoryFixture(isOld ? "ses_old" : "ses_1", ".", isOld ? "旧会话" : "t"), messages: isOld ? [{ role: "user", text: "你好", time: 1 }] : [] });
+      }
+      case "history_catalog_mutate":
+        return Promise.resolve(null);
+      case "sidecar_base_url":
           return Promise.resolve("http://127.0.0.1:48888");
         case "get_settings":
           return Promise.resolve(SETTINGS);
@@ -426,14 +459,16 @@ describe("deleting a conversation", () => {
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole("button", { name: "历史" }));
+    await user.click(await screen.findByRole("button", { name: "会话操作 旧会话" }));
+    await user.click(screen.getByRole("button", { name: "删除" }));
     await user.click(
       await screen.findByLabelText("同时删除仅由此对话产生的记忆"),
     );
-    await user.click(screen.getByRole("button", { name: "删除" }));
+    await user.click(screen.getByRole("button", { name: "永久删除" }));
 
     await waitFor(() => {
       expect(
-        invoke.mock.calls.some(([command]) => command === "history_delete"),
+        invoke.mock.calls.some(([command]) => command === "history_catalog_mutate"),
       ).toBe(true);
     });
     expect(
@@ -447,9 +482,19 @@ describe("deleting a conversation", () => {
 describe("resuming a conversation from history", () => {
   test("clicking a history row resumes it without a separate continue button", async () => {
     invoke.mockReset();
-    invoke.mockImplementation((command: string) => {
+    invoke.mockImplementation((command: string, args?: unknown) => {
       switch (command) {
-        case "sidecar_base_url":
+        case "history_register_native_session":
+        return Promise.resolve(registeredHistoryFixture({ sessionId: "ses_1", directory: "." }));
+      case "history_catalog_list":
+        return Promise.resolve(catalogPageFixture([nativeHistoryFixture("ses_old", ".", "旧会话")]));
+      case "history_catalog_load": {
+        const isOld = historyArgument(args, "key") === nativeHistoryFixture("ses_old").key;
+        return Promise.resolve({ entry: nativeHistoryFixture(isOld ? "ses_old" : "ses_1", ".", isOld ? "旧会话" : "t"), messages: isOld ? [{ role: "user", text: "你好", time: 1 }] : [] });
+      }
+      case "history_catalog_mutate":
+        return Promise.resolve(null);
+      case "sidecar_base_url":
           return Promise.resolve("http://127.0.0.1:48888");
         case "get_settings":
           return Promise.resolve(SETTINGS);
@@ -477,14 +522,14 @@ describe("resuming a conversation from history", () => {
     await user.click(await screen.findByRole("button", { name: "历史" }));
     expect(screen.queryByRole("button", { name: "继续对话" })).toBeNull();
 
-    await user.click(await screen.findByRole("button", { name: /旧会话/ }));
+    await user.click(await screen.findByRole("button", { name: "打开 旧会话" }));
 
     expect(await screen.findByText("你好")).toBeDefined();
     expect(
       invoke.mock.calls.some(
         ([command, args]) =>
-          command === "history_load" &&
-          (args as { id?: string } | undefined)?.id === "ses_old",
+          command === "history_catalog_load" &&
+          historyArgument(args, "key") === nativeHistoryFixture("ses_old").key,
       ),
     ).toBe(true);
   });
@@ -507,9 +552,19 @@ describe("memory retrieval on send", () => {
 
   test("disabling AI use stops the retrieval call entirely", async () => {
     invoke.mockReset();
-    invoke.mockImplementation((command: string) => {
+    invoke.mockImplementation((command: string, args?: unknown) => {
       switch (command) {
-        case "sidecar_base_url":
+        case "history_register_native_session":
+        return Promise.resolve(registeredHistoryFixture({ sessionId: "ses_1", directory: "." }));
+      case "history_catalog_list":
+        return Promise.resolve(catalogPageFixture([nativeHistoryFixture("ses_old", ".", "旧会话")]));
+      case "history_catalog_load": {
+        const isOld = historyArgument(args, "key") === nativeHistoryFixture("ses_old").key;
+        return Promise.resolve({ entry: nativeHistoryFixture(isOld ? "ses_old" : "ses_1", ".", isOld ? "旧会话" : "t"), messages: isOld ? [{ role: "user", text: "你好", time: 1 }] : [] });
+      }
+      case "history_catalog_mutate":
+        return Promise.resolve(null);
+      case "sidecar_base_url":
           return Promise.resolve("http://127.0.0.1:48888");
         case "get_settings":
           return Promise.resolve({ ...SETTINGS, memoryAiUse: false });

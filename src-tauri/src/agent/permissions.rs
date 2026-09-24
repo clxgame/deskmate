@@ -9,13 +9,23 @@ use crate::{
     },
     worklog::bridge::safe_id,
 };
-use std::{collections::HashMap, path::Path, sync::Mutex};
+use std::{
+    collections::HashMap,
+    path::Path,
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 
+const APPROVAL_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+use crate::tool_permissions::runtime::RejectionReason;
+pub(super) const APPROVAL_EXPIRED: RejectionReason = RejectionReason::ApprovalTimeout;
+pub(super) const APPROVAL_INVALID: RejectionReason = RejectionReason::InvalidMetadata;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum PendingDecision {
     AllowOnce,
     Ask(ApprovalDetail),
     Reject,
+    RejectWithReason(RejectionReason),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -28,6 +38,7 @@ struct OwnedRun {
     session_id: String,
     workspace: WorkspaceRoot,
     approvals: Vec<AgentPermissionApproval>,
+    approval_started_at: HashMap<String, Instant>,
 }
 
 struct OwnedRequest {
@@ -52,6 +63,22 @@ struct PermissionData {
 pub(crate) struct AgentPermissionState(Mutex<PermissionData>);
 
 impl AgentPermissionState {
+    #[cfg(test)]
+    pub(super) fn expire_current_for_test(&self, run_id: &str) -> Result<(), String> {
+        let mut data = self.0.lock().map_err(|_| "agent_permission_unavailable")?;
+        let run = data.runs.get_mut(run_id).ok_or("agent_run_unknown")?;
+        let expired = Instant::now()
+            .checked_sub(APPROVAL_TIMEOUT)
+            .ok_or("agent_test_clock_invalid")?;
+        if run.approval_started_at.is_empty() {
+            return Err("agent_test_no_approval".into());
+        }
+        for started in run.approval_started_at.values_mut() {
+            *started = expired;
+        }
+        Ok(())
+    }
+
     pub(crate) fn register_run(
         &self,
         run_id: &str,
@@ -75,6 +102,7 @@ impl AgentPermissionState {
             session_id: session_id.to_owned(),
             workspace: WorkspaceRoot::open(workspace).map_err(|error| error.to_string())?,
             approvals: approvals.to_vec(),
+            approval_started_at: HashMap::new(),
         };
         let mut data = self
             .0
@@ -142,6 +170,17 @@ impl AgentPermissionState {
         message_ids: &[String],
         call_ids: &[String],
     ) -> Result<Vec<(PermissionRequest, PendingDecision)>, String> {
+        self.sync_pending_at(run_id, requests, message_ids, call_ids, Instant::now())
+    }
+
+    fn sync_pending_at(
+        &self,
+        run_id: &str,
+        requests: Vec<PermissionRequest>,
+        message_ids: &[String],
+        call_ids: &[String],
+        now: Instant,
+    ) -> Result<Vec<(PermissionRequest, PendingDecision)>, String> {
         if !safe_id(run_id) {
             return Err("agent_invalid_id".into());
         }
@@ -155,7 +194,7 @@ impl AgentPermissionState {
         data.pending.retain(|_, request| request.run_id != run_id);
         let run = data
             .runs
-            .get(run_id)
+            .get_mut(run_id)
             .ok_or_else(|| "agent_run_unknown".to_owned())?;
         let mut evaluated = Vec::with_capacity(requests.len());
         for request in requests {
@@ -166,7 +205,33 @@ impl AgentPermissionState {
             if !matches_current_tool(&request, message_ids, call_ids) {
                 continue;
             }
-            let result = decision_with_approvals(&run.workspace, &request, &run.approvals)?;
+            let result = if run
+                .approval_started_at
+                .get(&request.id)
+                .is_some_and(|started| now.saturating_duration_since(*started) >= APPROVAL_TIMEOUT)
+            {
+                eprintln!(
+                    "agent permission approval timed out: run={run_id} request={}",
+                    request.id
+                );
+                PendingDecision::RejectWithReason(APPROVAL_EXPIRED)
+            } else {
+                match decision_with_approvals(&run.workspace, &request, &run.approvals) {
+                    Ok(result) => result,
+                    Err(error) => {
+                        eprintln!(
+                            "agent permission rejected: run={run_id} request={} error={error}",
+                            request.id
+                        );
+                        PendingDecision::RejectWithReason(APPROVAL_INVALID)
+                    }
+                }
+            };
+            if matches!(result, PendingDecision::Ask(_)) {
+                run.approval_started_at
+                    .entry(request.id.clone())
+                    .or_insert(now);
+            }
             evaluated.push((request, result));
         }
         for (request, result) in &evaluated {
@@ -210,6 +275,15 @@ impl AgentPermissionState {
         run_id: &str,
         request_id: &str,
     ) -> Result<PermissionRequest, String> {
+        self.take_reply_at(run_id, request_id, Instant::now())
+    }
+
+    fn take_reply_at(
+        &self,
+        run_id: &str,
+        request_id: &str,
+        now: Instant,
+    ) -> Result<PermissionRequest, String> {
         if !safe_id(run_id) || !safe_id(request_id) {
             return Err("agent_invalid_id".into());
         }
@@ -223,6 +297,14 @@ impl AgentPermissionState {
             .ok_or_else(|| "agent_permission_expired".to_owned())?;
         if owned.run_id != run_id {
             return Err("agent_permission_owner_mismatch".into());
+        }
+        if data
+            .runs
+            .get(run_id)
+            .and_then(|run| run.approval_started_at.get(request_id))
+            .is_some_and(|started| now.saturating_duration_since(*started) >= APPROVAL_TIMEOUT)
+        {
+            return Err("agent_permission_expired".into());
         }
         data.pending
             .remove(request_id)
@@ -305,6 +387,9 @@ impl AgentPermissionState {
     }
 }
 
+#[cfg(test)]
+#[path = "permissions_deadline_tests.rs"]
+mod deadline_tests;
 #[cfg(test)]
 #[path = "permissions_path_tests.rs"]
 mod path_tests;

@@ -82,6 +82,7 @@ fn history_start_uses_only_the_persisted_session_workspace_pair() -> TestResult<
     runs.bind_session("msg_origin", "ses_history")?;
     runs.fail_active("msg_origin", "done")?;
     let history = HistoryState(Mutex::new(vec![HistorySession {
+        local_link: None,
         id: "ses_history".into(),
         title: "first".into(),
         created: 1,
@@ -94,6 +95,7 @@ fn history_start_uses_only_the_persisted_session_workspace_pair() -> TestResult<
         &super::run_commands::AgentStartInput {
             workspace_path: None,
             history_id: Some("ses_history".into()),
+            catalog_key: None,
             input: "again".into(),
         },
         &history,
@@ -124,6 +126,7 @@ fn history_start_uses_only_the_persisted_session_workspace_pair() -> TestResult<
             &super::run_commands::AgentStartInput {
                 workspace_path: Some(workspace.clone()),
                 history_id: Some("ses_history".into()),
+                catalog_key: None,
                 input: "spoof".into()
             },
             &history,
@@ -135,3 +138,4 @@ fn history_start_uses_only_the_persisted_session_workspace_pair() -> TestResult<
     std::fs::remove_dir_all(root)?;
     Ok(())
 }
+

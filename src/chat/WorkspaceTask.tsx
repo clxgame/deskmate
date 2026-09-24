@@ -21,7 +21,7 @@ export function WorkspaceTask({ language, agent, historyDetails, onWorkspaceSele
     </div>
     {visibleWorkspace ? <p className="workspace-task-path"><strong>{t.agentCurrentFolder}</strong><span title={visibleWorkspace}>{visibleWorkspace}</span></p> : <p className="workspace-task-note">{t.agentEmpty}</p>}
     {historyDetails && <p className="workspace-task-recent"><strong>{historyDetails.source === "scheduled" ? t.agentHistoryScheduled : t.agentHistoryInteractive}</strong> · {historyDetails.status}</p>}
-    {active && <div className="workspace-task-status"><span>{active.workspacePath}</span><button type="button" onClick={() => void agent.stop()}>{t.chatStop}</button></div>}
+    {active && <div className="workspace-task-status"><span>{active.workspacePath}</span><button type="button" onClick={() => void agent.stop()} disabled={agent.isStopping}>{agent.isStopping ? t.chatStopping : t.chatStop}</button></div>}
     {agent.error && <p className="workspace-task-error" role="alert">{agent.error}</p>}
     {detailError && <p className="workspace-task-error" role="alert">{detailError}</p>}
     <ToolApprovalCards requests={agent.requests} error={false} onReply={agent.reply} t={t} />

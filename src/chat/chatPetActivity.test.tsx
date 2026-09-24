@@ -1,3 +1,4 @@
+import { catalogPageFixture, nativeHistoryFixture, registeredHistoryFixture } from "../testing/historyCatalogFixtures";
 // allow: SIZE_OK — fixed-reply timing cases stay together to preserve shared fake-clock setup.
 import {
   afterEach,
@@ -26,7 +27,10 @@ const listen = mock(() => Promise.resolve(() => {}));
 let eventHandler: ((event: OpenCodeEvent) => void) | null = null;
 const activityEvents: PetActivityEvent[] = [];
 const originalFetch = globalThis.fetch;
-const OriginalEventSource = globalThis.EventSource;
+let abortStatus: "idle" | "busy" = "idle";
+let promptTransport: "ok" | "lost_confirmed" | "lost_unknown" = "ok";
+let submittedMessageId: string | null = null;
+let promptAttempts = 0;
 
 mock.module("@tauri-apps/api/core", () => ({ ...tauriCore, invoke }));
 mock.module("@tauri-apps/api/event", () => ({
@@ -43,7 +47,23 @@ function makeJsonResponse(body: unknown): Response {
 
 function installOpenCodeTransport(): void {
   const fetchMock = mock((input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
+    const url = new URL(String(input)).pathname;
+    if (url.endsWith("/event")) {
+      return Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              eventHandler = (event: OpenCodeEvent) => {
+                controller.enqueue(
+                  new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`),
+                );
+              };
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+    }
     if (url.endsWith("/session") && init?.method === "GET") {
       return Promise.resolve(new Response(null, { status: 200 }));
     }
@@ -51,12 +71,29 @@ function installOpenCodeTransport(): void {
       return Promise.resolve(makeJsonResponse({ id: "ses_fixed", title: "t", directory: "." }));
     }
     if (url.endsWith("/session/ses_fixed/prompt_async") && init?.method === "POST") {
+      promptAttempts += 1;
+      const body = typeof init.body === "string" ? JSON.parse(init.body) as unknown : null;
+      submittedMessageId = typeof body === "object" && body !== null && "messageID" in body
+        ? String(Reflect.get(body, "messageID"))
+        : null;
+      if (promptTransport !== "ok") return Promise.reject(new Error("response lost"));
       return Promise.resolve(new Response(null, { status: 204 }));
     }
     if (url.endsWith("/session/ses_fixed/abort") && init?.method === "POST") {
-      return Promise.resolve(new Response(null, { status: 204 }));
+      return Promise.resolve(makeJsonResponse(true));
     }
-    if (url.includes("/session/ses_fixed/message?")) {
+    if (url.endsWith("/session/status")) {
+      return Promise.resolve(makeJsonResponse({ ses_fixed: { type: abortStatus } }));
+    }
+    if (url.endsWith("/session/ses_fixed/message")) {
+      if (promptTransport === "lost_unknown") return Promise.reject(new Error("sidecar offline"));
+      if (promptTransport === "lost_confirmed" && submittedMessageId) {
+        return Promise.resolve(makeJsonResponse([{ info: {
+          id: submittedMessageId,
+          sessionID: "ses_fixed",
+          role: "user",
+        }, parts: [] }]));
+      }
       return Promise.resolve(makeJsonResponse([]));
     }
     return Promise.resolve(new Response("unexpected opencode test request", { status: 500 }));
@@ -64,26 +101,6 @@ function installOpenCodeTransport(): void {
   globalThis.fetch = Object.assign(fetchMock, {
     preconnect: originalFetch.preconnect,
   });
-
-  globalThis.EventSource = class {
-    onmessage: ((message: MessageEvent) => void) | null = null;
-
-    constructor(readonly url: string) {
-      expect(url).toBe("http://127.0.0.1:48888/event");
-      eventHandler = (event: OpenCodeEvent) => {
-        this.onmessage?.(
-          new MessageEvent("message", {
-            data: JSON.stringify(event),
-          }),
-        );
-      };
-    }
-
-    close(): void {
-      activityEvents.length = 0;
-  eventHandler = null;
-    }
-  } as typeof EventSource;
 }
 
 const { default: ChatApp } = await import("./ChatApp");
@@ -117,10 +134,20 @@ const SETTINGS = {
 
 beforeEach(() => {
   activityEvents.length = 0;
+  abortStatus = "idle";
+  promptTransport = "ok";
+  submittedMessageId = null;
+  promptAttempts = 0;
   eventHandler = null;
   invoke.mockReset();
   invoke.mockImplementation((command: string) => {
     switch (command) {
+      case "history_register_native_session":
+        return Promise.resolve(registeredHistoryFixture({ sessionId: "ses_fixed", directory: "." }));
+      case "history_catalog_load":
+        return Promise.resolve({ entry: nativeHistoryFixture("ses_fixed"), messages: [] });
+      case "history_catalog_list":
+        return Promise.resolve(catalogPageFixture([]));
       case "sidecar_base_url":
         return Promise.resolve("http://127.0.0.1:48888");
       case "get_settings":
@@ -131,6 +158,10 @@ beforeEach(() => {
         return Promise.resolve({ memories: [], promptBlock: "" });
       case "history_save":
         return Promise.resolve(undefined);
+      case "chat_abort_session":
+        return abortStatus === "busy"
+          ? Promise.reject(new Error("agent_abort_still_running"))
+          : Promise.resolve(undefined);
       default:
         return Promise.resolve(undefined);
     }
@@ -142,7 +173,6 @@ afterEach(() => {
   jest.useRealTimers();
   cleanup();
   globalThis.fetch = originalFetch;
-  globalThis.EventSource = OriginalEventSource;
 });
 
 
@@ -158,16 +188,23 @@ async function sendPrompt() {
   return { id: "assistant", role: "assistant", sessionID: start.sessionId, parentID: start.requestId, time: { created: 1, completed: 2 }, finish: "stop" };
 }
 
+async function deliverEvents(events: OpenCodeEvent[]): Promise<void> {
+  await act(async () => {
+    for (const event of events) eventHandler?.(event);
+    // The event subscription is a real async fetch stream: let the reader
+    // drain before asserting.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+}
+
 test("chat emits scoped success once after terminal assistant SSE even after idle", async () => {
   const info = await sendPrompt();
-  act(() => {
-    eventHandler?.({ type: "session.idle", properties: { sessionID: info.sessionID } });
-  });
+  await deliverEvents([{ type: "session.idle", properties: { sessionID: info.sessionID } }]);
   expect(activityEvents.filter((event) => event.type === "success")).toHaveLength(0);
-  act(() => {
-    eventHandler?.({ type: "message.updated", properties: { info } });
-    eventHandler?.({ type: "message.updated", properties: { info } });
-  });
+  await deliverEvents([
+    { type: "message.updated", properties: { info } },
+    { type: "message.updated", properties: { info } },
+  ]);
   expect(activityEvents.filter((event) => event.type === "success")).toHaveLength(1);
 });
 
@@ -178,12 +215,47 @@ test("chat cancellation rejects a late terminal SSE", async () => {
   expect(activityEvents.filter((event) => event.type === "success")).toHaveLength(0);
 });
 
+test("chat keeps the run active when cancellation cannot be confirmed", async () => {
+  // Given: the native server accepts abort but still reports the session busy.
+  await sendPrompt();
+  abortStatus = "busy";
+
+  // When: the user requests stop.
+  fireEvent.click(screen.getByRole("button", { name: "停" }));
+
+  // Then: the stop control remains and no confirmed-cancel activity is emitted.
+  await waitFor(() => expect(screen.getByRole("button", { name: "停" })).toBeDefined());
+  expect(activityEvents.filter((event) => event.type === "cancel")).toHaveLength(0);
+});
+
+test("chat reconciles a lost prompt response without resending the turn", async () => {
+  // Given: the sidecar stores the stable user message but its HTTP response is lost.
+  promptTransport = "lost_confirmed";
+  await sendPrompt();
+
+  // When / Then: the native record confirms delivery and only one prompt attempt exists.
+  await waitFor(() => expect(promptAttempts).toBe(1));
+  expect(screen.getByRole("button", { name: "停" })).toBeDefined();
+  expect(screen.queryByText(/不会自动重发/)).toBeNull();
+});
+
+test("chat leaves an unreadable prompt submission pending without resending", async () => {
+  // Given: both the prompt response and subsequent native record lookup fail.
+  promptTransport = "lost_unknown";
+  await sendPrompt();
+
+  // When / Then: the UI preserves a stoppable pending state and does not replay the prompt.
+  await screen.findByText("消息可能已提交，但暂时无法读取原生记录；不会自动重发，请等待恢复或手动停止。");
+  expect(screen.getByRole("button", { name: "停" })).toBeDefined();
+  expect(promptAttempts).toBe(1);
+});
+
 test("chat session failure rejects a later success", async () => {
   const info = await sendPrompt();
-  act(() => {
-    eventHandler?.({ type: "session.error", properties: { sessionID: info.sessionID, error: { name: "TestFailure" } } });
-    eventHandler?.({ type: "message.updated", properties: { info } });
-  });
+  await deliverEvents([
+    { type: "session.error", properties: { sessionID: info.sessionID, error: { name: "TestFailure" } } },
+    { type: "message.updated", properties: { info } },
+  ]);
   expect(activityEvents.filter((event) => event.type === "error")).toHaveLength(1);
   expect(activityEvents.filter((event) => event.type === "success")).toHaveLength(0);
 });
@@ -204,15 +276,15 @@ test("fixed identity reply emits exactly one completion", async () => {
 
 test("real SSE tool stop cannot celebrate before the tool follow-up response", async () => {
   const info = await sendPrompt();
-  act(() => {
-    eventHandler?.({ type: "message.updated", properties: { info: { ...info, time: { created: 1 }, finish: undefined } } });
-    eventHandler?.({ type: "message.part.updated", properties: { part: { sessionID: info.sessionID, messageID: info.id, id: "part-tool", type: "tool", tool: "bash", state: { status: "completed", title: "test" } } } });
-    eventHandler?.({ type: "message.updated", properties: { info } });
-  });
+  await deliverEvents([
+    { type: "message.updated", properties: { info: { ...info, time: { created: 1 }, finish: undefined } } },
+    { type: "message.part.updated", properties: { part: { sessionID: info.sessionID, messageID: info.id, id: "part-tool", type: "tool", tool: "bash", state: { status: "completed", title: "test" } } } },
+    { type: "message.updated", properties: { info } },
+  ]);
   expect(activityEvents.filter((event) => event.type === "success")).toHaveLength(0);
-  act(() => {
-    eventHandler?.({ type: "message.updated", properties: { info: { ...info, id: "final" } } });
-    eventHandler?.({ type: "session.idle", properties: { sessionID: info.sessionID } });
-  });
+  await deliverEvents([
+    { type: "message.updated", properties: { info: { ...info, id: "final" } } },
+    { type: "session.idle", properties: { sessionID: info.sessionID } },
+  ]);
   expect(activityEvents.filter((event) => event.type === "success")).toHaveLength(1);
 });

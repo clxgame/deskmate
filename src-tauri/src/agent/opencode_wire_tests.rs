@@ -13,6 +13,7 @@ fn client_for(port: u16, workspace: &Path) -> OpenCodeClient {
         provider_id: "provider".into(),
         model_id: "model".into(),
         workspace: workspace.to_path_buf(),
+        auth_header: String::new(),
     })
 }
 

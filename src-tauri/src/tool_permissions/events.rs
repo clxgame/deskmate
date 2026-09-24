@@ -42,13 +42,18 @@ impl PermissionEvents {
         self.stopped.store(true, Ordering::Relaxed);
     }
     fn read(&self, base: &str) -> Result<(), String> {
-        let response = ureq::AgentBuilder::new()
+        let request = ureq::AgentBuilder::new()
             .timeout_connect(Duration::from_secs(3))
             .timeout_read(Duration::from_secs(45))
             .build()
-            .get(&format!("{base}/event"))
-            .call()
-            .map_err(|error| error.to_string())?;
+            .get(&format!("{base}/event"));
+        // The managed sidecar requires Basic auth; tests against fixture
+        // servers run without it (the global value is unset there).
+        let request = match crate::sidecar_auth_value() {
+            Some(value) => request.set("Authorization", value),
+            None => request,
+        };
+        let response = request.call().map_err(|error| error.to_string())?;
         self.state
             .lock()
             .map_err(|_| "permission_stream_lock")?

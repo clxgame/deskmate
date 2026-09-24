@@ -30,6 +30,7 @@ pub(super) fn lifecycle_client(
         provider_id: settings.provider_id.clone(),
         model_id: settings.model_id.clone(),
         workspace: workspace.to_path_buf(),
+        auth_header: crate::sidecar_auth_header(app),
     })
 }
 

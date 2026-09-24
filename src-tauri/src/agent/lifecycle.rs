@@ -15,6 +15,7 @@ pub(crate) struct AgentRunState {
     pub(super) data: Mutex<RunData>,
     pub(super) store: RunStore,
     operation: Mutex<()>,
+    pub(super) collection_failure: Mutex<Option<(String, std::time::Instant)>>,
 }
 
 impl AgentRunState {
@@ -28,6 +29,7 @@ impl AgentRunState {
             }),
             store,
             operation: Mutex::new(()),
+            collection_failure: Mutex::new(None),
         }
     }
 
@@ -49,6 +51,7 @@ impl AgentRunState {
             }),
             store,
             operation: Mutex::new(()),
+            collection_failure: Mutex::new(None),
         })
     }
 
@@ -141,6 +144,7 @@ impl AgentRunState {
             let mut part_ids: BTreeSet<String> = record.part_ids.iter().cloned().collect();
             let mut call_ids: BTreeSet<String> = record.call_ids.iter().cloned().collect();
             let mut latest = None;
+            let mut has_in_flight_tool = false;
             for message in messages
                 .iter()
                 .filter(|message| message.parent_id.as_deref() == Some(run_id))
@@ -148,6 +152,10 @@ impl AgentRunState {
                 latest = Some(message);
                 message_ids.insert(message.id.clone());
                 for part in &message.parts {
+                    has_in_flight_tool |= matches!(
+                        part.state.as_ref().map(|state| state.status.as_str()),
+                        Some("pending" | "running")
+                    );
                     part_ids.insert(part.id.clone());
                     if let Some(call_id) = &part.call_id {
                         call_ids.insert(call_id.clone());
@@ -155,18 +163,11 @@ impl AgentRunState {
                 }
             }
             if let Some(message) = latest {
-                let has_in_flight_tool = message.parts.iter().any(|part| {
-                    matches!(
-                        part.state.as_ref().map(|state| state.status.as_str()),
-                        Some("pending" | "running")
-                    )
-                });
-                terminal = if let Some(error) = &message.error {
+                terminal = if has_in_flight_tool {
+                    None
+                } else if let Some(error) = &message.error {
                     Some((RunOutcome::Failed, Some(error.clone())))
-                } else if message.completed
-                    && message.finish.as_deref() == Some("stop")
-                    && !has_in_flight_tool
-                {
+                } else if message.completed && message.finish.as_deref() == Some("stop") {
                     Some((RunOutcome::Completed, None))
                 } else {
                     None

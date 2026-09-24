@@ -7,6 +7,7 @@ export interface HistoryMessage {
   time: number;
   messageId?: string;
   partId?: string;
+  localOnly?: boolean;
 }
 
 /** A full chat session record. */
@@ -36,6 +37,10 @@ export interface HistorySummary {
   updated: number;
   count: number;
   agentDetails?: AgentHistoryDetails;
+  /** True when the session lives only on the managed OpenCode sidecar (e.g.
+   * created in the native workbench), not in YUME's history.json projection —
+   * continue it in the workbench, not here. */
+  native?: boolean;
 }
 
 export function historyList(): Promise<HistorySummary[]> {
@@ -53,3 +58,4 @@ export function historySave(session: HistorySession): Promise<void> {
 export function historyDelete(id: string): Promise<void> {
   return invoke<void>("history_delete", { id });
 }
+

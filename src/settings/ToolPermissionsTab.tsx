@@ -6,7 +6,7 @@ import {
   type PermissionMode,
   type ToolPermissions,
 } from "../lib/toolPermissions";
-import { Row, type TabProps } from "./settingsPrimitives";
+import { Row, Switch, type TabProps } from "./settingsPrimitives";
 
 const GROUPS = [
   { title: "permissionWorklog", rows: ["worklogRead", "worklogWrite"] },
@@ -35,6 +35,18 @@ export function ToolPermissionsTab({ settings, patch, t }: TabProps) {
   }
   return <>
     <p className="set-note">{t.permissionScope}</p>
+    <section aria-label={t.permissionDesktopTools}>
+      <h3 className="set-permission-heading">{t.permissionDesktopTools}</h3>
+      <Row label={t.permissionBrowserMcp}>
+        <Switch checked={settings.browserMcpEnabled ?? false} onChange={(value) => patch("browserMcpEnabled", value)} label={t.permissionBrowserMcp} />
+      </Row>
+      <p className="set-note">{t.permissionBrowserMcpDescription}</p>
+      <Row label={t.permissionWindowsMcp}>
+        <Switch checked={settings.windowsMcpEnabled ?? false} onChange={(value) => patch("windowsMcpEnabled", value)} label={t.permissionWindowsMcp} />
+      </Row>
+      <p className="set-note">{t.permissionWindowsMcpDescription}</p>
+      <p className="set-note">{t.permissionDesktopToolsRestart}</p>
+    </section>
     {GROUPS.map((group) => <section key={group.title} aria-label={t[group.title]}>
       <h3 className="set-permission-heading">{t[group.title]}</h3>
       {group.rows.map((key) => <div key={key}>

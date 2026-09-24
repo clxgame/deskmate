@@ -1,5 +1,10 @@
 use super::record_store::{NativeMessage, NativePart, NativeToolState};
 use serde::{Deserialize, Serialize};
+#[path = "opencode_settlement.rs"]
+mod settlement;
+#[cfg(test)]
+#[path = "opencode_settlement_tests.rs"]
+mod settlement_tests;
 use std::{
     path::Path,
     time::{Duration, Instant},
@@ -13,6 +18,8 @@ pub(crate) struct AgentEndpoint {
     pub(crate) provider_id: String,
     pub(crate) model_id: String,
     pub(crate) workspace: std::path::PathBuf,
+    /// Basic-auth header value required by the managed sidecar.
+    pub(crate) auth_header: String,
 }
 pub(crate) struct OpenCodeClient {
     endpoint: AgentEndpoint,
@@ -71,6 +78,7 @@ struct WireToolState {
     input: serde_json::Value,
     #[serde(default)]
     output: serde_json::Value,
+    error: Option<String>,
     #[serde(default)]
     metadata: serde_json::Value,
 }
@@ -89,6 +97,7 @@ impl OpenCodeClient {
         let session: Session = self
             .agent
             .post(&self.workspace_url("/session")?)
+            .set("Authorization", &self.endpoint.auth_header)
             .send_json(serde_json::json!({
                 "title":"YUME Agent",
                 "permission":[
@@ -118,6 +127,7 @@ impl OpenCodeClient {
             if self
                 .agent
                 .get(&format!("{}/global/health", self.endpoint.base_url))
+                .set("Authorization", &self.endpoint.auth_header)
                 .timeout(Duration::from_millis(500))
                 .call()
                 .is_ok()
@@ -136,6 +146,7 @@ impl OpenCodeClient {
         input: &str,
     ) -> Result<(), String> {
         self.agent.post(&self.workspace_url(&format!("/session/{session}/prompt_async"))?)
+            .set("Authorization", &self.endpoint.auth_header)
             .send_json(serde_json::json!({"messageID":message_id,"model":Model { provider_id:&self.endpoint.provider_id, model_id:&self.endpoint.model_id },"system":system,"parts":[{"type":"text","text":input}]}))
             .map_err(http_error)?;
         Ok(())
@@ -143,6 +154,7 @@ impl OpenCodeClient {
     pub(crate) fn abort(&self, session: &str) -> Result<bool, String> {
         self.agent
             .post(&self.workspace_url(&format!("/session/{session}/abort"))?)
+            .set("Authorization", &self.endpoint.auth_header)
             .call()
             .map_err(http_error)?
             .into_json()
@@ -152,6 +164,7 @@ impl OpenCodeClient {
         let messages: Vec<WireMessage> = self
             .agent
             .get(&self.workspace_url(&format!("/session/{session}/message"))?)
+            .set("Authorization", &self.endpoint.auth_header)
             .call()
             .map_err(http_error)?
             .into_json()
@@ -176,10 +189,13 @@ impl OpenCodeClient {
                         call_id: part.call_id,
                         tool: part.tool,
                         state: part.state.map(|state| NativeToolState {
-                            status: state.status,
                             input: state.input,
-                            output: state.output,
+                            output: match (state.status.as_str(), state.error) {
+                                ("error", Some(error)) => serde_json::Value::String(error),
+                                _ => state.output,
+                            },
                             metadata: state.metadata,
+                            status: state.status,
                         }),
                     })
                     .collect(),

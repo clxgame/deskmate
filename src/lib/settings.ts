@@ -3,6 +3,7 @@ import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ThemeId } from "../settings/theme";
 import type { PomodoroPreferences } from "./pomodoro";
 import type { AgentPermissionApproval } from "./toolPermissions";
+import { sidecarAuthHeaders } from "./opencode";
 
 /** A scheduled task: at `time` (HH:MM, daily), auto-send `prompt` to the AI. */
 export interface ScheduledTask {
@@ -39,6 +40,8 @@ export interface Settings {
   yolo: boolean;
   readonly toolPermissions?: import("./toolPermissions").ToolPermissions;
   readonly agentPermissionApprovals?: readonly AgentPermissionApproval[];
+  readonly browserMcpEnabled?: boolean;
+  readonly windowsMcpEnabled?: boolean;
   baseUrl: string;
   apiKey: string;
   readonly providers: readonly AiProvider[];
@@ -163,11 +166,14 @@ export function modelsMatchVerification(
 }
 
 export async function listModels(): Promise<ProviderModel[]> {
-  const base = await invoke<string>("sidecar_base_url");
+  const [base, headers] = await Promise.all([
+    invoke<string>("sidecar_base_url"),
+    sidecarAuthHeaders(),
+  ]);
   let lastError: Error | null = null;
   for (let attempt = 0; attempt < 8; attempt += 1) {
     try {
-      const res = await fetch(`${base}/config/providers`, { signal: AbortSignal.timeout(500) });
+      const res = await fetch(`${base}/config/providers`, { headers, signal: AbortSignal.timeout(500) });
       if (!res.ok) throw new Error(`providers -> ${res.status}`);
       const data = (await res.json()) as {
         providers?: {

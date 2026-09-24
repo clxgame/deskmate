@@ -8,6 +8,8 @@ const invoke = mock<(command: string, args?: unknown) => Promise<unknown>>(
 mock.module("@tauri-apps/api/core", () => ({ ...tauriCore, invoke }));
 
 const {
+  abortSession,
+  confirmPromptSubmission,
   getSessionMessages,
   getToolActivityLabel,
   isCompletedToolPart,
@@ -18,6 +20,85 @@ const {
 } = await import("./opencode");
 
 describe("opencode transport helpers", () => {
+  test("confirms a lost prompt response from the native message record", async () => {
+    // Given: the transport response was lost after the native user message was stored.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = Object.assign(
+      mock(() => Promise.resolve(Response.json([{ info: {
+        id: "msg-user", sessionID: "ses-1", role: "user",
+      }, parts: [] }]))),
+      { preconnect: originalFetch.preconnect },
+    );
+    try {
+      // When: the caller reconciles the uncertain submission by stable message ID.
+      const state = await confirmPromptSubmission("ses-1", "msg-user");
+      // Then: the native record, rather than the failed response, confirms delivery.
+      expect(state).toBe("confirmed");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("keeps prompt submission unknown when the native record cannot be read", async () => {
+    // Given: both the prompt response and native record lookup are unavailable.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = Object.assign(mock(() => Promise.reject(new Error("offline"))), {
+      preconnect: originalFetch.preconnect,
+    });
+    try {
+      // When / Then: reconciliation does not infer that the prompt was absent.
+      await expect(confirmPromptSubmission("ses-1", "msg-user")).resolves.toBe("unknown");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("confirms cancellation only after the native session becomes idle", async () => {
+    // Given: the host gate confirms abort, idle state, and interaction cleanup.
+    invoke.mockClear();
+    invoke.mockImplementation(() => Promise.resolve(undefined));
+
+    try {
+      // When: cancellation is requested.
+      await abortSession("ses-1");
+
+      // Then: the shared native cancellation gate is the only stop boundary.
+      expect(invoke).toHaveBeenCalledWith("chat_abort_session", { sessionId: "ses-1" });
+    } finally {
+      invoke.mockImplementation(() => Promise.resolve("http://127.0.0.1:48888"));
+    }
+  });
+
+  test("rejects cancellation while the native session is still running", async () => {
+    // Given: the host gate reports that the native session remains busy.
+    invoke.mockImplementation(() => Promise.reject(new Error("agent_abort_still_running")));
+
+    try {
+      // When / Then: the caller receives a typed, retryable failure.
+      await expect(abortSession("ses-1")).rejects.toMatchObject({
+        name: "SessionAbortError",
+        code: "STILL_RUNNING",
+      });
+    } finally {
+      invoke.mockImplementation(() => Promise.resolve("http://127.0.0.1:48888"));
+    }
+  });
+
+  test("reports cancellation as unknown when status confirmation is unavailable", async () => {
+    // Given: the native host cannot complete status or interaction reconciliation.
+    invoke.mockImplementation(() => Promise.reject(new Error("agent_transport_failure")));
+
+    try {
+      // When / Then: no successful stop is inferred from the abort response alone.
+      await expect(abortSession("ses-1")).rejects.toMatchObject({
+        name: "SessionAbortError",
+        code: "UNKNOWN",
+      });
+    } finally {
+      invoke.mockImplementation(() => Promise.resolve("http://127.0.0.1:48888"));
+    }
+  });
+
   test("keeps ordinary tool activity labels compatible", () => {
     expect(
       getToolActivityLabel({
@@ -187,43 +268,48 @@ describe("opencode transport helpers", () => {
   });
 
   test("skips malformed event frames without stopping later events", async () => {
-    const listeners: Array<(message: MessageEvent) => void> = [];
-    const closed: boolean[] = [];
-    const OriginalEventSource = globalThis.EventSource;
+    const originalFetch = globalThis.fetch;
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
 
-    globalThis.EventSource = class {
-      onmessage: ((message: MessageEvent) => void) | null = null;
-
-      constructor(readonly url: string) {
+    globalThis.fetch = Object.assign(
+      mock((input: unknown) => {
+        const url = String(input);
         expect(url).toBe("http://127.0.0.1:48888/event");
-        listeners.push((message: MessageEvent) => this.onmessage?.(message));
-      }
-
-      close(): void {
-        closed.push(true);
-      }
-    } as typeof EventSource;
+        return Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                streamController = controller;
+              },
+            }),
+            { status: 200 },
+          ),
+        );
+      }),
+      { preconnect: originalFetch.preconnect },
+    );
 
     try {
       const received: string[] = [];
       const unsubscribe = await subscribeEvents((event) => {
         received.push(event.type);
       });
-      const send = listeners[0];
-      if (!send) throw new Error("EventSource listener was not registered");
+      const controller = streamController as ReadableStreamDefaultController<Uint8Array> | null;
+      if (!controller) throw new Error("event stream was not opened");
+      const frame = (payload: string) => new TextEncoder().encode(`data: ${payload}\n\n`);
 
-      send(new MessageEvent("message", { data: "not json" }));
-      send(
-        new MessageEvent("message", {
-          data: JSON.stringify({ type: "session.idle", properties: {} }),
-        }),
-      );
-      unsubscribe();
+      controller.enqueue(frame("not json"));
+      controller.enqueue(frame(JSON.stringify({ type: "session.idle", properties: {} })));
+      await new Promise((resolve) => setTimeout(resolve, 50));
 
       expect(received).toEqual(["session.idle"]);
-      expect(closed).toEqual([true]);
+
+      unsubscribe();
+      controller.enqueue(frame(JSON.stringify({ type: "session.idle", properties: {} })));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(received).toEqual(["session.idle"]);
     } finally {
-      globalThis.EventSource = OriginalEventSource;
+      globalThis.fetch = originalFetch;
     }
   });
 });

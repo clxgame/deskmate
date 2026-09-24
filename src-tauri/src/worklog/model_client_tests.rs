@@ -38,6 +38,8 @@ fn real_http_fixture_requires_terminal_completion_and_disables_tools() {
                     assert!(request.starts_with("POST /session/ses_fixture/prompt_async"));
                     let input:serde_json::Value=serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
                     assert_eq!(input["tools"]["bash"],false);assert_eq!(input["tools"]["worklog_record"],false);
+                    assert_eq!(input["tools"]["yume_playwright_browser_navigate"],false);
+                    assert_eq!(input["tools"]["yume_windows_ui_type"],false);
                     message_id=input["messageID"].as_str().unwrap().into();String::new()
                 },
                 3=>serde_json::json!([{"info":{"role":"assistant","parentID":message_id,"finish":"tool-calls","time":{"completed":1}},"parts":[{"type":"text","text":"partial"}]}]).to_string(),
@@ -52,6 +54,7 @@ fn real_http_fixture_requires_terminal_completion_and_disables_tools() {
         provider_id: "fixture".into(),
         model_id: "test".into(),
         epoch: "1".into(),
+        auth_header: String::new(),
     });
     let session = client.create_session().unwrap();
     assert_eq!(

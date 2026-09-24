@@ -165,3 +165,54 @@ fn transport_failure_is_persisted_and_not_retried() -> TestResult<()> {
     fs::remove_dir_all(root).checked("remove scheduled fixture")?;
     Ok(())
 }
+
+#[test]
+fn uncertain_submission_keeps_pending_failure_owned_until_settlement() -> TestResult<()> {
+    // Given: prompt submission may have reached the sidecar despite transport failure.
+    let (root, workspace) = fixture()?;
+    let store = RunStore::new(root.join("agent-runs"));
+    let state = AgentRunState::new(store.clone());
+
+    // When: the callback records required settlement before returning the transport error.
+    let result = submit_with(
+        &state,
+        "msg_uncertain",
+        &workspace,
+        "remind",
+        |state, id| {
+            state.bind_session(id, "ses_uncertain")?;
+            state.confirm_submission(id)?;
+            state.request_finish(
+                id,
+                super::RunOutcome::Failed,
+                Some("agent_transport_failure".into()),
+            )?;
+            Err("agent_transport_failure".into())
+        },
+    );
+
+    // Then: persisted ownership and the busy admission barrier remain until settlement.
+    assert!(matches!(result, Err(ref error) if error == "agent_transport_failure"));
+    for active in [
+        state.active_record("msg_uncertain")?,
+        AgentRunState::load(store)?.active_record("msg_uncertain")?,
+    ] {
+        assert_eq!(active.outcome, None);
+        assert_eq!(active.pending_outcome, Some(super::RunOutcome::Failed));
+        assert_eq!(
+            active.pending_error_summary.as_deref(),
+            Some("agent_transport_failure")
+        );
+        assert!(active.initial_input.is_none());
+    }
+    let next = submit_with(&state, "msg_next", &workspace, "next", |_, _| {
+        panic!("busy scheduled task must not submit another prompt")
+    })?;
+    assert!(matches!(next, ScheduledAdmission::BusyReceipt));
+    assert_eq!(
+        state.active_record("msg_uncertain")?.session_id.as_deref(),
+        Some("ses_uncertain")
+    );
+    fs::remove_dir_all(root)?;
+    Ok(())
+}

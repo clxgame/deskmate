@@ -101,10 +101,7 @@ pub(super) fn index_agent_records(
         }) else {
             continue;
         };
-        if let Some(existing) = next.iter_mut().find(|item| item.id == session_id) {
-            if !existing.deleted {
-                existing.origin_run_id = Some(origin.run_id.clone());
-            }
+        if next.iter().any(|item| item.id == session_id) {
             continue;
         }
         let created = time_millis(&origin.created_at);
@@ -114,6 +111,7 @@ pub(super) fn index_agent_records(
             .max()
             .unwrap_or(created);
         next.push(HistorySession {
+            local_link: None,
             id: session_id.to_owned(),
             title: placeholder_title(origin),
             created,
@@ -228,4 +226,28 @@ pub(super) fn details_for(
         },
         availability,
     })
+}
+
+
+pub(super) fn validate_snapshot_scope(session: &HistorySession, records: &[RunRecord], workspace: &Path) -> Result<(), String> {
+    let origin = session.origin_run_id.as_deref().ok_or("history_agent_owned")?;
+    let record = records.iter().find(|record| record.run_id == origin && record.session_id.as_deref() == Some(&session.id)).ok_or("history_agent_origin_unknown")?;
+    if super::catalog_import::canonical_directory(&record.workspace_path.to_string_lossy()) != super::catalog_import::canonical_directory(&workspace.to_string_lossy()) {
+        return Err("history_agent_scope_mismatch".into());
+    }
+    Ok(())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum SnapshotWrite {
+    Allowed,
+    UnrelatedIdentity,
+}
+
+pub(super) fn snapshot_write(session: &HistorySession, records: &[RunRecord], workspace: &Path) -> Result<SnapshotWrite, String> {
+    match validate_snapshot_scope(session, records, workspace) {
+        Ok(()) => Ok(SnapshotWrite::Allowed),
+        Err(error) if error == "history_agent_owned" || error == "history_agent_scope_mismatch" => Ok(SnapshotWrite::UnrelatedIdentity),
+        Err(error) => Err(error),
+    }
 }

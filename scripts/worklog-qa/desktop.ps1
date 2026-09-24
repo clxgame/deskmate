@@ -18,14 +18,14 @@ function Read-Json($path) { Get-Content -LiteralPath $path -Raw | ConvertFrom-Js
 function File-Hash($path) { $stream = [IO.File]::OpenRead([IO.Path]::GetFullPath($path)); $hash = [Security.Cryptography.SHA256]::Create(); try { [BitConverter]::ToString($hash.ComputeHash($stream)).Replace('-','') } finally { $stream.Dispose(); $hash.Dispose() } }
 function Same-CreationTime($left, $right) { [math]::Abs(($left.ToUniversalTime() - $right.ToUniversalTime()).Ticks) -le 10 }
 function Source-Hashes {
-  $paths = @(& rg --files --no-ignore src src-tauri/src src-tauri/resources public scripts/worklog-qa)
+  $paths = @(& rg --files --no-ignore src src-tauri/src src-tauri/resources public scripts/worklog-qa scripts/workbench-qa)
   $paths += @('src-tauri/Cargo.toml','src-tauri/Cargo.lock','src-tauri/tauri.conf.json','package.json','bun.lock','vite.config.ts','tsconfig.json','pet.html','chat.html','settings.html')
   @($paths | Sort-Object -Unique | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | ForEach-Object { [ordered]@{ path = $_; sha256 = (File-Hash $_) } }) | ConvertTo-Json -Compress
 }
 function Assert-Guards {
   $lib = Get-Content src-tauri/src/lib.rs -Raw
   $settings = Get-Content src-tauri/src/settings.rs -Raw
-  if ($lib -notmatch 'validate_worklog_qa_identity\(&handle\)\?' -or $lib -notmatch 'all\(windows, not\(feature = "worklog-qa"\)\)' -or $settings -notmatch 'KEYRING_SERVICE: &str = "com.deskmate.worklogqa"') { throw 'Required compile-time isolation guards are absent.' }
+  if ($lib -notmatch 'validate_worklog_qa_identity\(&handle\)\?' -or $lib -notmatch 'all\(windows, not\(feature = "worklog-qa"\)\)' -or $settings -notmatch 'crate::qa_identity::keyring_scope\(\)') { throw 'Required compile-time isolation guards are absent.' }
   $config = Read-Json $configPath
   if ($config.identifier -ne $identity) { throw 'Refusing non-QA identity.' }
   foreach ($root in $roots) {
@@ -95,7 +95,7 @@ switch ($Action) {
     $app = Start-Process -FilePath $binaryPath -WorkingDirectory (Split-Path $binaryPath) -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $evidence 'app.stdout.log') -RedirectStandardError (Join-Path $evidence 'app.stderr.log')
     $app.Refresh()
     if ($app.HasExited) { throw 'QA application exited before process registration; inspect stderr.' }
-    $receipt.processes = @(@{pid=$app.Id;created=$app.StartTime.ToUniversalTime().ToString('o');executable=$app.Path})
+    $receipt.processes = @(@{pid=$app.Id;created=$app.StartTime.ToUniversalTime().ToString('o');executable=$binaryPath})
     Save-Json $runReceipt $receipt
     Write-Output "QA PID $($app.Id) launched. Configure only synthetic model-a at $FixtureBaseUrl through QA UI. Run status before and after each scenario."
   }
@@ -124,7 +124,7 @@ switch ($Action) {
     $receipt = Read-Json $runReceipt
     $receipt.processes = @(Owned-Processes $receipt)
     Save-Json $runReceipt $receipt
-    foreach ($owned in @($receipt.processes | Sort-Object created -Descending)) {
+    foreach ($owned in @($receipt.processes | Sort-Object created)) {
       $current = Get-CimInstance Win32_Process -Filter "ProcessId = $($owned.pid)"
       if ($current) {
         if ($current.ExecutablePath -ne $owned.executable -or -not (Same-CreationTime $current.CreationDate ([datetime]$owned.created))) { throw 'Refusing reused PID.' }

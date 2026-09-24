@@ -1,17 +1,37 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { lstat, mkdtemp, realpath, unlink } from "node:fs/promises";
 import type { Readable } from "node:stream";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { childEnv, freePort, stopChild } from "../ccswitch-harness/process";
-import { pathMissing, portClosed, processGone } from "../ccswitch-harness/cleanup";
+import { pathMissing, portClosed, processGone, removeTempRoot } from "../ccswitch-harness/cleanup";
 import { findSourceBinary } from "../prepare-opencode";
 import { stageFixture } from "./fixture";
 import { startProvider, type Provider } from "./provider";
 import { ContractError, jsonObject, type CleanupReceipt, type JsonObject } from "./types";
 
 type OwnedChild = ChildProcessByStdio<null, Readable, Readable>;
-type RuntimeOptions = { readonly injectSpawnFailure?: boolean; readonly includeTrusted?: boolean; readonly flowTools?: boolean };
+async function stopRuntimeChild(child: OwnedChild): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  const exited = new Promise<void>((resolveExit, reject) => {
+    child.once("exit", () => resolveExit());
+    deadline = setTimeout(() => reject(new ContractError("STOP_TIMEOUT", `OpenCode ${child.pid} did not exit after termination`)), 15_000);
+  });
+  try { await stopChild(child); await exited; }
+  finally { clearTimeout(deadline); }
+}
+type RuntimeOptions = {
+  readonly injectSpawnFailure?: boolean;
+  readonly includeTrusted?: boolean;
+  readonly flowTools?: boolean;
+  readonly providerFactory?: () => Promise<Provider>;
+  readonly continueLoopOnDeny?: boolean;
+  readonly processToolsDirectory?: string;
+  readonly mcp?: JsonObject;
+  readonly extraPermission?: JsonObject;
+  readonly authenticatedModel?: { readonly id: string; readonly apiKey: string };
+};
 type SetupFailure = {
   readonly cleanup: CleanupReceipt;
   readonly root: string;
@@ -68,11 +88,28 @@ async function health(baseUrl: string): Promise<JsonObject> {
   throw new ContractError("TIMEOUT", "OpenCode health endpoint did not become ready");
 }
 
+async function removeOwnedCacheJunction(root: string): Promise<void> {
+  const link = join(root, "AppData", "Local", "Microsoft", "Windows", "INetCache", "Content.IE5");
+  const entry = await lstat(link).catch((error: unknown) => {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
+    throw error;
+  });
+  if (entry === null) return;
+  if (!entry.isSymbolicLink()) throw new ContractError("UNEXPECTED_CACHE_ENTRY", "QA cache entry is not a junction");
+  const canonicalRoot = await realpath(root);
+  const canonicalTarget = await realpath(link);
+  if (!canonicalTarget.toLowerCase().startsWith(`${canonicalRoot.toLowerCase()}\\`)) {
+    throw new ContractError("UNSAFE_CACHE_JUNCTION", "QA cache junction points outside the owned root");
+  }
+  await unlink(link);
+}
+
 async function cleanupOwned(input: CleanupInput): Promise<CleanupReceipt> {
   const pid = input.child?.pid;
-  if (input.child !== undefined) await stopChild(input.child);
+  if (input.child !== undefined) await stopRuntimeChild(input.child);
   if (input.provider !== undefined) await input.provider.close();
-  await rm(input.root, { recursive: true, force: true });
+  await removeOwnedCacheJunction(input.root);
+  await removeTempRoot(input.root);
   return {
     processGone: await processGone(pid),
     providerClosed: input.provider === undefined || await portClosed(input.provider.port),
@@ -87,17 +124,26 @@ export async function startRuntime(options: RuntimeOptions = {}): Promise<Runtim
   let port: number | undefined;
   let child: OwnedChild | undefined;
   try {
-    provider = await startProvider();
+    provider = await (options.providerFactory ?? startProvider)();
     const fixture = await stageFixture(root, provider.baseUrl, options.includeTrusted ?? true, options.flowTools ?? false);
     port = await freePort();
     const binary = await findSourceBinary();
     if (options.injectSpawnFailure === true) throw new ContractError("INJECTED_SPAWN_FAILURE", "injected before child handle creation");
     const env = childEnv({ root, providerBaseUrl: provider.baseUrl, runtimeCanary: crypto.randomUUID() });
+    if (options.processToolsDirectory !== undefined) {
+      env.PATH = `${options.processToolsDirectory}${delimiter}${env.PATH ?? ""}`;
+      env.NoDefaultCurrentDirectoryInExePath = "1";
+    }
     env.OPENCODE_CONFIG_DIR = fixture.configDirectory;
+    if (options.authenticatedModel !== undefined) {
+      env.OPENCODE_AUTH_CONTENT = JSON.stringify({ yume: { type: "api", key: options.authenticatedModel.apiKey } });
+    }
     env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
       $schema: "https://opencode.ai/config.json",
-      permission: { "*": "deny", read: "allow", trusted_probe: "allow", edit: "ask", bash: "ask", webfetch: "ask", ...(options.flowTools === true ? { write: "ask" } : {}) },
-      provider: { yume: { npm: "@ai-sdk/openai-compatible", name: "YUME Agent QA", options: { baseURL: provider.baseUrl }, models: { "model-a": { name: "Model A" } } } },
+      permission: { "*": "deny", read: "allow", trusted_probe: "allow", edit: "ask", bash: "ask", webfetch: "ask", ...(options.flowTools === true ? { write: "ask" } : {}), ...options.extraPermission },
+      provider: { yume: { npm: "@ai-sdk/openai-compatible", name: "YUME Agent QA", options: { baseURL: provider.baseUrl }, models: { [options.authenticatedModel?.id ?? "model-a"]: { name: options.authenticatedModel?.id ?? "Model A" } } } },
+      ...(options.mcp === undefined ? {} : { mcp: options.mcp }),
+      ...(options.continueLoopOnDeny === true ? { experimental: { continue_loop_on_deny: true } } : {}),
     });
     const launch = (): OwnedChild => spawn(binary, ["--pure", "serve", "--port", String(port), "--hostname", "127.0.0.1", "--print-logs"], {
       cwd: fixture.workspaceA, env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
@@ -111,7 +157,7 @@ export async function startRuntime(options: RuntimeOptions = {}): Promise<Runtim
       root, workspaceA: fixture.workspaceA, workspaceB: fixture.workspaceB,
       baseUrl: `http://127.0.0.1:${port}`, provider, port, child, pid,
       restartSidecar: async () => {
-        if (child !== undefined) await stopChild(child);
+        if (child !== undefined) await stopRuntimeChild(child);
         child = launch();
         const restartedPid = child.pid;
         if (restartedPid === undefined) throw new ContractError("SIDECAR_START", "restarted sidecar PID unavailable");
@@ -120,7 +166,7 @@ export async function startRuntime(options: RuntimeOptions = {}): Promise<Runtim
         return restartedPid;
       },
       stopSidecar: async () => {
-        if (child !== undefined) await stopChild(child);
+        if (child !== undefined) await stopRuntimeChild(child);
       },
       close: () => cleanupOwned({ root, provider, port, child }),
     };

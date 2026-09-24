@@ -1,0 +1,158 @@
+param(
+  [ValidateSet('preflight','build','launch','status','stop','purge','test-receipt-time')][string]$Action = 'preflight',
+  [string]$FixtureBaseUrl = '',
+  [switch]$SeedLegacy
+)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
+Set-Location -LiteralPath $repoRoot
+$identity = 'com.deskmate.unifiedhistoryqa.run20260924a'
+$evidence = Join-Path $repoRoot '.omo/evidence/unified-conversation-history'
+$configPath = Join-Path $PSScriptRoot 'unified-history.qa.conf.json'
+$buildReceipt = Join-Path $evidence 'build-receipt.json'
+$runReceipt = Join-Path $evidence 'run-receipt.json'
+$binaryPath = Join-Path $repoRoot 'src-tauri/target/debug/yume-unified-history-qa.exe'
+$roots = @((Join-Path ([Environment]::GetFolderPath('ApplicationData')) $identity), (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) $identity))
+function Save-Json($path, $value) { $value | ConvertTo-Json -Depth 15 | Set-Content -LiteralPath $path -Encoding UTF8 }
+function Read-Json($path) { Get-Content -LiteralPath $path -Raw | ConvertFrom-Json }
+function File-Hash($path) { $stream = [IO.File]::OpenRead([IO.Path]::GetFullPath($path)); $hash = [Security.Cryptography.SHA256]::Create(); try { [BitConverter]::ToString($hash.ComputeHash($stream)).Replace('-','') } finally { $stream.Dispose(); $hash.Dispose() } }
+function Same-CreationTime($left, $right) { [math]::Abs(($left.ToUniversalTime() - $right.ToUniversalTime()).Ticks) -le 10 }
+function Source-Hashes([switch]$InputsOnly) {
+  $paths = @(& rg --files --no-ignore src src-tauri/src src-tauri/resources src-tauri/nsis public scripts/worklog-qa scripts/workbench-qa)
+  $paths += @('src-tauri/build.rs','src-tauri/Cargo.toml','src-tauri/Cargo.lock','src-tauri/tauri.conf.json','package.json','bun.lock','vite.config.ts','tsconfig.json','pet.html','chat.html','settings.html','scripts/prepare-workbench.ts','scripts/workbench-routing.ts','scripts/workbench-theme.ts','scripts/prepare-opencode.ts','scripts/windows-process-kill.rs','scripts/prepare-ncmdump.ts','scripts/prepare-windows-mcp.ts')
+  if ($InputsOnly) { $paths = @($paths | Where-Object { $_ -notmatch '^public[\\/]workbench[\\/]' -and $_ -notmatch '^src-tauri[\\/]resources[\\/]opencode[\\/]process-tools[\\/]taskkill\.(exe|pdb)$' }) }
+  @($paths | Sort-Object -Unique | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | ForEach-Object { [ordered]@{ path = $_; sha256 = (File-Hash $_) } }) | ConvertTo-Json -Compress
+}
+function Assert-Guards {
+  $lib = Get-Content src-tauri/src/lib.rs -Raw
+  $settings = Get-Content src-tauri/src/settings.rs -Raw
+  if ($lib -notmatch 'validate_worklog_qa_identity\(&handle\)\?' -or $lib -notmatch 'all\(windows, not\(feature = "worklog-qa"\)\)' -or $settings -notmatch 'crate::qa_identity::keyring_scope\(\)') { throw 'Required compile-time isolation guards are absent.' }
+  $config = Read-Json $configPath
+  if ($config.identifier -ne $identity) { throw 'Refusing non-QA identity.' }
+  foreach ($root in $roots) {
+    if ([IO.Path]::GetFileName($root) -ne $identity) { throw 'Invalid QA root.' }
+    if ((Test-Path -LiteralPath $root) -and ((Get-Item -LiteralPath $root).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'QA root is a reparse point.' }
+  }
+}
+function Owned-Processes($receipt) {
+  $all = @(Get-CimInstance Win32_Process)
+  $owned = @($receipt.processes)
+  foreach ($known in $owned) {
+    $current = $all | Where-Object { $_.ProcessId -eq $known.pid }
+    if ($current -and ($current.ExecutablePath -ne $known.executable -or -not (Same-CreationTime $current.CreationDate ([datetime]$known.created)))) { throw "PID reused: $($known.pid)" }
+  }
+  $changed = $true
+  while ($changed) {
+    $changed = $false
+    foreach ($candidate in $all) {
+      if ($candidate.ProcessId -in @($owned.pid)) { continue }
+      $parent = $owned | Where-Object { $_.pid -eq $candidate.ParentProcessId }
+      if ($parent -and $candidate.CreationDate.ToUniversalTime() -ge ([datetime]$parent.created).ToUniversalTime()) {
+        $owned += [pscustomobject]@{ pid=$candidate.ProcessId; created=$candidate.CreationDate.ToUniversalTime().ToString('o'); executable=$candidate.ExecutablePath }
+        $changed = $true
+      }
+    }
+  }
+  return @($owned)
+}
+New-Item -ItemType Directory -Path $evidence -Force | Out-Null
+switch ($Action) {
+  'test-receipt-time' {
+    $base = [datetime]'2026-09-17T05:29:48.3304840+08:00'
+    if (-not (Same-CreationTime $base $base.AddTicks(9))) { throw 'CIM precision tolerance rejected 9 ticks.' }
+    if (Same-CreationTime $base $base.AddTicks(11)) { throw 'PID reuse guard accepted more than one microsecond.' }
+    Write-Output 'Receipt creation-time tolerance passed: <=10 ticks accepted; >10 ticks rejected.'
+  }
+  'preflight' {
+    Assert-Guards
+    Save-Json (Join-Path $evidence 'preflight-hashes.json') (Source-Hashes | ConvertFrom-Json)
+    [ordered]@{ identity=$identity; roots=@($roots | ForEach-Object { @{path=$_;exists=(Test-Path -LiteralPath $_)} }); hashes='preflight-hashes.json'; launched=$false } | ConvertTo-Json -Depth 5
+  }
+  'build' {
+    Assert-Guards
+    $before = Source-Hashes -InputsOnly
+    Save-Json (Join-Path $evidence 'build-inputs-before.json') ($before | ConvertFrom-Json)
+    & bun run tauri build --debug --bundles nsis --features worklog-qa --config $configPath
+    if ($LASTEXITCODE -ne 0) { throw 'QA build failed.' }
+    $after = Source-Hashes -InputsOnly
+    Save-Json (Join-Path $evidence 'build-inputs-after.json') ($after | ConvertFrom-Json)
+    if ($before -ne $after) { throw 'Build inputs changed during build; inspect before/after snapshots and rebuild after changes settle.' }
+    $outputs = Source-Hashes
+    Save-Json (Join-Path $evidence 'build-verified-inputs-and-outputs.json') ($outputs | ConvertFrom-Json)
+    Save-Json $buildReceipt ([ordered]@{ identity=$identity; binary=$binaryPath; sha256=(File-Hash $binaryPath); sourceHashes=$outputs; inputHashes=$after; created=[DateTime]::UtcNow.ToString('o') })
+  }
+  'launch' {
+    Assert-Guards
+    $build = Read-Json $buildReceipt
+    if ($build.identity -ne $identity -or $build.binary -ne $binaryPath -or $build.sha256 -ne (File-Hash $binaryPath) -or $build.sourceHashes -ne (Source-Hashes)) { throw 'Build receipt is stale or not QA.' }
+    $uri = [uri]$FixtureBaseUrl
+    if (-not $uri.IsAbsoluteUri -or $uri.Scheme -ne 'http' -or $uri.Host -ne '127.0.0.1' -or $uri.Port -lt 1024) { throw 'Fixture must be an explicit loopback HTTP URL on an unprivileged port.' }
+    $catalog = Invoke-RestMethod -Uri ($FixtureBaseUrl.TrimEnd('/') + '/models') -TimeoutSec 5
+    if ('model-a' -notin @($catalog.data.id)) { throw 'Synthetic model-a fixture is not ready.' }
+    if (Test-Path -LiteralPath $runReceipt) {
+      $previous = Read-Json $runReceipt
+      if ($previous.identity -ne $identity -or ($previous.roots -join '|') -ne ($roots -join '|')) { throw 'Unexpected previous run ownership.' }
+      if (@(Owned-Processes $previous | Where-Object { Get-Process -Id $_.pid -ErrorAction SilentlyContinue }).Count) { throw 'Previous QA process remains alive.' }
+    } else {
+      foreach ($root in $roots) { if (Test-Path -LiteralPath $root) { throw "Preexisting unowned QA data: $root" } }
+    }
+    $receipt = [ordered]@{ identity=$identity; roots=$roots; fixtureBaseUrl=$FixtureBaseUrl; fixtureOwnership='external probe worker'; buildSha256=$build.sha256; processes=@(); started=[DateTime]::UtcNow.ToString('o'); runtimeDataRetained=$true }
+    Save-Json $runReceipt $receipt
+    if ($SeedLegacy) {
+      $legacyPath = Join-Path $roots[0] 'history.json'
+      if (Test-Path -LiteralPath $legacyPath) { throw 'Refusing to overwrite an existing synthetic history fixture.' }
+      New-Item -ItemType Directory -Path $roots[0] -Force | Out-Null
+      $stamp = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+      $legacy = @(@{ id='qa-legacy-text-only'; title='旧记录：项目讨论（合成数据）'; created=$stamp; updated=$stamp; messages=@(@{ role='user'; text='这是一条仅用于迁移验收的旧版文字记录。'; time=$stamp }, @{ role='assistant'; text='旧记录保持只读，不补造工具状态或原生会话。'; time=$stamp }) })
+      $json = ConvertTo-Json -InputObject $legacy -Depth 8
+      [IO.File]::WriteAllText($legacyPath, $json, [Text.UTF8Encoding]::new($false))
+      Save-Json (Join-Path $evidence 'legacy-migration-before.json') @{ path=$legacyPath; sha256=(File-Hash $legacyPath); fixtureId='qa-legacy-text-only'; created=[DateTime]::UtcNow.ToString('o') }
+    }
+    $env:YUME_CDP_PORT = '55893'
+    $app = Start-Process -FilePath $binaryPath -WorkingDirectory (Split-Path $binaryPath) -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $evidence 'app.stdout.log') -RedirectStandardError (Join-Path $evidence 'app.stderr.log')
+    $app.Refresh()
+    if ($app.HasExited) { throw 'QA application exited before process registration; inspect stderr.' }
+    $receipt.processes = @(@{pid=$app.Id;created=$app.StartTime.ToUniversalTime().ToString('o');executable=$binaryPath})
+    Save-Json $runReceipt $receipt
+    Write-Output "QA PID $($app.Id) launched. Configure only synthetic model-a at $FixtureBaseUrl through QA UI. Run status before and after each scenario."
+  }
+  'status' {
+    $receipt = Read-Json $runReceipt
+    $receipt.processes = @(Owned-Processes $receipt)
+    Save-Json $runReceipt $receipt
+    $ports = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.OwningProcess -in @($receipt.processes.pid) } | Select-Object LocalAddress,LocalPort,OwningProcess)
+    [ordered]@{ processes=$receipt.processes; ports=$ports; roots=$receipt.roots } | ConvertTo-Json -Depth 5
+  }
+  'purge' {
+    Assert-Guards
+    $receipt = Read-Json $runReceipt
+    if ($receipt.identity -ne $identity -or ($receipt.roots -join '|') -ne ($roots -join '|')) { throw 'Unexpected root ownership.' }
+    if (@(Owned-Processes $receipt | Where-Object { Get-Process -Id $_.pid -ErrorAction SilentlyContinue }).Count) { throw 'Stop all owned QA processes before purging.' }
+    foreach ($root in $roots) {
+      if (-not (Test-Path -LiteralPath $root)) { continue }
+      $links = @(Get-ChildItem -LiteralPath $root -Recurse -Force | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })
+      if ($links.Count) { throw 'Refusing recursive cleanup containing reparse points.' }
+      Remove-Item -LiteralPath $root -Recurse -Force
+    }
+    Save-Json (Join-Path $evidence 'data-cleanup-receipt.json') @{ removedRoots=$roots; credentials='Synthetic keyring entries require separate QA UI cleanup receipt'; exports='Only exact export receipt filenames may be separately removed'; completed=[DateTime]::UtcNow.ToString('o') }
+    Write-Output 'Owned QA runtime roots removed; evidence retained. Verify separate synthetic credential/export cleanup receipts.'
+  }
+  'stop' {
+    $receipt = Read-Json $runReceipt
+    $receipt.processes = @(Owned-Processes $receipt)
+    Save-Json $runReceipt $receipt
+    foreach ($owned in @($receipt.processes | Sort-Object created)) {
+      $current = Get-CimInstance Win32_Process -Filter "ProcessId = $($owned.pid)"
+      if ($current) {
+        if ($current.ExecutablePath -ne $owned.executable -or -not (Same-CreationTime $current.CreationDate ([datetime]$owned.created))) { throw 'Refusing reused PID.' }
+        Stop-Process -Id $owned.pid -Force
+      }
+    }
+    $remaining = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.OwningProcess -in @($receipt.processes.pid) })
+    Save-Json (Join-Path $evidence 'cleanup-receipt.json') @{ stoppedProcesses=$receipt.processes; remainingOwnedPorts=$remaining; runtimeDataRetained=$true; fixtureOwnership='external probe worker'; completed=[DateTime]::UtcNow.ToString('o') }
+    if ($remaining.Count) { throw 'Owned ports still open.' }
+    Write-Output 'Owned QA processes stopped. Runtime data intentionally retained for restart/readback; fixture remains owned by probe worker.'
+  }
+}
+

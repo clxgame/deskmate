@@ -31,6 +31,7 @@ pub(crate) mod scheduled;
 #[cfg(test)]
 mod scheduled_tests;
 mod start_context;
+mod supervision;
 #[cfg(test)]
 mod test_support;
 mod workspace;
@@ -51,6 +52,44 @@ use tauri::Manager;
 pub(crate) use workspace::opencode_wire_directory;
 
 use crate::tool_permissions::runtime::{PermissionRequest, Reply};
+
+pub(crate) fn abort_managed_session(
+    app: &tauri::AppHandle,
+    directory: &str,
+    session_id: &str,
+) -> Result<(), String> {
+    crate::history::commands::client(app)?
+        .get(directory, session_id)
+        .map_err(|error| error.to_string())?;
+    let workspace = std::path::PathBuf::from(directory);
+    opencode::OpenCodeClient::new(opencode::AgentEndpoint {
+        base_url: crate::sidecar_url(app),
+        provider_id: String::new(),
+        model_id: String::new(),
+        workspace,
+        auth_header: crate::sidecar_auth_header(app),
+    })
+    .abort_with_interaction_cleanup(session_id)
+}
+
+pub(crate) fn managed_session_busy(
+    app: &tauri::AppHandle,
+    directory: &str,
+    session_id: &str,
+) -> Result<bool, String> {
+    crate::history::commands::client(app)?
+        .get(directory, session_id)
+        .map_err(|error| error.to_string())?;
+    let workspace = std::path::PathBuf::from(directory);
+    opencode::OpenCodeClient::new(opencode::AgentEndpoint {
+        base_url: crate::sidecar_url(app),
+        provider_id: String::new(),
+        model_id: String::new(),
+        workspace,
+        auth_header: crate::sidecar_auth_header(app),
+    })
+    .is_busy(session_id)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -84,6 +123,9 @@ fn process_pending(
         match decision {
             PendingDecision::AllowOnce => automatic.push((request, Reply::Once)),
             PendingDecision::Reject => automatic.push((request, Reply::Reject)),
+            PendingDecision::RejectWithReason(reason) => {
+                automatic.push((request, Reply::RejectWithReason(reason)))
+            }
             PendingDecision::Ask(_) => {}
         }
     }
@@ -148,13 +190,6 @@ fn pending_projection(
     }
 }
 
-fn mark_rejected_run(state: &AgentRunState, run_id: &str, reply: AgentReply) -> Result<(), String> {
-    if matches!(reply, AgentReply::Reject) {
-        state.request_finish(run_id, RunOutcome::Cancelled, None)?;
-    }
-    Ok(())
-}
-
 #[tauri::command]
 pub(crate) async fn agent_permission_pending(
     window: tauri::WebviewWindow,
@@ -205,10 +240,6 @@ pub(crate) async fn agent_permission_reply(
             engine_reply,
             &workspace,
         )?;
-        {
-            let _operation = state.lock_operation()?;
-            mark_rejected_run(&state, &run_id, decision)?;
-        }
         if matches!(decision, AgentReply::Reject) {
             collector::collect_active_run_once(&app, collector::CollectionMode::Live)?;
         }
@@ -234,3 +265,17 @@ mod lifecycle_restart_tests;
 #[cfg(test)]
 #[path = "agent/lifecycle_tests.rs"]
 mod lifecycle_tests;
+
+#[cfg(test)]
+#[path = "agent/tool_lifecycle_live_tests.rs"]
+mod tool_lifecycle_live_tests;
+
+
+
+pub(crate) fn managed_sidecar_ready(app: &tauri::AppHandle) -> Result<bool, String> {
+    let workspace = std::path::PathBuf::from(crate::history::commands::workspace(app)?);
+    Ok(opencode::OpenCodeClient::new(opencode::AgentEndpoint {
+        base_url: crate::sidecar_url(app), provider_id: String::new(), model_id: String::new(),
+        workspace, auth_header: crate::sidecar_auth_header(app),
+    }).wait_ready(opencode::READY_TIMEOUT))
+}

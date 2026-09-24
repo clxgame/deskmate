@@ -1,3 +1,5 @@
+import { nativeHistoryFixture } from "./historyCatalogFixtures";
+import type { HistorySession } from "../lib/history";
 import { describe, expect, test } from "bun:test";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { agentRun, ChatApp, histories, invoke, promptRequests, sendOrdinaryEvent, sessionCreates, setAgentProjection, setAgentStartError, setHistory, setHistoryLoader  } from "../chat/chatAttachmentSendHarness.test";
@@ -15,7 +17,7 @@ describe("Agent history view", () => {
     render(<ChatApp />);
     await screen.findByPlaceholderText("输入消息,Enter 发送");
     fireEvent.click(screen.getByRole("button", { name: "历史" }));
-    fireEvent.click(await screen.findByRole("button", { name: /历史工作/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^打开 历史工作$/ }));
     await screen.findByText("第一轮");
     await screen.findByText("已完成");
     expect(sessionCreates()).toBe(1);
@@ -26,7 +28,7 @@ describe("Agent history view", () => {
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
     await waitFor(() => expect(invoke.mock.calls.filter(([command]) => command === "agent_run_start")).toHaveLength(1));
     expect(invoke.mock.calls.find(([command]) => command === "agent_run_start")?.[1]).toEqual({
-      request: { historyId: "ses_history", input: "继续处理" },
+      request: { historyId: "ses_history", catalogKey: nativeHistoryFixture("ses_history", agentRun.workspacePath).key, input: "继续处理" },
     });
     expect(promptRequests).toHaveLength(0);
   });
@@ -36,13 +38,13 @@ describe("Agent history view", () => {
       ses_a: { id: "ses_a", title: "A 会话", created: 1, updated: 1, originRunId: "msg_a", messages: [{ role: "assistant", text: "A 的结果", time: 1 }] },
       ses_b: { id: "ses_b", title: "B 会话", created: 2, updated: 2, originRunId: "msg_b", messages: [{ role: "assistant", text: "B 的结果", time: 2 }] },
     });
-    let releaseA: ((value: object) => void) | null = null;
+    let releaseA: ((value: HistorySession | null) => void) | null = null;
     setHistoryLoader((id) => id === "ses_a" ? new Promise((resolve) => { releaseA = resolve; }) : Promise.resolve(histories()[id] ?? null));
     render(<ChatApp />);
     await screen.findByPlaceholderText("输入消息,Enter 发送");
     fireEvent.click(screen.getByRole("button", { name: "历史" }));
-    fireEvent.click(await screen.findByRole("button", { name: /A 会话/ }));
-    fireEvent.click(screen.getByRole("button", { name: /B 会话/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^打开 A 会话$/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^打开 B 会话$/ }));
     await screen.findByText("B 的结果");
     await act(async () => releaseA?.(histories().ses_a));
     expect(screen.queryByText("A 的结果")).toBeNull();
@@ -57,7 +59,7 @@ describe("Agent history view", () => {
     render(<ChatApp />);
     await screen.findByPlaceholderText("输入消息,Enter 发送");
     fireEvent.click(screen.getByRole("button", { name: "历史" }));
-    fireEvent.click(await screen.findByRole("button", { name: /隔离历史/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^打开 隔离历史$/ }));
     await screen.findByText("Agent 内容");
     sendOrdinaryEvent({ type: "message.updated", properties: { info: { id: "ordinary-reply", sessionID: "ses_attachment", role: "assistant" } } });
     sendOrdinaryEvent({ type: "message.part.updated", properties: { part: { id: "ordinary-part", sessionID: "ses_attachment", messageID: "ordinary-reply", type: "text", text: "错误串入" } } });
@@ -74,7 +76,7 @@ describe("Agent history view", () => {
     render(<ChatApp />);
     await screen.findByPlaceholderText("输入消息,Enter 发送");
     fireEvent.click(screen.getByRole("button", { name: "历史" }));
-    fireEvent.click(await screen.findByRole("button", { name: /完成中的历史/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^打开 完成中的历史$/ }));
     await screen.findByText("处理中");
     const createsBeforeFinish = sessionCreates();
     const startsBeforeFinish = invoke.mock.calls.filter(([command]) => command === "agent_run_start").length;
@@ -101,7 +103,7 @@ describe("Agent history view", () => {
     render(<ChatApp />);
     await screen.findByPlaceholderText("输入消息,Enter 发送");
     fireEvent.click(screen.getByRole("button", { name: "历史" }));
-    fireEvent.click(await screen.findByRole("button", { name: /只读历史/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^打开 只读历史$/ }));
     await screen.findByText("仍可阅读");
     const input = screen.getByPlaceholderText("输入消息,Enter 发送");
     fireEvent.change(input, { target: { value: "不要丢失" } });
@@ -111,4 +113,70 @@ describe("Agent history view", () => {
     expect(screen.getByText("仍可阅读")).toBeTruthy();
   });
 
+});
+
+for (const action of ["archive", "failed-delete"] as const) {
+  test(`selected completed Agent history denies continuation after ${action}`, async () => {
+    // Given a completed native Agent conversation already selected in light chat.
+    histories().ses_history = {
+      id: "ses_history", title: "已完成任务", created: 1, updated: 2, originRunId: "msg_origin",
+      messages: [{ role: "assistant", text: "任务结果", time: 2 }],
+    };
+    render(<ChatApp />);
+    await screen.findByPlaceholderText("输入消息,Enter 发送");
+    fireEvent.click(screen.getByRole("button", { name: "历史" }));
+    fireEvent.click(await screen.findByRole("button", { name: "打开 已完成任务" }));
+    await screen.findByText("任务结果");
+    expect(screen.getByPlaceholderText("输入消息,Enter 发送")).toBeTruthy();
+    // When the organizer archives it or creates a deletion tombstone before remote failure.
+    fireEvent.click(screen.getByRole("button", { name: "历史" }));
+    fireEvent.click(await screen.findByRole("button", { name: "会话操作 已完成任务" }));
+    switch (action) {
+      case "archive":
+        fireEvent.click(screen.getByRole("button", { name: "归档" }));
+        await waitFor(() => expect(screen.queryByRole("button", { name: "打开 已完成任务" }) === null).toBe(true));
+        break;
+      case "failed-delete":
+        fireEvent.click(screen.getByRole("button", { name: "删除" }));
+        fireEvent.click(screen.getByRole("button", { name: "永久删除" }));
+        await screen.findByText(/remote delete unavailable/);
+        break;
+    }
+    await waitFor(() => expect(invoke.mock.calls.filter(([command]) => command === "history_catalog_load").length).toBeGreaterThan(2));
+    fireEvent.click(screen.getByRole("button", { name: "关闭历史" }));
+    // Then stale selected state cannot expose a composer or start another run.
+    await waitFor(() => expect(screen.queryByPlaceholderText("输入消息,Enter 发送") === null).toBe(true));
+    expect(screen.getByText("任务结果")).toBeTruthy();
+    expect(invoke.mock.calls.filter(([command]) => command === "agent_run_start")).toHaveLength(0);
+    expect(promptRequests).toHaveLength(0);
+  });
+}
+test("selected externally started Agent conversation refreshes completion while local projection stays idle", async () => {
+  // Given a native Agent run started outside this mounted chat's idle projection.
+  const activeRecord: HistorySession = {
+    id: "ses_external", title: "外部启动任务", created: 1, updated: 2, originRunId: "msg_external",
+    agentDetails: { workspacePath: agentRun.workspacePath, status: "active", source: "interactive", availability: "ready" },
+    messages: [{ role: "assistant", text: "外部任务处理中", time: 2 }],
+  };
+  histories().ses_external = activeRecord;
+  render(<ChatApp />);
+  await screen.findByPlaceholderText("输入消息,Enter 发送");
+  fireEvent.click(screen.getByRole("button", { name: "历史" }));
+  fireEvent.click(await screen.findByRole("button", { name: "打开 外部启动任务" }));
+  await screen.findByText("外部任务处理中");
+  expect(screen.queryByPlaceholderText("输入消息,Enter 发送") === null).toBe(true);
+
+  // When the host finishes the run without this chat starting or observing it locally.
+  histories().ses_external = {
+    ...activeRecord, updated: 3,
+    agentDetails: { workspacePath: agentRun.workspacePath, status: "completed", source: "interactive", availability: "ready" },
+    messages: [{ role: "assistant", text: "外部任务最终结果", time: 3 }],
+  };
+
+  // Then the selected scoped view refreshes without another selection or a new run.
+  await screen.findByText("外部任务最终结果", {}, { timeout: 3_000 });
+  expect(screen.queryByText("外部任务处理中") === null).toBe(true);
+  expect(sessionCreates()).toBe(1);
+  expect(invoke.mock.calls.filter(([command]) => command === "agent_run_start")).toHaveLength(0);
+  expect(promptRequests).toHaveLength(0);
 });

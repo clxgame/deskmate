@@ -1,4 +1,5 @@
 mod archive_tests;
+mod migration_rollback_tests;
 mod ownership_tests;
 mod recovery_tests;
 mod storage_tests;
@@ -14,11 +15,13 @@ pub(super) fn temp_file(label: &str) -> PathBuf {
 
 pub(super) fn ordinary(id: &str) -> HistorySession {
     HistorySession {
+        local_link: None,
         id: id.to_owned(),
         title: "chat".to_owned(),
         created: 1,
         updated: 1,
         messages: vec![HistoryMessage {
+            local_only: false,
             role: "user".to_owned(),
             text: "hello".to_owned(),
             time: 1,
@@ -37,3 +40,6 @@ pub(super) fn agent(id: &str) -> HistorySession {
         ..ordinary(id)
     }
 }
+
+
+

@@ -206,7 +206,8 @@ fn cancel_evicts_cached_approval_and_automatic_reply_runs_without_locks() -> Tes
 }
 
 #[test]
-fn invalid_permission_snapshot_fails_the_run_instead_of_retrying_forever() -> TestResult<()> {
+fn invalid_permission_snapshot_reports_error_before_native_execution_is_stopped() -> TestResult<()>
+{
     // Given: an active run whose message snapshot is readable but whose permission
     // snapshot is structurally invalid and cannot be repaired.
     let (root, workspace) = fixture("invalid-permission")?;
@@ -224,22 +225,18 @@ fn invalid_permission_snapshot_fails_the_run_instead_of_retrying_forever() -> Te
         },
     );
 
-    // Then: the existing failed-run receipt becomes visible and the run is no longer active.
+    // The outer collector must abort/settle the engine before releasing ownership.
     assert_eq!(result, Err("permission_invalid_metadata".into()));
     let listing = runs.read()?;
-    assert!(listing.active.is_none());
     assert_eq!(
-        listing.recent[0].outcome,
-        Some(crate::agent::RunOutcome::Failed)
-    );
-    assert_eq!(
-        listing.recent[0].error_summary.as_deref(),
+        listing
+            .active
+            .as_ref()
+            .and_then(|run| run.error_summary.as_deref()),
         Some("permission_invalid_metadata")
     );
-    assert_eq!(
-        permissions.cancel_run("msg_run"),
-        Err("agent_run_unknown".into())
-    );
+    assert!(listing.recent.is_empty());
+    permissions.cancel_run("msg_run")?;
     fs::remove_dir_all(root)?;
     Ok(())
 }

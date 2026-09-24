@@ -1,3 +1,5 @@
+import { catalogPageFixture, historyArgument, nativeHistoryFixture, registeredHistoryFixture } from "../testing/historyCatalogFixtures";
+import type { UnifiedHistoryRow } from "../lib/unifiedHistory";
 import { afterEach, beforeEach, expect, mock } from "bun:test";
 import * as tauriCore from "@tauri-apps/api/core";
 import { cleanup, fireEvent, screen } from "@testing-library/react";
@@ -18,6 +20,7 @@ type PromptRequest = {
 
 export const promptRequests: PromptRequest[] = [];
 
+let registeredEntry: UnifiedHistoryRow | null = null;
 let convertFails = false;
 let promptFails = false;
 let nextSessionIndex = 0;
@@ -58,6 +61,7 @@ const SETTINGS = {
 beforeEach(() => {
   invoke.mockReset();
   promptRequests.length = 0;
+  registeredEntry = null;
   convertFails = false;
   promptFails = false;
   nextSessionIndex = 0;
@@ -113,6 +117,14 @@ function handleInvoke(command: string, args?: unknown): Promise<unknown> {
     case "memory_context":
     case "history_save":
       return Promise.resolve({ memories: [], promptBlock: "" });
+    case "history_register_native_session":
+      registeredEntry = nativeHistoryFixture(historyArgument(args, "sessionId"), historyArgument(args, "directory"));
+      return Promise.resolve(registeredHistoryFixture(args));
+    case "history_catalog_load":
+      if (!registeredEntry || historyArgument(args, "key") !== registeredEntry.key) throw new Error("catalog entry missing");
+      return Promise.resolve({ entry: registeredEntry, messages: [] });
+    case "history_catalog_list":
+      return Promise.resolve(catalogPageFixture([]));
     case "history_list":
       return Promise.resolve([]);
     case "agent_run_read":
@@ -155,11 +167,13 @@ function readyAttachment(id: string, fileName: string, mime: string, kind: strin
 
 function installOpenCodeTransport(): void {
   const fetchMock = mock((input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
+    const url = new URL(String(input)).pathname;
     if (url.endsWith("/session") && init?.method === "GET") return Promise.resolve(new Response(null, { status: 200 }));
     if (url.endsWith("/session") && init?.method === "POST") return Promise.resolve(jsonResponse({ id: nextSessionId(), title: "t", directory: "." }));
+    if (url.endsWith("/session/status") && init?.method === "GET") return Promise.resolve(jsonResponse({}));
+    if (url.endsWith("/message") && init?.method === "GET") return Promise.resolve(jsonResponse([]));
     if (url.includes("/prompt_async") && init?.method === "POST") return promptResponse(init);
-    if (url.includes("/abort") && init?.method === "POST") return Promise.resolve(new Response(null, { status: 204 }));
+    if (url.includes("/abort") && init?.method === "POST") return Promise.resolve(jsonResponse(true));
     return Promise.resolve(new Response("unexpected opencode test request", { status: 500 }));
   });
   globalThis.fetch = Object.assign(fetchMock, { preconnect: originalFetch.preconnect });
@@ -168,7 +182,7 @@ function installOpenCodeTransport(): void {
     value: class {
       onmessage: ((message: MessageEvent) => void) | null = null;
       constructor(readonly url: string) {
-        expect(url).toBe("http://127.0.0.1:48888/event");
+        expect(new URL(url).pathname).toBe("/event");
       }
       close(): void {}
     },

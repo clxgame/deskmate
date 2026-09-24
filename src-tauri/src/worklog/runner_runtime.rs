@@ -21,6 +21,7 @@ impl RunnerEnvironment for DesktopEnvironment {
             provider_id: settings.provider_id.clone(),
             model_id: settings.model_id.clone(),
             epoch: format!("{}:{process_id}", sidecar.port),
+            auth_header: crate::sidecar_auth_header(&self.0),
         })
     }
     fn model_identity(&self) -> Option<String> {

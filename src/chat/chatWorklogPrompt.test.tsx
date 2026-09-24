@@ -1,3 +1,4 @@
+import { nativeHistoryFixture, registeredHistoryFixture } from "../testing/historyCatalogFixtures";
 import { afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import * as tauriCore from "@tauri-apps/api/core";
@@ -11,6 +12,10 @@ const OriginalEventSource = globalThis.EventSource;
 
 const invoke = mock((command: string): Promise<unknown> => {
   switch (command) {
+    case "history_register_native_session":
+      return Promise.resolve(registeredHistoryFixture({ sessionId: "ses_worklog_prompt", directory: "." }));
+    case "history_catalog_load":
+      return Promise.resolve({ entry: nativeHistoryFixture("ses_worklog_prompt"), messages: [] });
     case "sidecar_base_url":
       return Promise.resolve("http://127.0.0.1:48888");
     case "get_settings":
@@ -53,7 +58,7 @@ beforeEach(() => {
   // Mock the transport, not the shared client module. Bun's module replacement
   // otherwise leaves this test's session/functions installed for later files.
   const fetchMock = mock((input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
+    const url = new URL(String(input)).pathname;
     if (url.endsWith("/session")) {
       return Promise.resolve(Response.json(init?.method === "POST"
         ? { id: "ses_worklog_prompt", title: "YUME chat", directory: "." } : []));

@@ -18,14 +18,31 @@ import {
   waitFor,
 } from "@testing-library/react";
 import type { OpenCodeEvent } from "../lib/opencode";
+import type { UnifiedHistoryRow } from "../lib/unifiedHistory";
+import type { HistoryMessage } from "../lib/history";
 
 const invoke = mock<(command: string, args?: unknown) => Promise<unknown>>(
   () => Promise.resolve(undefined),
 );
-const listen = mock(() => Promise.resolve(() => {}));
+const listen = mock<
+  (event: string, callback: () => void) => Promise<() => void>
+>(() => Promise.resolve(() => {}));
 let eventHandler: ((event: OpenCodeEvent) => void) | null = null;
+let ownershipChanged: (() => void) | null = null;
+let workbenchOwned = false;
+let workbenchState: "busy" | "idle" | "unavailable" = "idle";
 const originalFetch = globalThis.fetch;
-const OriginalEventSource = globalThis.EventSource;
+let localMessages: HistoryMessage[] = [];
+let catalogUnavailable = false;
+let promptCount = 0;
+const nativeEntry: UnifiedHistoryRow = {
+  key: 'native:["test",".","ses_fixed"]',
+  identity: { kind: "native", sidecarId: "test", directory: ".", sessionId: "ses_fixed" },
+  title: "t", userTitle: null, displayTitle: "t", source: "light_chat",
+  created: 1, updated: 1, pinned: false, archived: false, availability: "available",
+  ownership: "unowned", runtime: "idle", tombstone: null,
+  capabilities: { open: true, openWorkbench: true, send: true, rename: true, pin: true, archive: true, delete: true, readOnlyReason: null },
+};
 
 mock.module("@tauri-apps/api/core", () => ({ ...tauriCore, invoke }));
 mock.module("@tauri-apps/api/event", () => ({
@@ -42,7 +59,23 @@ function makeJsonResponse(body: unknown): Response {
 
 function installOpenCodeTransport(): void {
   const fetchMock = mock((input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
+    const url = String(input).split("?")[0] ?? "";
+    if (url.endsWith("/event")) {
+      return Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              eventHandler = (event: OpenCodeEvent) => {
+                controller.enqueue(
+                  new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`),
+                );
+              };
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+    }
     if (url.endsWith("/session") && init?.method === "GET") {
       return Promise.resolve(new Response(null, { status: 200 }));
     }
@@ -50,12 +83,16 @@ function installOpenCodeTransport(): void {
       return Promise.resolve(makeJsonResponse({ id: "ses_fixed", title: "t", directory: "." }));
     }
     if (url.endsWith("/session/ses_fixed/prompt_async") && init?.method === "POST") {
+      promptCount += 1;
       return Promise.resolve(new Response(null, { status: 204 }));
     }
     if (url.endsWith("/session/ses_fixed/abort") && init?.method === "POST") {
-      return Promise.resolve(new Response(null, { status: 204 }));
+      return Promise.resolve(makeJsonResponse(true));
     }
-    if (url.includes("/session/ses_fixed/message?")) {
+    if (url.endsWith("/session/status")) {
+      return Promise.resolve(makeJsonResponse({ ses_fixed: { type: "idle" } }));
+    }
+    if (url.endsWith("/session/ses_fixed/message")) {
       return Promise.resolve(makeJsonResponse([]));
     }
     return Promise.resolve(new Response("unexpected opencode test request", { status: 500 }));
@@ -63,25 +100,6 @@ function installOpenCodeTransport(): void {
   globalThis.fetch = Object.assign(fetchMock, {
     preconnect: originalFetch.preconnect,
   });
-
-  globalThis.EventSource = class {
-    onmessage: ((message: MessageEvent) => void) | null = null;
-
-    constructor(readonly url: string) {
-      expect(url).toBe("http://127.0.0.1:48888/event");
-      eventHandler = (event: OpenCodeEvent) => {
-        this.onmessage?.(
-          new MessageEvent("message", {
-            data: JSON.stringify(event),
-          }),
-        );
-      };
-    }
-
-    close(): void {
-      eventHandler = null;
-    }
-  } as typeof EventSource;
 }
 
 const { default: ChatApp } = await import("./ChatApp");
@@ -115,8 +133,19 @@ const SETTINGS = {
 
 beforeEach(() => {
   eventHandler = null;
+  localMessages = [];
+  catalogUnavailable = false;
+  promptCount = 0;
+  ownershipChanged = null;
+  workbenchOwned = false;
+  workbenchState = "idle";
+  listen.mockReset();
+  listen.mockImplementation((event: string, callback: () => void) => {
+    if (event === "workbench://ownership-changed") ownershipChanged = callback;
+    return Promise.resolve(() => {});
+  });
   invoke.mockReset();
-  invoke.mockImplementation((command: string) => {
+  invoke.mockImplementation((command: string, args?: unknown) => {
     switch (command) {
       case "sidecar_base_url":
         return Promise.resolve("http://127.0.0.1:48888");
@@ -126,8 +155,30 @@ beforeEach(() => {
         return Promise.resolve({ persona: "你是小著。", skills: undefined, placeholders: null });
       case "memory_context":
         return Promise.resolve({ memories: [], promptBlock: "" });
+      case "history_register_native_session":
+        return Promise.resolve({ ...nativeEntry, runtime: "unknown", capabilities: { ...nativeEntry.capabilities, send: false, readOnlyReason: "runtime_unknown" } });
+      case "history_catalog_load":
+        if (catalogUnavailable) return Promise.reject(new Error("synthetic unavailable"));
+        return Promise.resolve({ entry: nativeEntry, messages: localMessages });
+      case "history_catalog_list":
+        return Promise.resolve({ items: [nativeEntry], total: 1, hasMore: false, offline: false, errors: [], directories: ["."] });
+      case "history_save_local_messages": {
+        if (!args || typeof args !== "object" || !("messages" in args) || !Array.isArray(args.messages)) throw new Error("Missing local messages");
+        localMessages = args.messages.map((message: unknown): HistoryMessage => {
+          if (!message || typeof message !== "object" || !("role" in message) || !("text" in message)
+            || !("time" in message) || !("messageId" in message) || !("localOnly" in message)
+            || (message.role !== "user" && message.role !== "assistant") || typeof message.text !== "string"
+            || typeof message.time !== "number" || typeof message.messageId !== "string" || message.localOnly !== true) throw new Error("Invalid local message");
+          return { role: message.role, text: message.text, time: message.time, messageId: message.messageId, localOnly: true };
+        });
+        return Promise.resolve();
+      }
       case "history_save":
         return Promise.resolve(undefined);
+      case "workbench_session_owned":
+        return Promise.resolve(workbenchOwned);
+      case "workbench_session_status":
+        return Promise.resolve({ state: workbenchState });
       default:
         return Promise.resolve(undefined);
     }
@@ -139,10 +190,71 @@ afterEach(() => {
   jest.useRealTimers();
   cleanup();
   globalThis.fetch = originalFetch;
-  globalThis.EventSource = OriginalEventSource;
 });
 
 describe("小著固定名字由来回复", () => {
+  test("a newly registered unknown session refreshes host capabilities before the first send", async () => {
+    render(<ChatApp />);
+    const input = await screen.findByPlaceholderText("输入消息,Enter 发送");
+    await waitFor(() => expect(invoke.mock.calls.some(([command]) => command === "history_catalog_load")).toBe(true));
+    fireEvent.change(input, { target: { value: "普通问题" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(promptCount).toBe(1));
+  });
+
+  test("a new session stays read only when its fresh host status cannot be loaded", async () => {
+    catalogUnavailable = true;
+    render(<ChatApp />);
+    await screen.findByText("暂时无法确认对话状态，仅供阅读");
+    expect(screen.queryByPlaceholderText("输入消息,Enter 发送")).toBeNull();
+    expect(promptCount).toBe(0);
+  });
+  test("reopening a fixed reply preserves the local turn in the same native conversation", async () => {
+    render(<ChatApp />);
+    const input = await screen.findByPlaceholderText("输入消息,Enter 发送");
+    await act(async () => { fireEvent.change(input, { target: { value: "你是谁啊" } }); });
+    await waitFor(() => expect(screen.getByRole<HTMLButtonElement>("button", { name: "发送" }).disabled).toBe(false));
+    jest.useFakeTimers();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "发送" })); });
+    await act(async () => { jest.advanceTimersByTime(1000); });
+    await act(async () => { jest.advanceTimersByTime(1000); });
+    await act(async () => { jest.advanceTimersByTime(300); });
+    expect(localMessages).toHaveLength(2);
+    expect(localMessages.every(message => message.localOnly && message.messageId?.startsWith("local_"))).toBe(true);
+    expect(invoke.mock.calls.some(([command]) => command === "history_save")).toBe(false);
+    const reply = localMessages.find(message => message.role === "assistant")?.text;
+    expect(reply).toBeDefined();
+    jest.useRealTimers();
+    fireEvent.click(screen.getByRole("button", { name: "历史" }));
+    fireEvent.click(await screen.findByRole("button", { name: "打开 t" }));
+    await waitFor(() => expect(document.querySelector(".chat-msg-assistant .chat-bubble")?.textContent).toBe(reply));
+    expect(screen.getByText("本地回复")).toBeDefined();
+    expect(invoke.mock.calls.filter(([command]) => command === "history_register_native_session")).toHaveLength(1);
+  });
+
+  test("keeps input locked until a disconnected workbench session has a verified state", async () => {
+    // Given a light-chat session handed to the workbench.
+    render(<ChatApp />);
+    await screen.findByPlaceholderText("输入消息,Enter 发送");
+    await waitFor(() => expect(ownershipChanged).not.toBeNull());
+    workbenchOwned = true;
+    ownershipChanged?.();
+    await screen.findByText("该会话正在工作台处理");
+    expect(screen.queryByPlaceholderText("输入消息,Enter 发送")).toBeNull();
+
+    // When the ownership lease expires but the native session cannot be read.
+    workbenchOwned = false;
+    workbenchState = "unavailable";
+    ownershipChanged?.();
+
+    // Then input remains locked until a later native status check succeeds.
+    await screen.findByText("工作台已断开，但暂时无法确认会话状态；输入仍保持锁定，请稍后重试。");
+    expect(screen.queryByPlaceholderText("输入消息,Enter 发送")).toBeNull();
+    workbenchState = "idle";
+    ownershipChanged?.();
+    await screen.findByPlaceholderText("输入消息,Enter 发送");
+  });
+
   test("sends four lines two seconds apart and shows typing while waiting", async () => {
     render(<ChatApp />);
     const input = await screen.findByPlaceholderText("输入消息,Enter 发送");
@@ -363,6 +475,8 @@ describe("小著固定名字由来回复", () => {
       await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();
+    });
+    await act(async () => {
       jest.advanceTimersByTime(2000);
       await Promise.resolve();
     });
@@ -444,6 +558,8 @@ describe("小著固定名字由来回复", () => {
       await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();
+    });
+    await act(async () => {
       jest.advanceTimersByTime(2000);
       await Promise.resolve();
     });
@@ -506,6 +622,8 @@ describe("小著固定名字由来回复", () => {
       await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();
+    });
+    await act(async () => {
       jest.advanceTimersByTime(2000);
       await Promise.resolve();
     });
@@ -586,3 +704,10 @@ describe("小著固定名字由来回复", () => {
     );
   });
 });
+
+
+
+
+
+
+

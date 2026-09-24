@@ -54,8 +54,8 @@ export async function readAgentRuns(): Promise<AgentProjection> {
   if (!Array.isArray(value.artifacts)) throw new AgentWireError("recent");
   return { active: value.active === null ? null : parseRun(value.active), recent: value.recent.map(parseRun), artifacts: value.artifacts.map(parseArtifact) };
 }
-export async function startAgentRun(workspacePath: string | null, input: string, historyId?: string): Promise<AgentRun> {
-  const request = historyId ? { historyId, input } : { workspacePath, input };
+export async function startAgentRun(workspacePath: string | null, input: string, historyId?: string, catalogKey?: string): Promise<AgentRun> {
+  const request = historyId ? { historyId, input, ...(catalogKey ? { catalogKey } : {}) } : { workspacePath, input };
   return parseRun(await invoke("agent_run_start", { request }));
 }
 export function cancelAgentRun(runId: string): Promise<void> { return invoke("agent_run_cancel", { runId }); }
@@ -74,3 +74,4 @@ export function replyAgentPermission(runId: string, requestId: string, reply: Pe
   return invoke("agent_permission_reply", { runId, requestId, reply });
 }
 export function locateAgentArtifact(runId: string, reference: string): Promise<void> { return invoke("agent_artifact_locate", { runId, reference }); }
+

@@ -1,3 +1,4 @@
+import { catalogPageFixture, nativeHistoryFixture, registeredHistoryFixture } from "../testing/historyCatalogFixtures";
 import { expect, mock } from "bun:test";
 import * as tauriCore from "@tauri-apps/api/core";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -10,7 +11,6 @@ export const invoke = mock<(command: string, args?: unknown) => Promise<unknown>
 );
 
 const originalFetch = globalThis.fetch;
-const originalEventSource = globalThis.EventSource;
 let chatEventHandler: ((event: unknown) => void) | null = null;
 const appEventHandlers = new Map<string, (event: { payload: unknown }) => void>();
 let snapshotMessages: readonly OpenCodeMessage[] = [];
@@ -131,6 +131,21 @@ function installOpenCodeTransport(): void {
   const fetchMock = mock((input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     fetchLog = [...fetchLog, url];
+    if (new URL(url).pathname.endsWith("/event")) {
+      return Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              chatEventHandler = (event: unknown) => {
+                const frame = `data: ${JSON.stringify(event)}\n\n`;
+                controller.enqueue(new TextEncoder().encode(frame));
+              };
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+    }
     if (url.endsWith("/session") && init?.method === "GET") {
       return Promise.resolve(new Response("[]", { status: 200 }));
     }
@@ -138,6 +153,12 @@ function installOpenCodeTransport(): void {
       return Promise.resolve(
         Response.json({ id: "ses-1", title: "YUME chat", directory: "." }),
       );
+    }
+    if (new URL(url).pathname.endsWith("/session/status") && init?.method === "GET") {
+      return Promise.resolve(Response.json({}));
+    }
+    if (url.includes("/abort") && init?.method === "POST") {
+      return Promise.resolve(Response.json(true));
     }
     if (url.includes("/session/ses-1/message?order=asc")) {
       return Promise.resolve(Response.json(snapshotMessages));
@@ -149,27 +170,20 @@ function installOpenCodeTransport(): void {
       fetchMock(input, init),
     { preconnect: originalFetch.preconnect },
   );
-  globalThis.EventSource = class {
-    onmessage: ((message: MessageEvent) => void) | null = null;
-
-    constructor(readonly url: string) {
-      expect(url).toBe("http://127.0.0.1:48888/event");
-      chatEventHandler = (event: unknown) => {
-        this.onmessage?.(
-          new MessageEvent("message", { data: JSON.stringify(event) }),
-        );
-      };
-    }
-
-    close(): void {
-      chatEventHandler = null;
-    }
-  } as typeof EventSource;
+  // The chat event subscription uses fetch-streamed SSE (native EventSource
+  // cannot send the sidecar's Authorization header); events are pushed through
+  // the /event branch in fetchMock above.
 }
 
 function mockChatInvoke(): void {
   invoke.mockImplementation((command: string) => {
     switch (command) {
+      case "history_register_native_session":
+        return Promise.resolve(registeredHistoryFixture({ sessionId: "ses-1", directory: "." }));
+      case "history_catalog_load":
+        return Promise.resolve({ entry: nativeHistoryFixture("ses-1"), messages: [] });
+      case "history_catalog_list":
+        return Promise.resolve(catalogPageFixture([]));
       case "sidecar_base_url":
         return Promise.resolve("http://127.0.0.1:48888");
       case "get_settings":
@@ -244,6 +258,5 @@ export function resetChatHarness(): void {
 
 export function cleanupChatHarness(): void {
   globalThis.fetch = originalFetch;
-  globalThis.EventSource = originalEventSource;
   cleanup();
 }

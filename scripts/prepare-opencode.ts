@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import {
   chmod,
   copyFile,
@@ -89,6 +90,22 @@ async function readManifest(path: string): Promise<PackageManifest> {
   return JSON.parse(await readFile(path, "utf8")) as PackageManifest;
 }
 
+export async function prepareProcessTerminator(): Promise<string | undefined> {
+  if (process.platform !== "win32") return undefined;
+  const directory = resolve(dirname(targetBinary), "process-tools");
+  await mkdir(directory, { recursive: true });
+  const compiler = spawn("rustc", [
+    "--edition=2021", "-O", resolve(projectRoot, "scripts/windows-process-kill.rs"),
+    "-o", resolve(directory, "taskkill.exe"),
+  ], { stdio: "inherit", windowsHide: true });
+  const code = await new Promise<number | null>((done, reject) => {
+    compiler.once("error", reject);
+    compiler.once("exit", done);
+  });
+  if (code !== 0) throw new Error(`YUME process terminator compilation failed (${code})`);
+  return directory;
+}
+
 async function main() {
   const [projectManifest, installedManifest] = await Promise.all([
     readManifest(projectManifestPath),
@@ -116,6 +133,7 @@ async function main() {
   await mkdir(dirname(targetBinary), { recursive: true });
   await rm(resolve(dirname(targetBinary), staleExecutableName), { force: true });
   await copyFile(selectedSource, targetBinary);
+  await prepareProcessTerminator();
   if (process.platform !== "win32") {
     await chmod(targetBinary, 0o755);
   }

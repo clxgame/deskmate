@@ -123,6 +123,12 @@ pub(super) fn decision_with_approvals(
             command: None,
             cwd: workspace.path().to_path_buf(),
         }),
+        permission if crate::settings::is_approved_desktop_mcp_permission(permission) => {
+            PendingDecision::Ask(ApprovalDetail {
+                command: None,
+                cwd: workspace.path().to_path_buf(),
+            })
+        }
         "external_directory" | "question" | "task" | "doom_loop" => PendingDecision::Reject,
         _ => PendingDecision::Reject,
     };

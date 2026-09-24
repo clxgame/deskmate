@@ -1,0 +1,7 @@
+{
+  "$schema": "gen/schemas/desktop-schema.json",
+  "identifier": "workbench",
+  "description": "YUME workbench window (embedded native OpenCode app)",
+  "windows": ["workbench"],
+  "permissions": ["core:default"]
+}

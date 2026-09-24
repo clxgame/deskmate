@@ -15,11 +15,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
   abortSession,
+  confirmPromptSubmission,
   createSession,
   getSessionMessages,
   promptAsync,
   subscribeEvents,
   waitForServer,
+  SessionAbortError,
   type OpenCodeEvent,
 } from "../lib/opencode";
 import { broadcastMood, broadcastPetActivity } from "../lib/petState";
@@ -45,22 +47,18 @@ import {
   type MemoryFailure,
   type MemoryReceipt,
 } from "./memoryActions";
-import { memoryForgetConversation } from "../lib/memory";
 import {
   getSettings,
   onResourceError,
   onSettingsChanged,
   type Settings,
 } from "../lib/settings";
+import { memoryForgetConversation } from "../lib/memory";
 import type { ThemeId } from "../settings/theme";
 import { dict } from "../lib/i18n";
 import { AppIcon } from "../ui/AppIcon";
 import {
-  historyDelete,
-  historyList,
-  historySave,
   type HistorySession,
-  type HistorySummary,
 } from "../lib/history";
 import {
   type ModelReadyAttachment,
@@ -79,6 +77,10 @@ import { CcSwitchSetupCard } from "./CcSwitchSetupCard";
 import { WorkspaceTask } from "./WorkspaceTask";
 import { useAgentRun } from "./useAgentRun";
 import { useAgentHistoryView } from "./useAgentHistoryView";
+import { HistoryOrganizer } from "./HistoryOrganizer";
+import { catalogLoad, saveLocalMessages, type UnifiedHistoryRow } from "../lib/unifiedHistory";
+import { validateSharedConversation, loadSharedConversation, conversationReadOnlyReason } from "./sharedConversation";
+import { useHistoryOrganizerRequest } from "./useHistoryOrganizerRequest";
 import {
   CCSWITCH_PREPARE_OPENCODE_PROVIDER_TOOL,
   createCcSwitchToolResultTracker,
@@ -97,6 +99,8 @@ interface TextChatMessage {
   text: string;
   activity?: ToolActivity;
   attachments?: ModelReadyAttachment[];
+  readonly localOnly?: boolean;
+  readonly time?: number;
 }
 
 interface ArtifactChatMessage {
@@ -205,9 +209,95 @@ export default function ChatApp() {
   const [theme, setTheme] = useState<ThemeId>("dark");
   const [activePersonaId, setActivePersonaId] = useState(DEFAULT_PERSONA_ID);
   const [view, setView] = useState<View>("chat");
+  const showOrganizer = useCallback(() => setView("history"), []);
+  useHistoryOrganizerRequest(showOrganizer);
+  const [catalogEntry, setCatalogEntry] = useState<UnifiedHistoryRow | null>(null);
+  const catalogEntryRef = useRef<UnifiedHistoryRow | null>(null);
+  const viewGenerationRef = useRef(0);
+  const nativePersistedRef = useRef(false);
+  const localReplySnapshotRef = useRef(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const currentDirectory = catalogEntry?.identity.kind === "native" ? catalogEntry.identity.directory : undefined;
+  const sessionDirectory = () => catalogEntryRef.current?.identity.kind === "native" ? catalogEntryRef.current.identity.directory : undefined;
+
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [isDragActive, setIsDragActive] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
+  /** Whether the current session's input is owned by the workbench (§8.1):
+   * the light chat then defers its send/approve/cancel handlers for it. */
+  const [sessionOwnedByWorkbench, setSessionOwnedByWorkbench] = useState(false);
+  const [workbenchSessionStateUnknown, setWorkbenchSessionStateUnknown] =
+    useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    let checking = false;
+    let ownershipObserved = false;
+    const check = async () => {
+      if (!currentSessionId) {
+        setSessionOwnedByWorkbench(false);
+        setWorkbenchSessionStateUnknown(false);
+        return;
+      }
+      if (checking) return;
+      checking = true;
+      try {
+        const owned = await invoke<boolean>("workbench_session_owned", {
+          sessionId: currentSessionId,
+          directory: currentDirectory,
+        });
+        if (cancelled) return;
+        if (owned) {
+          ownershipObserved = true;
+          setSessionOwnedByWorkbench(true);
+          setWorkbenchSessionStateUnknown(false);
+          return;
+        }
+        if (!ownershipObserved) {
+          setSessionOwnedByWorkbench(false);
+          setWorkbenchSessionStateUnknown(false);
+          return;
+        }
+        const snapshot = await invoke<{ state: "busy" | "idle" | "unavailable" }>(
+          "workbench_session_status",
+          { sessionId: currentSessionId, directory: currentDirectory },
+        );
+        if (cancelled) return;
+        if (snapshot.state === "unavailable") {
+          setSessionOwnedByWorkbench(true);
+          setWorkbenchSessionStateUnknown(true);
+          return;
+        }
+        ownershipObserved = false;
+        setSessionOwnedByWorkbench(false);
+        setWorkbenchSessionStateUnknown(false);
+        setStatus((current) => {
+          if (snapshot.state === "busy") return "busy";
+          return current === "busy" ? "ready" : current;
+        });
+      } catch {
+        if (cancelled) return;
+        if (ownershipObserved) {
+          setSessionOwnedByWorkbench(true);
+          setWorkbenchSessionStateUnknown(true);
+        } else {
+          setSessionOwnedByWorkbench(false);
+        }
+      } finally {
+        checking = false;
+      }
+    };
+    void check();
+    // Ownership can change while we are already on this session (handoff from
+    // this window, or the workbench hiding); re-check on every such change.
+    const unlisten = listen("workbench://ownership-changed", () => void check());
+    const timer = window.setInterval(() => void check(), 2_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      void unlisten.then((off) => off());
+    };
+  }, [currentSessionId, currentDirectory]);
   const worklog = useWorklogChat(currentSessionId);
   /** Inline memory receipts, keyed by the message they belong to. */
   const [memoryReceipts, setMemoryReceipts] = useState<
@@ -232,9 +322,46 @@ export default function ChatApp() {
     viewedId: agentHistoryId,
     archive: agentHistoryArchive,
     open: openHistory,
+    openScoped: openScopedAgentHistory,
     adopt: adoptAgentHistory,
     leave: leaveAgentHistory,
   } = useAgentHistoryView(agent.projection.active?.sessionId ?? null);
+  const canContinueAgentHistory = agentHistoryId !== null && agentHistoryArchive?.agentDetails?.status !== "active"
+    && catalogEntry?.ownership === "agent" && !catalogEntry.archived && catalogEntry.availability === "available";
+  const readOnlyHistory = catalogEntry !== null && !catalogEntry.capabilities.send && !canContinueAgentHistory;
+  const refreshSelectedConversation = useCallback(async (key: string) => {
+    const displayed = catalogEntryRef.current;
+    const generation = viewGenerationRef.current;
+    if (!displayed || displayed.key !== key) return;
+    try {
+      const loaded = await loadSharedConversation(displayed);
+      if (generation !== viewGenerationRef.current || catalogEntryRef.current?.key !== key) return;
+      catalogEntryRef.current = loaded.entry;
+      setCatalogEntry(loaded.entry);
+    } catch (cause) {
+      if (generation !== viewGenerationRef.current || catalogEntryRef.current?.key !== key) return;
+      const unavailable: UnifiedHistoryRow = { ...displayed, availability: "unavailable", runtime: "unknown",
+        capabilities: { ...displayed.capabilities, send: false, readOnlyReason: "native_unavailable" } };
+      catalogEntryRef.current = unavailable;
+      setCatalogEntry(unavailable);
+      console.warn("selected conversation unavailable", cause instanceof Error ? cause.message : String(cause));
+    }
+  }, []);
+  useEffect(() => {
+    const key = catalogEntry?.key;
+    if (!key) return;
+    let disposed = false;
+    const subscription = listen("history-catalog-changed", () => {
+      if (!disposed) void refreshSelectedConversation(key);
+    }).catch(cause => {
+      console.warn("history listener unavailable", cause instanceof Error ? cause.message : String(cause));
+      return () => undefined;
+    });
+    return () => {
+      disposed = true;
+      void subscription.then(stop => stop());
+    };
+  }, [catalogEntry?.key, refreshSelectedConversation]);
   const agentHistoryActiveRef = useRef(agentHistoryId !== null);
   useLayoutEffect(() => {
     agentHistoryActiveRef.current = agentHistoryId !== null;
@@ -505,17 +632,39 @@ export default function ChatApp() {
   }, []);
 
   const resetSession = useCallback(async (): Promise<void> => {
+    const generation = ++viewGenerationRef.current;
+    const previousSession = sessionRef.current;
+    if (previousSession && catalogEntryRef.current?.capabilities.send) {
+      await abortSession(previousSession, sessionDirectory());
+      await cleanupAttachmentSession(previousSession);
+    }
     petActivity.cancel();
     fixedReplySequenceRef.current += 1;
     clearReplyPacing();
     setIsPersonaTyping(false);
-    const previousSession = sessionRef.current;
-    if (previousSession) {
-      await abortSession(previousSession).catch(() => {});
-      await cleanupAttachmentSession(previousSession);
-    }
     await waitForServer();
     const session = await createSession("YUME chat");
+    const registered = await invoke<UnifiedHistoryRow>("history_register_native_session", {
+      sessionId: session.id,
+      directory: session.directory,
+      source: "light_chat",
+    });
+    if (viewGenerationRef.current !== generation) return;
+    let ready = registered;
+    let statusUnavailable = false;
+    try {
+      ready = (await loadSharedConversation(registered)).entry;
+    } catch (error: unknown) {
+      statusUnavailable = true;
+      console.warn("new conversation status unavailable", error instanceof Error ? error.message : String(error));
+    }
+    if (viewGenerationRef.current !== generation) return;
+    catalogEntryRef.current = ready;
+    setCatalogEntry(ready);
+    setMemoryNotice(statusUnavailable ? tRef.current.sessionStateUnknown : null);
+    nativePersistedRef.current = false;
+    localReplySnapshotRef.current = false;
+    setHistoryLoading(false);
     sessionRef.current = session.id;
     setCurrentSessionId(session.id);
     resetAttachmentSession(session.id);
@@ -598,7 +747,7 @@ export default function ChatApp() {
     async (sessionID: string) => {
       try {
         const results = recoverCcSwitchToolResultsFromMessages(
-          await getSessionMessages(sessionID),
+          await getSessionMessages(sessionID, sessionDirectory()),
           ccSwitchToolTrackerRef.current,
         );
         results.forEach((result, index) => {
@@ -614,12 +763,12 @@ export default function ChatApp() {
   // Boot: wait for sidecar, load persona, create session, subscribe SSE.
   useEffect(() => {
     let closed = false;
-    let unsubscribe: (() => void) | null = null;
     let stopSettingsListener: (() => void) | null = null;
 
     (async () => {
       try {
         settingsRef.current = await getSettings().catch(() => null);
+        if (closed) return;
         const initialPersonaId = resolvePersonaId(
           settingsRef.current?.personaId,
         );
@@ -639,7 +788,6 @@ export default function ChatApp() {
               nextPersonaId,
             )
           ) {
-            petActivity.cancel();
             const switchRequest = loadPersona(nextPersonaId).then(() =>
               activePersonaIdRef.current === nextPersonaId
                 ? resetSession()
@@ -663,18 +811,10 @@ export default function ChatApp() {
         stopSettingsListener = settingsListener;
         await resetSession();
         if (closed) return;
-        const eventStream = await subscribeEvents(handleEvent);
-        // The stream is opened inside the await above, so a teardown that ran
-        // meanwhile never saw it. Close it here instead of leaking the
-        // connection for the lifetime of the window.
-        if (closed) {
-          eventStream();
-          return;
-        }
-        unsubscribe = eventStream;
         setStatus("ready");
         broadcastMood("idle");
       } catch (error: unknown) {
+        if (closed) return;
         console.error(
           error instanceof Error ? error : new Error(String(error)),
         );
@@ -685,7 +825,7 @@ export default function ChatApp() {
 
     return () => {
       closed = true;
-      unsubscribe?.();
+      personaLoadSequenceRef.current += 1;
       stopSettingsListener?.();
     };
   }, [loadPersona, resetSession]);
@@ -805,6 +945,19 @@ export default function ChatApp() {
   }, []);
 
   useEffect(() => {
+    if (!currentSessionId || !currentDirectory) return;
+    let closed = false;
+    const subscription = subscribeEvents((event) => {
+      const identity = catalogEntryRef.current?.identity;
+      if (!closed && identity?.kind === "native" && identity.directory === currentDirectory && identity.sessionId === currentSessionId) handleEvent(event);
+    }, currentDirectory);
+    return () => {
+      closed = true;
+      void subscription.then((stop) => stop());
+    };
+  }, [currentSessionId, currentDirectory, handleEvent]);
+
+  useEffect(() => {
     const lastUser = messages.filter((message) => message.role === "user").at(-1)?.id;
     if (lastUser !== lastScrollUserRef.current) followLatestRef.current = true;
     lastScrollUserRef.current = lastUser;
@@ -816,28 +969,21 @@ export default function ChatApp() {
     messagesRef.current = messages;
   }, [messages]);
 
-  // Persist history when a turn completes (status ready) and messages exist.
+  // Persist only YUME-local messages; native text remains owned by OpenCode.
   useEffect(() => {
-    if (agentHistoryId || status !== "ready" || messages.length === 0) return;
+    if (agentHistoryId || !localReplySnapshotRef.current || status !== "ready" || messages.length === 0) return;
     const sessionID = sessionRef.current;
     if (!sessionID) return;
     const timer = setTimeout(() => {
-      if (agentHistoryActiveRef.current) return;
+      if (agentHistoryActiveRef.current || !localReplySnapshotRef.current || sessionRef.current !== sessionID) return;
       const msgs = messagesRef.current;
-      const firstUser = msgs.find((m) => m.role === "user");
-      const title = firstUser
-        ? firstUser.text.slice(0, 40)
-        : tRef.current.historyNewSession;
-      const textMessages = msgs.filter(isTextChatMessage);
-      void historySave({
-        id: sessionID,
-        title,
-        created: createdRef.current,
-        updated: Date.now(),
-        messages: textMessages
-          .filter((m) => m.text.trim().length > 0)
-          .map((m) => ({ role: m.role, text: m.text, time: Date.now() })),
-      }).catch((e) => console.error("history save failed", e));
+      const localMessages = msgs.flatMap(message => isTextChatMessage(message) && message.localOnly && message.text.trim()
+        ? [{ role: message.role, text: message.text, time: message.time ?? Date.now(), messageId: message.id, localOnly: true }]
+        : []);
+      const entry = catalogEntryRef.current;
+      if (!entry || !localMessages.length) return;
+      void saveLocalMessages(entry.key, localMessages)
+        .catch(error => console.error("local reply save failed", error instanceof Error ? error.message : String(error)));
     }, 300);
     return () => clearTimeout(timer);
   }, [agentHistoryId, messages, status]);
@@ -847,9 +993,10 @@ export default function ChatApp() {
   }, [agentHistoryArchive]);
 
   const send = async () => {
+    const generation = viewGenerationRef.current;
     const text = input.trim();
     if (!text && chatAttachments.items.length === 0) return;
-    if (status !== "ready" || !sessionRef.current) return;
+    if (historyLoading || readOnlyHistory || sessionOwnedByWorkbench || status !== "ready" || !sessionRef.current) return;
     if (containsCcSwitchApiKey(text)) {
       setInput("");
       setAttachmentError(null);
@@ -864,7 +1011,25 @@ export default function ChatApp() {
         setAttachmentError(t.agentAttachmentsUnsupported);
         return;
       }
-      const run = await agent.start(text, agentHistoryId ?? undefined);
+      if (agentHistoryId && catalogEntryRef.current?.identity.kind === "native") {
+        const displayed = catalogEntryRef.current;
+        try {
+          const loaded = await loadSharedConversation(displayed);
+          if (generation !== viewGenerationRef.current) return;
+          catalogEntryRef.current = loaded.entry;
+          setCatalogEntry(loaded.entry);
+          if (loaded.entry.archived || loaded.entry.tombstone || loaded.entry.availability !== "available"
+            || loaded.entry.runtime === "unknown" || loaded.entry.runtime === "running" || loaded.agentDetails?.status === "active") return;
+        } catch (cause) {
+          await refreshSelectedConversation(displayed.key);
+          if (generation !== viewGenerationRef.current) return;
+          setMemoryNotice(tRef.current.sessionStateUnknown);
+          console.warn("agent conversation access unavailable", cause instanceof Error ? cause.message : String(cause));
+          return;
+        }
+      }
+      const run = await agent.start(text, agentHistoryId ?? undefined,
+        agentHistoryId && catalogEntryRef.current?.identity.kind === "native" ? catalogEntryRef.current.key : undefined);
       if (run) {
         setInput("");
         setAttachmentError(null);
@@ -887,13 +1052,14 @@ export default function ChatApp() {
       setAttachmentError(error instanceof Error ? error.message : t.chatAttachmentReadFailed);
       return;
     }
-    if (!prepared.shouldSendToModel) return;
+    if (!prepared.shouldSendToModel || generation !== viewGenerationRef.current) return;
     const sentReadyLocalIds = chatAttachments.items
       .filter((item) => item.kind === "ready")
       .map((item) => item.localId);
     setInput("");
     setAttachmentError(null);
     const sent = await sendText(text, prepared);
+    if (!sent && generation === viewGenerationRef.current) setInput(text);
     if (sent) {
       discardSentAttachmentSources(sentReadyLocalIds);
     }
@@ -904,13 +1070,31 @@ export default function ChatApp() {
     prepared: PreparedModelAttachments = EMPTY_PREPARED_ATTACHMENTS,
   ): Promise<boolean> => {
     const sessionID = sessionRef.current;
+    const generation = viewGenerationRef.current;
+    const displayed = catalogEntryRef.current;
+    if (!displayed || historyLoading || sessionOwnedByWorkbench || !displayed.capabilities.send) return false;
     if ((!text && !prepared.shouldSendToModel) || !sessionID) return false;
     await personaLoadRef.current;
-    if (sessionRef.current !== sessionID) return false;
+    if (sessionRef.current !== sessionID || generation !== viewGenerationRef.current) return false;
+    let fresh: UnifiedHistoryRow;
+    try {
+      fresh = (await catalogLoad(displayed.key)).entry;
+    } catch (error: unknown) {
+      setMemoryNotice(tRef.current.sessionStateUnknown);
+      console.error("conversation access unavailable", error instanceof Error ? error.message : String(error));
+      return false;
+    }
+    if (generation !== viewGenerationRef.current) return false;
+    catalogEntryRef.current = fresh;
+    setCatalogEntry(fresh);
+    const identity = validateSharedConversation(displayed, fresh);
+    if (!identity) return false;
     const messageAttachments = prepared.fileParts.map(attachmentPreviewFromPart);
     const attachmentNames = messageAttachments.map((item) => item.name).join(", ");
     const promptText = text || prepared.fallbackPrompt;
-    const userMessageId = newUserMessageId();
+    const localOnly = activePersonaIdRef.current === DEFAULT_PERSONA_ID && prepared.fileParts.length === 0
+      && (isXiaozhuNameOriginQuestion(text) || isXiaozhuIdentityQuestion(text));
+    const userMessageId = localOnly ? `local_${newUserMessageId()}` : newUserMessageId();
     rolesRef.current.set(userMessageId, "user");
     setMessages((prev) => [
       ...prev,
@@ -919,6 +1103,7 @@ export default function ChatApp() {
         role: "user",
         text: text || `附件：${attachmentNames}`,
         attachments: messageAttachments,
+        localOnly, time: Date.now(),
       },
     ]);
     if (!promptText) return false;
@@ -934,6 +1119,7 @@ export default function ChatApp() {
       prepared.fileParts.length === 0
     ) {
       if (isXiaozhuNameOriginQuestion(text)) {
+        localReplySnapshotRef.current = true;
         if (!(await waitForFixedReplyStart(fixedReplySequence))) return false;
         for (const [index, line] of XIAOZHU_NAME_ORIGIN_LINES.entries()) {
           if (index > 0) {
@@ -948,9 +1134,9 @@ export default function ChatApp() {
           setMessages((prev) => [
             ...prev,
             {
-              id: `xiaozhu-name-origin-${fixedReplySequence}-${index}`,
+              id: `${userMessageId}_origin_${index}`,
               role: "assistant",
-              text: line,
+              text: line, localOnly: true, time: Date.now(),
             },
           ]);
           broadcastMood("talking");
@@ -963,14 +1149,15 @@ export default function ChatApp() {
         return true;
       }
       if (isXiaozhuIdentityQuestion(text)) {
+        localReplySnapshotRef.current = true;
         if (!(await waitForFixedReplyStart(fixedReplySequence))) return false;
         setIsPersonaTyping(false);
         setMessages((prev) => [
           ...prev,
           {
-            id: `xiaozhu-identity-${fixedReplySequence}`,
+            id: `${userMessageId}_identity`,
             role: "assistant",
-            text: XIAOZHU_IDENTITY_REPLY,
+            text: XIAOZHU_IDENTITY_REPLY, localOnly: true, time: Date.now(),
           },
         ]);
         broadcastMood("talking");
@@ -981,6 +1168,7 @@ export default function ChatApp() {
       }
     }
     startReplyPacing();
+    let promptStarted = false;
     try {
       const s = settingsRef.current;
       // Persona defaults to Chinese; add a reply-language override otherwise.
@@ -1014,8 +1202,21 @@ export default function ChatApp() {
       } catch (error: unknown) {
         setMemoryNotice(`${worklogChatCopy(lang).failed}: ${error instanceof Error ? error.message : "BRIDGE_UNAVAILABLE"}`);
       }
-      if (!petActivity.isCurrent(petScope)) return false;
+      if (!petActivity.isCurrent(petScope) || generation !== viewGenerationRef.current) return false;
+      const finalAccess = (await catalogLoad(displayed.key)).entry;
+      if (generation !== viewGenerationRef.current || !validateSharedConversation(displayed, finalAccess)) {
+        if (generation === viewGenerationRef.current) {
+          catalogEntryRef.current = finalAccess;
+          setCatalogEntry(finalAccess);
+          clearReplyPacing();
+          setStatus("ready");
+        }
+        return false;
+      }
+      promptStarted = true;
+      nativePersistedRef.current = true;
       await promptAsync(sessionID, promptText, {
+        directory: identity.directory,
         messageID: userMessageId,
         system: [system, buildCurrentInformationInstruction(), buildWorklogSystemInstruction()].filter(Boolean).join("\n\n"),
         attachments: [...prepared.fileParts],
@@ -1024,9 +1225,20 @@ export default function ChatApp() {
             ? { providerID: s.providerId, modelID: s.modelId }
             : undefined,
       });
+      nativePersistedRef.current = true;
       return true;
     } catch (error: unknown) {
       if (!petActivity.isCurrent(petScope)) return false;
+      if (promptStarted) {
+        const submission = await confirmPromptSubmission(sessionID, userMessageId, identity.directory);
+        if (submission === "confirmed") { nativePersistedRef.current = true; return true; }
+        if (submission === "unknown") {
+          nativePersistedRef.current = true;
+          setMemoryNotice(tRef.current.chatSubmissionUnknown);
+          broadcastMood("thinking");
+          return true;
+        }
+      }
       petActivity.error(petScope);
       console.error(
         error instanceof Error ? error : new Error(String(error)),
@@ -1043,6 +1255,7 @@ export default function ChatApp() {
   };
 
   const stageAttachmentFiles = useCallback((files: ArrayLike<File> | null) => {
+    if (catalogEntryRef.current && !catalogEntryRef.current.capabilities.send) return;
     const selected = Array.from(files ?? []);
     if (selected.length === 0) return;
     void (async () => {
@@ -1194,53 +1407,85 @@ export default function ChatApp() {
   }, []);
 
   const abort = async () => {
-    petActivity.cancel();
-    fixedReplySequenceRef.current += 1;
-    clearReplyPacing();
-    setIsPersonaTyping(false);
-    setStatus("ready");
-    broadcastMood("idle");
-    if (sessionRef.current)
-      await abortSession(sessionRef.current).catch(() => {});
+    const sessionID = sessionRef.current;
+    if (!sessionID || isCancelling || sessionOwnedByWorkbench || readOnlyHistory || historyLoading) return;
+    setIsCancelling(true);
+    setMemoryNotice(null);
+    try {
+      await abortSession(sessionID, sessionDirectory());
+      petActivity.cancel();
+      fixedReplySequenceRef.current += 1;
+      clearReplyPacing();
+      setIsPersonaTyping(false);
+      setStatus("ready");
+      broadcastMood("idle");
+    } catch (error: unknown) {
+      const unknown = error instanceof SessionAbortError && error.code === "UNKNOWN";
+      setMemoryNotice(unknown ? t.chatStopUnknown : t.chatStopFailed);
+      broadcastMood("error");
+    } finally {
+      setIsCancelling(false);
+    }
   };
 
-  /** Resume a past session: adopt its opencode session id and reload messages. */
-  const resumeSession = useCallback(async (id: string) => {
+  /** Load actual native messages via the host, preserving the composite identity. */
+  const resumeSession = useCallback(async (row: UnifiedHistoryRow) => {
+    const generation = ++viewGenerationRef.current;
+    setHistoryLoading(true);
     petActivity.cancel();
     fixedReplySequenceRef.current += 1;
     clearReplyPacing();
     setIsPersonaTyping(false);
-    const opened = await openHistory(id);
-    if (opened.kind === "missing" || opened.kind === "stale") return;
-    if (opened.kind === "agent") {
+    try {
+      const loaded = await loadSharedConversation(row);
+      if (generation !== viewGenerationRef.current) return;
+      const entry = loaded.entry;
+      if (entry.key !== row.key) throw new Error("history identity changed");
+      if (loaded.agentDetails) {
+        const agentId = entry.identity.kind === "native" ? entry.identity.sessionId : entry.identity.historyId;
+        const opened = entry.identity.kind === "native" ? openScopedAgentHistory(loaded) : await openHistory(agentId);
+        if (generation !== viewGenerationRef.current || opened.kind !== "agent") return;
+        agent.clearSelection();
+        catalogEntryRef.current = entry;
+        setCatalogEntry(entry);
+        sessionRef.current = agentId;
+        setCurrentSessionId(agentId);
+        nativePersistedRef.current = true;
+        setView("chat");
+        setStatus("ready");
+        return;
+      }
       agent.clearSelection();
+      leaveAgentHistory();
+      const id = entry.identity.kind === "native" ? entry.identity.sessionId : null;
+      const previousSession = sessionRef.current;
+      if (previousSession && previousSession !== id) await cleanupAttachmentSession(previousSession);
+      if (generation !== viewGenerationRef.current) return;
+      sessionRef.current = id;
+      catalogEntryRef.current = entry;
+      setCatalogEntry(entry);
+      nativePersistedRef.current = true;
+      setCurrentSessionId(id);
+      if (id) resetAttachmentSession(id);
+      rolesRef.current.clear();
+      createdRef.current = entry.created;
+      setMessages(loaded.messages.map((message, index) => ({
+        id: message.messageId ?? message.partId ?? "history-" + index, role: message.role, text: message.text,
+        localOnly: message.localOnly, time: message.time,
+      })));
+      setInput("");
+      setMemoryNotice(null);
       setView("chat");
       setStatus("ready");
       broadcastMood("idle");
-      return;
+    } catch (error: unknown) {
+      if (generation !== viewGenerationRef.current) return;
+      setMemoryNotice(tRef.current.historyLoadFailed);
+      throw error instanceof Error ? error : new Error(String(error));
+    } finally {
+      if (generation === viewGenerationRef.current) setHistoryLoading(false);
     }
-    agent.clearSelection();
-    const rec = opened.session;
-    const previousSession = sessionRef.current;
-    if (previousSession !== null && previousSession !== id) {
-      await cleanupAttachmentSession(previousSession);
-    }
-    sessionRef.current = id;
-    setCurrentSessionId(id);
-    resetAttachmentSession(id);
-    rolesRef.current.clear();
-    createdRef.current = rec.created;
-    setMessages(
-      rec.messages.map((m, i) => ({
-        id: `hist-${i}`,
-        role: m.role,
-        text: m.text,
-      })),
-    );
-    setView("chat");
-    setStatus("ready");
-    broadcastMood("idle");
-  }, [agent, cleanupAttachmentSession, openHistory, resetAttachmentSession, petActivity]);
+  }, [agent, cleanupAttachmentSession, leaveAgentHistory, openHistory, openScopedAgentHistory, resetAttachmentSession, petActivity]);
 
   /** Start a fresh session. */
   const newChat = useCallback(async () => {
@@ -1252,7 +1497,8 @@ export default function ChatApp() {
       console.error(
         error instanceof Error ? error : new Error(String(error)),
       );
-      setStatus("error");
+      const unknown = error instanceof SessionAbortError && error.code === "UNKNOWN";
+      setMemoryNotice(unknown ? tRef.current.chatStopUnknown : tRef.current.chatStopFailed);
       broadcastMood("error");
     }
   }, [agent, leaveAgentHistory, resetSession]);
@@ -1298,6 +1544,19 @@ export default function ChatApp() {
           {statusLabel[status]}
         </span>
         <button
+          className="chat-iconbtn"
+          disabled={!currentSessionId}
+          onClick={() => {
+            if (currentSessionId) {
+              void invoke("workbench_open_session", { sessionId: currentSessionId, directory: currentDirectory });
+            }
+          }}
+          aria-label={t.openInWorkbench}
+          title={t.openInWorkbench}
+        >
+          <AppIcon name="widget" size={18} />
+        </button>
+        <button
           className={`chat-iconbtn${view === "history" ? " chat-iconbtn-active" : ""}`}
           onClick={() => setView(view === "history" ? "chat" : "history")}
           aria-label={t.tabHistory}
@@ -1323,12 +1582,12 @@ export default function ChatApp() {
       </header>
 
       {view === "history" ? (
-        <HistoryPanel
-          t={t}
-          onContinue={resumeSession}
-          onNewChat={newChat}
-          onDelete={cleanupAttachmentSession}
-        />
+        <HistoryOrganizer language={lang} onOpen={resumeSession} onClose={() => setView("chat")} onNewChat={newChat} onChanged={refreshSelectedConversation}
+          onDeleted={async (row, forgetMemories) => {
+            const id = row.identity.kind === "native" ? row.identity.sessionId : row.identity.historyId;
+            await cleanupAttachmentSession(id);
+            if (forgetMemories) await memoryForgetConversation(id, row.key);
+          }} />
       ) : (
         <>
           <div className="chat-timeline">
@@ -1428,6 +1687,7 @@ export default function ChatApp() {
                       ))}
                     </div>
                   )}
+                  {m.localOnly && m.role === "assistant" && <div className="chat-activity">{lang === "zh-CN" ? "本地回复" : "Local reply"}</div>}
                   {(m.text.trim().length > 0 || m.role === "user") && (
                     <div className="chat-bubble">
                       <ChatText text={m.text} format={m.role === "assistant" ? "markdown" : "plain"}
@@ -1528,8 +1788,29 @@ export default function ChatApp() {
           )}
 
           <WorkspaceTask language={lang} agent={agent} historyDetails={agentHistoryArchive?.agentDetails} onWorkspaceSelected={leaveAgentHistory} />
-          <ToolApprovalCards requests={permissions.requests} error={permissions.error} onReply={permissions.reply} t={t} />
-          <footer className="chat-input-row">
+          {sessionOwnedByWorkbench || readOnlyHistory || historyLoading ? (
+            <div className="chat-memory-notice" role="status" aria-live="polite">
+              {historyLoading ? t.loading : readOnlyHistory
+                ? (catalogEntry ? conversationReadOnlyReason(catalogEntry, lang) : t.sessionStateUnknown)
+                : workbenchSessionStateUnknown ? t.sessionStateUnknown : t.sessionOwnedByWorkbench}
+              <button type="button" className="chat-memory-action" onClick={() => void newChat()}>{t.historyNewSession}</button>
+              <button
+                type="button"
+                className="chat-memory-action"
+                disabled={!currentSessionId}
+                onClick={() => {
+                  if (currentSessionId) {
+                    void invoke("workbench_open_session", { sessionId: currentSessionId, directory: currentDirectory });
+                  }
+                }}
+              >
+                {t.openInWorkbench}
+              </button>
+            </div>
+          ) : (
+            <>
+              <ToolApprovalCards requests={permissions.requests} error={permissions.error} onReply={permissions.reply} t={t} />
+              <footer className="chat-input-row">
             <input
               ref={fileInputRef}
               className="chat-file-input"
@@ -1582,8 +1863,9 @@ export default function ChatApp() {
               <button
                 className="chat-send chat-abort"
                 onClick={() => void abort()}
+                disabled={isCancelling}
               >
-                {t.chatStop}
+                {isCancelling ? t.chatStopping : t.chatStop}
               </button>
             ) : (
               <button
@@ -1603,6 +1885,8 @@ export default function ChatApp() {
           </footer>
         </>
       )}
+      </>
+    )}
     </div>
   );
 }
@@ -1684,134 +1968,13 @@ function upsertAssistant(
   ];
 }
 
-// ------------------------------------------------------------------- 历史
 
-export function HistoryPanel({
-  t,
-  onContinue,
-  onNewChat,
-  onDelete,
-}: {
-  t: ReturnType<typeof dict>;
-  onContinue: (id: string) => void;
-  onNewChat: () => void;
-  onDelete: (id: string) => Promise<void>;
-}) {
-  const [sessions, setSessions] = useState<HistorySummary[] | null>(null);
-  const [failed, setFailed] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  /**
-   * Deleting a conversation offers to drop the memories that came only from it,
-   * enabled by default. Memories with other sources, or that the user saved
-   * explicitly elsewhere, always survive.
-   */
-  const [deleteMemories, setDeleteMemories] = useState(true);
 
-  const refresh = useCallback(() => {
-    setFailed(false);
-    void historyList()
-      .then(setSessions)
-      .catch(() => {
-        setFailed(true);
-        setSessions([]);
-      });
-  }, []);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
 
-  const remove = async (id: string) => {
-    setDeleteError(null);
-    try {
-      await historyDelete(id);
-    } catch (error) {
-      setDeleteError(
-        String(error).includes("history_agent_running")
-          ? t.historyDeleteAgentRunning
-          : t.historyDeleteFailed,
-      );
-      return;
-    }
-    await onDelete(id).catch(() => {});
-    if (deleteMemories) {
-      // A memory failure must not leave the conversation half-deleted.
-      await memoryForgetConversation(id).catch(() => {});
-    }
-    refresh();
-  };
 
-  return (
-    <div className="history-panel">
-      <div className="history-head">
-        <span className="history-title">{t.tabHistory}</span>
-        <button className="history-new" onClick={() => void onNewChat()}>
-          <AppIcon name="add" size={16} />
-          {t.historyNewSession}
-        </button>
-      </div>
-      {failed && (
-        <p className="history-empty history-error">{t.historyLoadFailed}</p>
-      )}
-      {deleteError && (
-        <p className="history-delete-error" role="alert">{deleteError}</p>
-      )}
-      {sessions !== null && sessions.length > 0 && (
-        <label className="history-memory-option">
-          <input
-            type="checkbox"
-            checked={deleteMemories}
-            onChange={(event) => setDeleteMemories(event.target.checked)}
-          />
-          {t.memoryDeleteWithConversation}
-        </label>
-      )}
-      {sessions === null ? (
-        <p className="history-empty">{t.loading}</p>
-      ) : sessions.length === 0 ? (
-        <p className="history-empty">{t.historyEmpty}</p>
-      ) : (
-        <div className="history-list">
-          {sessions.map((s) => (
-            <div key={s.id} className="history-item">
-              <button
-                className="history-main"
-                onClick={() => void onContinue(s.id)}
-              >
-                <span className="history-item-title">
-                  {s.title || t.historyNewSession}
-                </span>
-                <span className="history-item-meta">
-                  {formatTime(s.updated)} · {t.historyCount(s.count)}
-                </span>
-                {s.agentDetails && (
-                  <span className="history-item-meta history-agent-meta">
-                    {s.agentDetails.workspacePath} · {s.agentDetails.status}
-                  </span>
-                )}
-              </button>
-              <button
-                className="history-del"
-                aria-label={t.historyDelete}
-                title={t.historyDelete}
-                onClick={() => void remove(s.id)}
-              >
-                <AppIcon name="delete" size={16} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
-function formatTime(ms: number): string {
-  const d = new Date(ms);
-  const now = new Date();
-  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(
-    d.getMinutes(),
-  ).padStart(2, "0")}`;
-  if (d.toDateString() === now.toDateString()) return hm;
-  return `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
-}
+
+
+
+

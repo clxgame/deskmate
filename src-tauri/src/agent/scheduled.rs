@@ -87,7 +87,12 @@ pub(super) fn submit_with(
         return Ok(admission);
     }
     if let Err(error) = submit(state, id) {
-        let _ = state.fail_active(id, "scheduled_submission_failed");
+        if state
+            .active_record(id)
+            .is_ok_and(|record| record.pending_outcome.is_none())
+        {
+            let _ = state.fail_active(id, "scheduled_submission_failed");
+        }
         return Err(error);
     }
     Ok(admission)
@@ -139,13 +144,13 @@ pub(crate) fn execute(
                     Err(error) => Err(error),
                 };
             }
-            let result = client
-                .prompt(&session, id, "", &task.prompt)
-                .and_then(|_| state.confirm_submission(id));
-            if result.is_err() {
-                let _ = permissions.cancel_run(id);
+            let _operation = state.lock_operation()?;
+            state.active_record(id)?;
+            if let Err(error) = client.prompt(&session, id, "", &task.prompt) {
+                super::supervision::submission_failed(app, &state.active_record(id)?, &error)?;
+                return Err(error);
             }
-            result
+            state.confirm_submission(id)
         })
     })();
     if let Err(error) = result {

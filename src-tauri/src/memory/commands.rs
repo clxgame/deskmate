@@ -140,20 +140,66 @@ pub fn memory_clear(
 
 /// Called when a conversation is deleted and the user opted to drop memories
 /// that came only from it.
+fn forget_catalog_conversation(
+    repository: &MemoryRepository<SystemClock>,
+    entries: &[crate::history::catalog_model::CatalogEntry],
+    conversation_id: &str,
+    catalog_key: &str,
+) -> MemoryResult<u64> {
+    use crate::history::catalog_model::CatalogIdentity;
+    let mut matched = false;
+    let mut identities = 0;
+    for entry in entries {
+        let id = match &entry.identity {
+            CatalogIdentity::Native { session_id, .. } => session_id,
+            CatalogIdentity::Legacy { history_id } => history_id,
+        };
+        if id == conversation_id {
+            identities += 1;
+            matched |= entry.key() == catalog_key;
+        }
+    }
+    if !matched {
+        return Err(MemoryError::validation_failed("memory_conversation_identity_invalid"));
+    }
+    if identities > 1 {
+        return Err(MemoryError::conflict("memory_conversation_identity_ambiguous"));
+    }
+    repository.forget_conversation(conversation_id)
+}
+
 #[tauri::command]
 pub fn memory_forget_conversation(
+    window: tauri::WebviewWindow,
     app: tauri::AppHandle,
     state: tauri::State<MemoryState>,
     conversation_id: String,
+    catalog_key: Option<String>,
 ) -> Result<u64, MemoryError> {
+    let entries = if catalog_key.is_some() {
+        crate::history::native_api::authorize_history_window(window.label())
+            .map_err(|_| MemoryError::validation_failed("memory_conversation_window_denied"))?;
+        Some(crate::history::commands::store(&app)
+            .and_then(|store| store.all())
+            .map_err(MemoryError::storage_unavailable)?)
+    } else {
+        None
+    };
     let removed = with_repository(&state, |repository| {
-        repository.forget_conversation(&conversation_id)
+        match (catalog_key.as_deref(), entries.as_deref()) {
+            (Some(key), Some(entries)) => forget_catalog_conversation(repository, entries, &conversation_id, key),
+            _ => repository.forget_conversation(&conversation_id),
+        }
     })?;
     if removed > 0 {
         notify(&app, MemoryChange::new(MemoryAction::Forgotten));
     }
     Ok(removed)
 }
+
+#[cfg(test)]
+#[path = "commands_forget_tests.rs"]
+mod forget_tests;
 
 /// Assemble the memory block for one outgoing chat turn.
 #[tauri::command]

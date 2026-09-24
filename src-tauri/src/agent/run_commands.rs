@@ -11,6 +11,7 @@ use tauri::Manager;
 pub(crate) struct AgentStartInput {
     pub(super) workspace_path: Option<std::path::PathBuf>,
     pub(super) history_id: Option<String>,
+    pub(super) catalog_key: Option<String>,
     pub(super) input: String,
 }
 
@@ -30,11 +31,26 @@ pub(crate) async fn agent_run_start(
         if crate::updater::installation_in_progress() {
             return Err("agent_update_installing".to_owned());
         }
-        let target = super::continuation::start_target(
-            &request,
-            &app.state::<crate::history::HistoryState>(),
-            &state,
-        )?;
+        let history = app.state::<crate::history::HistoryState>();
+        let target = match request.catalog_key.as_deref() {
+            Some(key) => {
+                let entry = crate::history::commands::store(&app)?.get(key)?;
+                let target = super::continuation::catalog_start_target(&request, &entry, &history, &state)?;
+                if let crate::history::catalog_model::CatalogIdentity::Native { directory, session_id, .. } = &entry.identity {
+                    let client = crate::history::commands::client(&app)?;
+                    client.get(directory, session_id).map_err(|error| error.to_string())?;
+                    let statuses = client.statuses(directory).map_err(|error| error.to_string())?;
+                    if statuses.get(session_id).is_some_and(|status| !matches!(status, crate::history::native_api::NativeStatus::Idle)) {
+                        return Err("agent_history_busy".into());
+                    }
+                    if app.state::<crate::workbench::WorkbenchOwnership>().is_owned(directory, session_id)? {
+                        return Err("session_owned_by_workbench".into());
+                    }
+                }
+                target
+            }
+            None => super::continuation::start_target(&request, &history, &state)?,
+        };
         state.begin(&run_id, &target.workspace, &request.input)?;
         drop(operation);
         let workspace = state
@@ -136,9 +152,10 @@ pub(crate) async fn agent_run_start(
         {
             return fail_history_start(&state, &app.state::<AgentPermissionState>(), &run_id);
         }
+        let _operation = state.lock_operation()?;
+        state.active_record(&run_id)?;
         if let Err(error) = client.prompt(&session, &run_id, &system, &request.input) {
-            let _ = app.state::<AgentPermissionState>().cancel_run(&run_id);
-            let _ = state.fail_active(&run_id, &error);
+            super::supervision::submission_failed(&app, &state.active_record(&run_id)?, &error)?;
             return Err(error);
         }
         state.confirm_submission(&run_id)?;
@@ -207,43 +224,29 @@ pub(crate) async fn agent_run_cancel(
     crate::tool_permissions::runtime::require_chat(&window)?;
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AgentRunState>();
+        let operation = state.lock_operation()?;
         let record = state.active_record(&run_id)?;
+        if record.initial_input.is_some() && record.session_id.is_none() {
+            state.cancel_preparation(&run_id)?;
+            return Ok(());
+        }
+        super::supervision::settle(&app, &record, "agent_cancelled")?;
         if record.initial_input.is_some() {
-            if let Some(session) = record.session_id.as_deref() {
-                let settings = current_start_settings(&app)?;
-                let aborted =
-                    lifecycle_client(&app, &settings, &record.workspace_path).abort(session)?;
-                if !aborted {
-                    state.set_collection_error(&run_id, Some("abort_not_confirmed"))?;
-                    return Err("agent_abort_unconfirmed".to_owned());
+            state.cancel_preparation(&run_id)?;
+            if let Err(error) = app.state::<AgentPermissionState>().cancel_run(&run_id) {
+                if error != "agent_run_unknown" {
+                    return Err(error);
                 }
-            }
-            let _operation = state.lock_operation()?;
-            if state.matches_active(&record)? {
-                state.cancel_preparation(&run_id)?;
-                let _ = app.state::<AgentPermissionState>().cancel_run(&run_id);
             }
             return Ok(());
         }
-
-        let session = record
-            .session_id
-            .as_deref()
-            .ok_or_else(|| "agent_session_unknown".to_owned())?;
-        let settings = current_start_settings(&app)?;
-        let aborted = lifecycle_client(&app, &settings, &record.workspace_path).abort(session)?;
-        if !aborted {
-            state.set_collection_error(&run_id, Some("abort_not_confirmed"))?;
-            return Err("agent_abort_unconfirmed".to_owned());
-        }
-        {
-            let _operation = state.lock_operation()?;
-            if !state.matches_active(&record)? {
-                return Ok(());
+        state.request_finish(&run_id, RunOutcome::Cancelled, None)?;
+        if let Err(error) = app.state::<AgentPermissionState>().cancel_run(&run_id) {
+            if error != "agent_run_unknown" {
+                return Err(error);
             }
-            state.request_finish(&run_id, RunOutcome::Cancelled, None)?;
-            let _ = app.state::<AgentPermissionState>().cancel_run(&run_id);
         }
+        drop(operation);
         super::collector::collect_active_run_once(&app, super::collector::CollectionMode::Live)
     })
     .await

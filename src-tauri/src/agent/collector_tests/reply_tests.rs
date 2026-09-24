@@ -2,7 +2,7 @@ use super::{active, fixture, permission_snapshot, request_for_tool, terminal};
 use crate::{
     agent::{
         collector::{collect_once_with, CollectorActions, SnapshotRead},
-        mark_rejected_run, process_current_reply,
+        process_current_reply,
         record_store::{NativeMessage, RunOutcome, RunRecord},
         test_support::TestResult,
         AgentReply,
@@ -12,15 +12,26 @@ use crate::{
 use std::{cell::Cell, fs};
 
 #[test]
-fn rejected_permission_archives_final_snapshot_before_cancelling() -> TestResult<()> {
+fn rejected_permission_waits_for_native_result_and_model_reply() -> TestResult<()> {
     let (root, workspace) = fixture("permission-reject")?;
     let (runs, permissions) = active(&root, &workspace)?;
-    mark_rejected_run(&runs, "msg_run", AgentReply::Reject)?;
+    runs.reconcile("msg_run", &permission_snapshot())?;
+    permissions.accept(
+        "msg_run",
+        request_for_tool("per_reject", "ses_run", "msg_native", "call_bash")?,
+    )?;
+    process_current_reply(
+        &runs,
+        &permissions,
+        "msg_run",
+        "per_reject",
+        AgentReply::Reject,
+    )?;
     assert_eq!(
         runs.read()?
             .active
             .and_then(|record| record.pending_outcome),
-        Some(RunOutcome::Cancelled)
+        None
     );
 
     let archived = Cell::new(false);
@@ -29,7 +40,7 @@ fn rejected_permission_archives_final_snapshot_before_cancelling() -> TestResult
         &permissions,
         CollectorActions {
             snapshot: |_: &RunRecord| Ok(SnapshotRead::Messages(terminal("msg_run"))),
-            pending: |_: &RunRecord| panic!("rejected run does not read permissions again"),
+            pending: |_: &RunRecord| Ok(Vec::new()),
             archive: |_: &RunRecord, messages: &[NativeMessage]| {
                 assert_eq!(
                     messages[0].parts[0].text.as_deref(),
@@ -44,7 +55,7 @@ fn rejected_permission_archives_final_snapshot_before_cancelling() -> TestResult
     assert!(archived.get());
     let listing = runs.read()?;
     assert!(listing.active.is_none());
-    assert_eq!(listing.recent[0].outcome, Some(RunOutcome::Cancelled));
+    assert_eq!(listing.recent[0].outcome, Some(RunOutcome::Completed));
     fs::remove_dir_all(root)?;
     Ok(())
 }

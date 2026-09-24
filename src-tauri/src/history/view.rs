@@ -4,6 +4,76 @@ use super::{
 };
 use tauri::Manager;
 
+/// The sidecar `/session` list returns these per session; only the fields the
+/// history projection needs are read.
+#[derive(serde::Deserialize)]
+struct NativeSessionInfo {
+    id: String,
+    title: Option<String>,
+    directory: Option<String>,
+    time: Option<NativeSessionTime>,
+}
+
+#[derive(serde::Deserialize)]
+struct NativeSessionTime {
+    created: Option<u64>,
+    updated: Option<u64>,
+}
+
+/// Merge sessions that live only on the managed OpenCode sidecar (e.g. created
+/// in the native workbench) into the history list, flagged `native`, without
+/// copying them into history.json (§8.1 / §9.2: native sessions stay native;
+/// the light chat shows them as projections and hands off to the workbench).
+fn native_sessions(
+    app: &tauri::AppHandle,
+    already: &std::collections::HashSet<String>,
+) -> Vec<HistorySummary> {
+    let Ok(data_dir) = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "app data dir unavailable".to_string())
+    else {
+        return Vec::new();
+    };
+    let workspace = data_dir.join("workspace").to_string_lossy().into_owned();
+    let url = format!("{}/session", crate::sidecar_url(app));
+    let list: Vec<NativeSessionInfo> = match ureq::get(&url)
+        .set("Authorization", &crate::sidecar_auth_header(app))
+        .timeout(std::time::Duration::from_secs(3))
+        .call()
+    {
+        Ok(response) => response.into_json().unwrap_or_default(),
+        Err(_) => return Vec::new(),
+    };
+    list.into_iter()
+        .filter(|session| {
+            !already.contains(&session.id)
+                && session
+                    .directory
+                    .as_deref()
+                    .map(|directory| directory == workspace)
+                    .unwrap_or(false)
+        })
+        .map(|session| HistorySummary {
+            id: session.id,
+            title: session.title.unwrap_or_default(),
+            created: session
+                .time
+                .as_ref()
+                .and_then(|time| time.created)
+                .unwrap_or(0),
+            updated: session
+                .time
+                .as_ref()
+                .and_then(|time| time.updated)
+                .unwrap_or(0),
+            count: 0,
+            agent_details: None,
+            native: true,
+        })
+        .collect()
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct HistoryLoaded {
@@ -40,7 +110,15 @@ pub(crate) fn history_list(app: tauri::AppHandle) -> Result<Vec<HistorySummary>,
         .lock()
         .map_err(|_| "history_state_unavailable")?
         .clone();
-    history_summaries(&sessions, &records)
+    let mut list = history_summaries(&sessions, &records)?;
+    // Merge native-only sessions (created in the workbench) that are not
+    // already projected in history.json. They are flagged `native` so the UI
+    // hands them off to the workbench instead of resuming them here (§8.1).
+    let already: std::collections::HashSet<String> =
+        sessions.iter().map(|session| session.id.clone()).collect();
+    list.extend(native_sessions(&app, &already));
+    list.sort_by(|a, b| b.updated.cmp(&a.updated));
+    Ok(list)
 }
 
 pub(super) fn history_summaries(
@@ -59,6 +137,7 @@ pub(super) fn history_summaries(
             agent_details: session.origin_run_id.as_ref().and_then(|_| {
                 recovery::details_for(records, &session.id, DetailAvailability::Ready)
             }),
+            native: false,
         })
         .collect())
 }
@@ -142,7 +221,7 @@ pub(crate) async fn history_load(
                     Err(error) => return Err(error),
                 }
             }
-            Err(error) if error == "agent_http_404" => DetailAvailability::Missing,
+            Err(error) if matches!(error.as_str(), "agent_http_404" | "history_native_missing") => DetailAvailability::Missing,
             Err(_) => DetailAvailability::Retryable,
         };
         Ok(visible_session(&state, &id)?.map(|session| loaded(session, &records, availability)))
@@ -150,3 +229,4 @@ pub(crate) async fn history_load(
     .await
     .map_err(|_| "history_load_unavailable".to_owned())?
 }
+

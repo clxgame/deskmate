@@ -200,6 +200,8 @@ pub struct Settings {
     pub yolo: bool,
     pub tool_permissions: crate::tool_permissions::ToolPermissions,
     pub agent_permission_approvals: Vec<crate::tool_permissions::AgentPermissionApproval>,
+    pub browser_mcp_enabled: bool,
+    pub windows_mcp_enabled: bool,
     pub base_url: String,
     pub api_key: String,
     /// Configured gateways; the first is the legacy-migrated one.
@@ -251,6 +253,8 @@ impl Default for Settings {
             yolo: false,
             tool_permissions: crate::tool_permissions::ToolPermissions::default(),
             agent_permission_approvals: Vec::new(),
+            browser_mcp_enabled: false,
+            windows_mcp_enabled: false,
             base_url: DEFAULT_AI_BASE_URL.into(),
             api_key: String::new(),
             providers: Vec::new(),
@@ -287,8 +291,8 @@ const MODEL_CATALOG_DIR: &str = "model-catalogs";
 /// Legacy single-file catalog path; used only to migrate into per-provider files.
 const LEGACY_MODEL_CATALOG_FILE: &str = "model-catalog.json";
 const CCSWITCH_PREPARE_OPENCODE_PROVIDER_TOOL: &str = "ccswitch_prepare_opencode_provider";
-const DENIED_OPENCODE_PERMISSIONS: &[&str] =
-    &["edit", "write", "patch", "external_directory", "task"];
+const NATIVE_WORKBENCH_APPROVAL_PERMISSIONS: &[&str] =
+    &["edit", "write", "patch", "task", "question"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -316,14 +320,20 @@ impl Default for SettingsState {
 #[cfg(not(feature = "worklog-qa"))]
 const KEYRING_SERVICE: &str = "com.deskmate.desktop";
 #[cfg(feature = "worklog-qa")]
-const KEYRING_SERVICE: &str = "com.deskmate.worklogqa";
+fn keyring_service() -> &'static str {
+    crate::qa_identity::keyring_scope()
+}
+#[cfg(not(feature = "worklog-qa"))]
+const fn keyring_service() -> &'static str {
+    KEYRING_SERVICE
+}
 /// Legacy single-key entry; superseded by per-provider entries once a
 /// provider list exists. Kept only to migrate an existing key into
 /// `providers[0]`.
 const LEGACY_KEYRING_USER: &str = "ai-api-key";
 
 fn api_key_entry(user: &str) -> Option<keyring::Entry> {
-    keyring::Entry::new(KEYRING_SERVICE, user).ok()
+    keyring::Entry::new(keyring_service(), user).ok()
 }
 
 /// The keystore username for a given provider, e.g. `ai-api-key.<provider_id>`.
@@ -332,7 +342,7 @@ fn api_key_user_for(provider_id: &str) -> String {
 }
 
 fn read_api_key_user(user: &str) -> Result<String, String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, user)
+    let entry = keyring::Entry::new(keyring_service(), user)
         .map_err(|e| format!("无法访问系统凭据存储: {e}"))?;
     match entry.get_password() {
         Ok(api_key) => Ok(api_key),
@@ -1164,6 +1174,9 @@ fn apply_and_publish_settings(
 #[cfg(test)]
 #[path = "settings_geometry_tests.rs"]
 mod geometry_tests;
+#[cfg(test)]
+#[path = "settings_mcp_permission_tests.rs"]
+mod mcp_permission_tests;
 #[tauri::command]
 pub fn set_settings(
     app: tauri::AppHandle,
@@ -1201,6 +1214,8 @@ pub fn set_settings(
     settings.api_key = settings.api_key.trim().to_string();
     // SAFE-UNWRAP: a poisoned settings mutex means an earlier command panicked.
     let old = { state.0.lock().unwrap().clone() };
+    let desktop_mcp_changed = old.browser_mcp_enabled != settings.browser_mcp_enabled
+        || old.windows_mcp_enabled != settings.windows_mcp_enabled;
     settings.agent_permission_approvals = old.agent_permission_approvals.clone();
     for provider in &mut settings.providers {
         provider.base_url = normalize_base_url(&provider.base_url);
@@ -1223,9 +1238,19 @@ pub fn set_settings(
     settings.pet_position = old.pet_position;
     persist_settings_update(&AppSettingsTransactionOps { app: &app }, &old, &settings)?;
     let current = apply_and_publish_settings(&state, &settings, || apply(&app, &old, &settings))?;
+    // Keep the native workbench's default model on the same effective value as
+    // the YUME settings selection, so both UIs read one sidecar config field
+    // instead of maintaining two divergent model values (§3.4).
+    sync_workbench_default_model(&app, &settings);
     crate::pomodoro::apply_preferences(&app, settings.pomodoro)?;
     // Notify every window (pet scale, persona, model...) of the change.
     let _ = app.emit("deskmate://settings-changed", &current);
+    if old.theme != current.theme {
+        let _ = app.emit_to("workbench", "deskmate://theme-changed", &current.theme);
+    }
+    if desktop_mcp_changed {
+        crate::restart_sidecar(&app)?;
+    }
     Ok(())
 }
 
@@ -1461,7 +1486,21 @@ pub(crate) fn load_verified_model_catalog_for_provider(
 pub(crate) fn sidecar_environment(app: &tauri::AppHandle) -> Option<(String, String)> {
     let state = app.try_state::<SettingsState>()?;
     let settings = state.0.lock().ok()?.clone();
-    build_multi_provider_sidecar_environment(app, &settings)
+    let (config, auth) = build_multi_provider_sidecar_environment(app, &settings)
+        .unwrap_or_else(baseline_sidecar_environment);
+    Some((with_desktop_mcp(app, &settings, config)?, auth))
+}
+
+fn baseline_sidecar_environment() -> (String, String) {
+    (
+        serde_json::json!({
+            "$schema": "https://opencode.ai/config.json",
+            "permission": sidecar_permission_policy(),
+            "experimental": { "continue_loop_on_deny": true }
+        })
+        .to_string(),
+        serde_json::json!({}).to_string(),
+    )
 }
 
 /// Injects **every** verified gateway into the sidecar so a model picked from
@@ -1576,12 +1615,177 @@ fn finalize_sidecar_environment(
     let config = serde_json::json!({
         "$schema": "https://opencode.ai/config.json",
         "permission": sidecar_permission_policy(),
+        "experimental": { "continue_loop_on_deny": true },
         "provider": providers,
     });
     Some((
         config.to_string(),
         serde_json::Value::Object(auth).to_string(),
     ))
+}
+
+const PLAYWRIGHT_MCP_VERSION: &str = "0.0.82";
+const WINDOWS_MCP_VERSION: &str = "1.3.24";
+const PLAYWRIGHT_MCP_SERVER: &str = "yume_playwright";
+const WINDOWS_MCP_SERVER: &str = "yume_windows";
+const PLAYWRIGHT_MCP_TOOLS: &[&str] = &[
+    "browser_navigate",
+    "browser_snapshot",
+    "browser_fill_form",
+    "browser_click",
+    "browser_wait_for",
+    "browser_close",
+];
+const WINDOWS_MCP_TOOLS: &[&str] = &[
+    "app",
+    "window_management",
+    "ui_snapshot",
+    "ui_find",
+    "ui_click",
+    "ui_type",
+    "ui_read",
+    "ui_wait",
+    "screenshot_control",
+    "keyboard_control",
+];
+
+#[cfg(windows)]
+fn find_command(names: &[&str]) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    for directory in std::env::split_paths(&path) {
+        for name in names {
+            let candidate = directory.join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(not(windows))]
+fn find_command(_names: &[&str]) -> Option<PathBuf> {
+    None
+}
+
+fn configure_desktop_mcp(
+    config: &mut serde_json::Map<String, serde_json::Value>,
+    settings: &Settings,
+    playwright_command: Option<&Path>,
+    windows_command: Option<&Path>,
+    output_directory: &Path,
+) {
+    let mut approved = Vec::new();
+    let mut servers = serde_json::Map::new();
+    if settings.browser_mcp_enabled {
+        if let Some(command) = playwright_command {
+            servers.insert(
+                PLAYWRIGHT_MCP_SERVER.to_owned(),
+                serde_json::json!({
+                    "type": "local",
+                    "command": [
+                        command.to_string_lossy(),
+                        "--yes",
+                        format!("@playwright/mcp@{PLAYWRIGHT_MCP_VERSION}"),
+                        "--browser", "msedge",
+                        "--isolated",
+                        "--headless",
+                        "--timeout-action", "5000",
+                        "--timeout-navigation", "15000",
+                        "--output-dir", output_directory.join("playwright").to_string_lossy().into_owned(),
+                        "--output-max-size", "10485760"
+                    ],
+                    "enabled": true,
+                    "timeout": 30_000
+                }),
+            );
+            approved.extend(
+                PLAYWRIGHT_MCP_TOOLS
+                    .iter()
+                    .map(|tool| (PLAYWRIGHT_MCP_SERVER, *tool)),
+            );
+        }
+    }
+    if settings.windows_mcp_enabled {
+        if let Some(command) = windows_command {
+            servers.insert(
+                WINDOWS_MCP_SERVER.to_owned(),
+                serde_json::json!({
+                    "type": "local",
+                    "command": [
+                        command.to_string_lossy(),
+                        "--tools", WINDOWS_MCP_TOOLS.join(",")
+                    ],
+                    "enabled": true,
+                    "timeout": 30_000
+                }),
+            );
+            approved.extend(
+                WINDOWS_MCP_TOOLS
+                    .iter()
+                    .map(|tool| (WINDOWS_MCP_SERVER, *tool)),
+            );
+        }
+    }
+    config.insert(
+        "permission".to_owned(),
+        serde_json::Value::Object(sidecar_permission_policy_with_approved_mcp_tools(&approved)),
+    );
+    if !servers.is_empty() {
+        config.insert("mcp".to_owned(), serde_json::Value::Object(servers));
+    }
+}
+
+fn bundled_windows_mcp(resource_dir: &Path) -> Option<PathBuf> {
+    [
+        resource_dir
+            .join("resources")
+            .join("windows-mcp")
+            .join(WINDOWS_MCP_VERSION)
+            .join("Sbroenne.WindowsMcp.exe"),
+        resource_dir
+            .join("windows-mcp")
+            .join(WINDOWS_MCP_VERSION)
+            .join("Sbroenne.WindowsMcp.exe"),
+    ]
+    .into_iter()
+    .find(|candidate| candidate.is_file())
+}
+
+fn with_desktop_mcp(app: &tauri::AppHandle, settings: &Settings, config: String) -> Option<String> {
+    let mut config: serde_json::Value = serde_json::from_str(&config).ok()?;
+    let object = config.as_object_mut()?;
+    let output_directory = app.path().app_data_dir().ok()?.join("mcp-output");
+    let resource_dir = app.path().resource_dir().ok()?;
+    let windows_command = bundled_windows_mcp(&resource_dir);
+    configure_desktop_mcp(
+        object,
+        settings,
+        find_command(&["npx.cmd", "npx.exe"]).as_deref(),
+        windows_command.as_deref(),
+        &output_directory,
+    );
+    Some(config.to_string())
+}
+
+/// Keep the native workbench's default model on the same effective value as
+/// the YUME settings selection, so both UIs read one sidecar config field
+/// instead of maintaining two divergent model values (§3.4). Best-effort: the
+/// sidecar may be down or restarting, and a failed write must not block saving.
+fn sync_workbench_default_model(app: &tauri::AppHandle, settings: &Settings) {
+    if settings.provider_id.is_empty() || settings.model_id.is_empty() {
+        return;
+    }
+    if !crate::sidecar_owned_running(app).unwrap_or(false) {
+        return;
+    }
+    let model = format!("{}/{}", settings.provider_id, settings.model_id);
+    let url = format!("{}/global/config", crate::sidecar_url(app));
+    let _ = ureq::patch(&url)
+        .set("Authorization", &crate::sidecar_auth_header(app))
+        .set("Content-Type", "application/json")
+        .timeout(std::time::Duration::from_secs(3))
+        .send_json(serde_json::json!({ "model": model }));
 }
 
 /// The permission policy is global to the sidecar and independent of how many
@@ -1594,11 +1798,75 @@ pub(crate) fn sidecar_permission_policy() -> serde_json::Map<String, serde_json:
         CCSWITCH_PREPARE_OPENCODE_PROVIDER_TOOL.to_string(),
         serde_json::json!("allow"),
     );
-    for permission_id in DENIED_OPENCODE_PERMISSIONS {
-        permission.insert((*permission_id).to_string(), serde_json::json!("deny"));
+    permission.insert("external_directory".to_string(), serde_json::json!("deny"));
+    for permission_id in NATIVE_WORKBENCH_APPROVAL_PERMISSIONS {
+        permission.insert((*permission_id).to_string(), serde_json::json!("ask"));
     }
     for tool in crate::tool_permissions::CONTROLLED_TOOLS {
         permission.insert((*tool).to_owned(), serde_json::json!("ask"));
+    }
+    permission
+}
+
+/// Mirrors OpenCode's `McpCatalog.toolName` exactly: any character outside
+/// `[a-zA-Z0-9_-]` becomes `_`; hyphens are preserved, matching
+/// `packages/opencode/src/mcp/catalog.ts` `sanitize`.
+#[allow(
+    dead_code,
+    reason = "reserved for explicit QA and future MCP configuration"
+)]
+pub(crate) fn mcp_tool_permission_id(server: &str, tool: &str) -> String {
+    let sanitize = |segment: &str| {
+        segment
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() || character == '_' || character == '-' {
+                    character
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>()
+    };
+
+    format!("{}_{}", sanitize(server), sanitize(tool))
+}
+
+pub(crate) fn is_approved_desktop_mcp_permission(permission: &str) -> bool {
+    desktop_mcp_permission_ids()
+        .into_iter()
+        .any(|approved| approved == permission)
+}
+
+pub(crate) fn desktop_mcp_permission_ids() -> Vec<String> {
+    PLAYWRIGHT_MCP_TOOLS
+        .iter()
+        .map(|tool| mcp_tool_permission_id(PLAYWRIGHT_MCP_SERVER, tool))
+        .chain(
+            WINDOWS_MCP_TOOLS
+                .iter()
+                .map(|tool| mcp_tool_permission_id(WINDOWS_MCP_SERVER, tool)),
+        )
+        .collect()
+}
+
+/// Builds the baseline policy plus explicit MCP tool approvals.
+///
+/// Production callers pass an empty slice (no behavior change); QA/future MCP
+/// configuration passes explicit `(server, tool)` pairs.
+#[allow(
+    dead_code,
+    reason = "reserved for explicit QA and future MCP configuration"
+)]
+pub(crate) fn sidecar_permission_policy_with_approved_mcp_tools(
+    approved: &[(&str, &str)],
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut permission = sidecar_permission_policy();
+    for &(server, tool) in approved {
+        permission.insert(
+            mcp_tool_permission_id(server, tool),
+            serde_json::json!("ask"),
+        );
     }
     permission
 }
@@ -2276,7 +2544,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_sidecar_environment_allows_shell_and_web_but_denies_file_editing() {
+    fn generated_sidecar_environment_asks_for_native_workbench_tools() {
         let catalog = ModelCatalog {
             base_url: "https://models.example.test".into(),
             api_key_fingerprint: api_key_fingerprint("secret-key"),
@@ -2296,9 +2564,10 @@ mod tests {
         assert_eq!(permission["bash"], "ask");
         assert_eq!(permission["webfetch"], "ask");
         assert_eq!(permission["websearch"], "ask");
-        for denied in ["edit", "write", "patch", "external_directory", "task"] {
-            assert_eq!(permission[denied], "deny");
+        for tool in ["edit", "write", "patch", "task", "question"] {
+            assert_eq!(permission[tool], "ask");
         }
+        assert_eq!(permission["external_directory"], "deny");
         let allowed = permission
             .iter()
             .filter(|(_, value)| **value == "allow")

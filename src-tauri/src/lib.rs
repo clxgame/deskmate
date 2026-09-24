@@ -1,10 +1,12 @@
+#[cfg(windows)]
+mod windows_process_tree;
 // allow: SIZE_OK — legacy Tauri bootstrap root owns startup/resource wiring; this patch keeps the migration at that boundary.
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
+    Arc, Mutex, OnceLock,
 };
 use std::time::Duration;
 
@@ -17,6 +19,7 @@ pub mod ccswitch;
 mod chat_attachments;
 mod chat_links;
 mod history;
+mod history_entry;
 mod local_ai_deploy;
 /// Local memory: storage, policy, retrieval, and the frontend command surface.
 mod memory;
@@ -31,13 +34,18 @@ mod pet_visibility;
 mod pet_visibility_recovery;
 mod pet_visibility_state;
 mod pomodoro;
+#[cfg(any(feature = "worklog-qa", test))]
+mod qa_identity;
 mod settings;
 mod settings_window;
 mod startup_settings;
 mod tool_permissions;
 mod updater;
 mod window_layout;
+mod workbench;
+mod workbench_theme;
 mod worklog;
+mod yume_context;
 use ai_usage::fetch_ai_usage;
 use chat_attachments::AttachmentStore;
 use history::HistoryState;
@@ -46,9 +54,38 @@ use settings::{get_settings, set_settings, verify_api_key, SettingsState};
 const RESOURCE_ERROR_EVENT: &str = "deskmate://resource-error";
 
 /// Sidecar state: the spawned `opencode serve` process and its base URL.
-struct Sidecar {
+pub(crate) struct Sidecar {
     child: Mutex<Option<Child>>,
-    port: u16,
+    pub(crate) port: u16,
+    /// Per-launch random password the sidecar requires (Basic auth). Generated
+    /// fresh each start, never persisted; shared only with YUME-owned windows
+    /// and the host's own clients at request time.
+    pub(crate) password: String,
+}
+
+#[derive(Default)]
+struct SidecarSupervisor {
+    stopping: AtomicBool,
+    recovery: Mutex<()>,
+}
+
+/// Basic-auth header value for the current managed sidecar.
+pub(crate) fn sidecar_auth_header(app: &tauri::AppHandle) -> String {
+    use base64::Engine;
+    let password = &app.state::<Sidecar>().password;
+    format!(
+        "Basic {}",
+        base64::engine::general_purpose::STANDARD.encode(format!("opencode:{password}"))
+    )
+}
+
+/// Process-launch sidecar auth value for call sites that only carry a URL
+/// (e.g. the tool-permission polling chain). Set once at startup; unset in
+/// tests, where fixture servers do not require auth.
+static SIDECAR_AUTH: OnceLock<String> = OnceLock::new();
+
+pub(crate) fn sidecar_auth_value() -> Option<&'static str> {
+    SIDECAR_AUTH.get().map(String::as_str)
 }
 
 struct ChatShown(Mutex<bool>);
@@ -62,6 +99,23 @@ struct ChatMotion {
 #[tauri::command]
 fn sidecar_base_url(sidecar: State<Sidecar>) -> String {
     format!("http://127.0.0.1:{}", sidecar.port)
+}
+
+/// Credentials for the managed sidecar, delivered in memory to YUME's own
+/// chat/workbench windows only. Never logged, never persisted.
+#[tauri::command]
+fn sidecar_auth(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
+    if window.label() != "chat" && window.label() != "workbench" {
+        return Err("sidecar credentials are only available to YUME windows".to_string());
+    }
+    let password = &app.state::<Sidecar>().password;
+    Ok(serde_json::json!({
+        "username": "opencode",
+        "password": password,
+    }))
 }
 
 pub(crate) fn sidecar_url(app: &tauri::AppHandle) -> String {
@@ -219,7 +273,10 @@ mod tests {
         let mut command = Command::new("opencode");
         configure_sidecar_command(&mut command, 47_891, Path::new("."));
 
-        assert_eq!(command.get_args().next(), Some(OsStr::new("--pure")));
+        // Plugin loading stays enabled for the host-managed yume-context
+        // plugin; isolation comes from the private HOME, not `--pure`.
+        assert_eq!(command.get_args().next(), Some(OsStr::new("serve")));
+        assert!(!command.get_args().any(|arg| arg == OsStr::new("--pure")));
     }
 
     #[test]
@@ -428,15 +485,20 @@ mod tests {
             Some(&serde_json::json!("allow"))
         );
         assert_eq!(permission.get("bash"), Some(&serde_json::json!("ask")));
+        assert_eq!(
+            config.pointer("/experimental/continue_loop_on_deny"),
+            Some(&serde_json::json!(true))
+        );
         assert_eq!(permission.get("webfetch"), Some(&serde_json::json!("ask")));
-        assert_eq!(permission.get("edit"), Some(&serde_json::json!("deny")));
-        assert_eq!(permission.get("write"), Some(&serde_json::json!("deny")));
-        assert_eq!(permission.get("patch"), Some(&serde_json::json!("deny")));
+        assert_eq!(permission.get("edit"), Some(&serde_json::json!("ask")));
+        assert_eq!(permission.get("write"), Some(&serde_json::json!("ask")));
+        assert_eq!(permission.get("patch"), Some(&serde_json::json!("ask")));
         assert_eq!(
             permission.get("external_directory"),
             Some(&serde_json::json!("deny"))
         );
-        assert_eq!(permission.get("task"), Some(&serde_json::json!("deny")));
+        assert_eq!(permission.get("task"), Some(&serde_json::json!("ask")));
+        assert_eq!(permission.get("question"), Some(&serde_json::json!("ask")));
         std::fs::remove_dir_all(root).expect("remove test directory");
     }
 
@@ -1001,13 +1063,13 @@ fn copy_missing_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
 
 /// Apply the non-user-specific OpenCode launch settings for YUME's sidecar.
 ///
-/// `--pure` prevents globally installed OpenCode plugins from changing YUME's
-/// behavior or producing system notifications for YUME chat replies. Provider
-/// credentials and model definitions still arrive through YUME's own
-/// environment variables below.
+/// Plugin loading stays enabled (no `--pure`) so the host-managed
+/// `yume-context` plugin can inject persona/memory on the native
+/// `experimental.chat.system.transform` hook; the isolated HOME keeps foreign
+/// global plugins out, and the plugin allowlist is exactly what
+/// OPENCODE_CONFIG_CONTENT declares.
 fn configure_sidecar_command(cmd: &mut Command, port: u16, workspace: &Path) {
-    cmd.arg("--pure")
-        .arg("serve")
+    cmd.arg("serve")
         .arg("--port")
         .arg(port.to_string())
         .arg("--hostname")
@@ -1065,6 +1127,24 @@ fn spawn_sidecar(app: &tauri::AppHandle, port: u16) -> std::io::Result<Child> {
 
     let bin = resolve_opencode(app);
     let mut cmd = Command::new(&bin);
+    #[cfg(windows)]
+    {
+        let tools = bin
+            .parent()
+            .ok_or_else(|| std::io::Error::other("OpenCode resource directory unavailable"))?
+            .join("process-tools");
+        if !tools.join("taskkill.exe").is_file() {
+            return Err(std::io::Error::other(
+                "YUME process terminator missing; run prepare:sidecar",
+            ));
+        }
+        let inherited = std::env::var_os("PATH").unwrap_or_default();
+        let path =
+            std::env::join_paths(std::iter::once(tools).chain(std::env::split_paths(&inherited)))
+                .map_err(std::io::Error::other)?;
+        cmd.env("PATH", path)
+            .env("NoDefaultCurrentDirectoryInExePath", "1");
+    }
     configure_sidecar_command(&mut cmd, port, &workspace);
     configure_sidecar_environment(&mut cmd, &data_dir);
     cmd.env_remove("YUME_WORKLOG_IPC_DIR");
@@ -1076,20 +1156,40 @@ fn spawn_sidecar(app: &tauri::AppHandle, port: u16) -> std::io::Result<Child> {
             Err(error) => eprintln!("work journal bridge unavailable: {}", error.code),
         }
     }
-    cmd.env_remove("OPENCODE_SERVER_PASSWORD")
-        .env_remove("OPENCODE_SERVER_USERNAME");
+    let password = app.state::<Sidecar>().password.clone();
+    cmd.env("OPENCODE_SERVER_PASSWORD", password);
+    // Username stays the server default ("opencode"); sidecar_auth_header matches it.
 
-    if let Some((config, auth)) = settings::sidecar_environment(app) {
-        cmd.env("OPENCODE_CONFIG_CONTENT", config)
-            .env("OPENCODE_AUTH_CONTENT", auth);
-    } else {
-        cmd.env(
-            "OPENCODE_CONFIG_CONTENT",
+    // Deploy the host-managed context plugin and its data file before launch;
+    // the plugin reads the file per request, so later persona/memory updates
+    // only need a context rewrite, not a restart.
+    if let Err(error) = yume_context::ensure_plugin(app) {
+        eprintln!("yume context plugin deploy failed: {error}");
+    }
+    if let Err(error) = yume_context::write_context(app) {
+        eprintln!("yume context write failed: {error}");
+    }
+    if let Ok(context_path) = yume_context::context_file_path(app) {
+        cmd.env("YUME_CONTEXT_FILE", context_path);
+    }
+
+    let (config, auth) = match settings::sidecar_environment(app) {
+        Some((config, auth)) => (config, Some(auth)),
+        None => (
             serde_json::json!({
-                "permission": settings::sidecar_permission_policy()
+                "permission": settings::sidecar_permission_policy(),
+                "experimental": { "continue_loop_on_deny": true }
             })
             .to_string(),
-        );
+            None,
+        ),
+    };
+    cmd.env(
+        "OPENCODE_CONFIG_CONTENT",
+        yume_context::with_plugin(config, app),
+    );
+    if let Some(auth) = auth {
+        cmd.env("OPENCODE_AUTH_CONTENT", auth);
     }
 
     #[cfg(windows)]
@@ -1110,6 +1210,11 @@ fn spawn_sidecar(app: &tauri::AppHandle, port: u16) -> std::io::Result<Child> {
 }
 
 pub(crate) fn restart_sidecar(app: &tauri::AppHandle) -> Result<(), String> {
+    let supervisor = app.state::<SidecarSupervisor>();
+    let _recovery = supervisor
+        .recovery
+        .lock()
+        .map_err(|_| "sidecar recovery lock poisoned")?;
     if app.try_state::<agent::AgentRunState>().is_some() {
         agent::interrupt_owned_run(app, "sidecar_restarted");
     }
@@ -1125,7 +1230,69 @@ pub(crate) fn restart_sidecar(app: &tauri::AppHandle) -> Result<(), String> {
     }
     let child = spawn_sidecar(app, sidecar.port).map_err(|error| error.to_string())?;
     *sidecar.child.lock().map_err(|_| "sidecar lock poisoned")? = Some(child);
+    history::commands::refresh_after_ready(app.clone());
     Ok(())
+}
+
+fn start_sidecar_supervisor(app: tauri::AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_millis(500));
+        let supervisor = app.state::<SidecarSupervisor>();
+        if supervisor.stopping.load(Ordering::SeqCst) {
+            break;
+        }
+        let Ok(_recovery) = supervisor.recovery.lock() else {
+            break;
+        };
+        let (needs_recovery, crashed) = {
+            let sidecar = app.state::<Sidecar>();
+            let Ok(mut slot) = sidecar.child.lock() else {
+                break;
+            };
+            match slot.as_mut() {
+                Some(child) => match child.try_wait() {
+                    Ok(Some(_)) | Err(_) => {
+                        *slot = None;
+                        (true, true)
+                    }
+                    Ok(None) => (false, false),
+                },
+                None => {
+                    *slot = None;
+                    (true, false)
+                }
+            }
+        };
+        if !needs_recovery {
+            continue;
+        }
+        if crashed {
+            if app.try_state::<agent::AgentRunState>().is_some() {
+                agent::interrupt_owned_run(&app, "sidecar_crashed");
+            }
+            workbench::release_ownership(&app);
+            let _ = app.emit("sidecar://restarting", ());
+        }
+        loop {
+            if supervisor.stopping.load(Ordering::SeqCst) {
+                return;
+            }
+            match spawn_sidecar(&app, app.state::<Sidecar>().port) {
+                Ok(child) => {
+                    if let Ok(mut slot) = app.state::<Sidecar>().child.lock() {
+                        *slot = Some(child);
+                    }
+                    history::commands::refresh_after_ready(app.clone());
+                    let _ = app.emit("sidecar://restarted", ());
+                    break;
+                }
+                Err(error) => {
+                    eprintln!("sidecar recovery failed: {error}");
+                    std::thread::sleep(Duration::from_secs(1));
+                }
+            }
+        }
+    });
 }
 
 /// Build the system tray, including an escape hatch for lost pet positions.
@@ -1135,9 +1302,13 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 
     let show_hide = MenuItem::with_id(app, "toggle_pet", "显示/隐藏桌宠", true, None::<&str>)?;
     let find_pet = MenuItem::with_id(app, "find_pet", "找回桌宠", true, None::<&str>)?;
+    let open_history = MenuItem::with_id(app, "history", "全部对话记录", true, None::<&str>)?;
     let open_settings = MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show_hide, &find_pet, &open_settings, &quit])?;
+    let menu = Menu::with_items(
+        app,
+        &[&show_hide, &find_pet, &open_history, &open_settings, &quit],
+    )?;
 
     TrayIconBuilder::with_id("main")
         // SAFE-EXPECT: the bundled app icon is generated by Tauri at compile time.
@@ -1148,6 +1319,11 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id.as_ref() {
             "toggle_pet" => toggle_pet_visibility(app),
             "find_pet" => pet_recovery::find_pet(app),
+            "history" => {
+                if let Err(error) = history_entry::open(app) {
+                    eprintln!("history organizer could not open: {error}");
+                }
+            }
             "settings" => show_settings_window(app),
             "quit" => app.exit(0),
             _ => {}
@@ -1236,8 +1412,8 @@ fn open_worklog_settings(app: tauri::AppHandle, target: Option<serde_json::Value
 #[cfg(feature = "worklog-qa")]
 fn validate_worklog_qa_identity(app: &tauri::AppHandle) -> Result<(), String> {
     let identifier = &app.config().identifier;
-    if identifier != "com.deskmate.worklogqa" {
-        return Err("QA build requires com.deskmate.worklogqa application identity".into());
+    if !qa_identity::is_allowed(identifier) {
+        return Err("QA build requires an isolated QA application identity".into());
     }
     for path in [
         app.path().app_data_dir(),
@@ -1250,7 +1426,7 @@ fn validate_worklog_qa_identity(app: &tauri::AppHandle) -> Result<(), String> {
         }
         eprintln!("worklog QA isolated directory: {}", path.display());
     }
-    Ok(())
+    qa_identity::initialize_keyring(identifier)
 }
 
 #[tauri::command]
@@ -1288,6 +1464,16 @@ pub fn run() {
         }));
     }
 
+    let sidecar_password = uuid::Uuid::new_v4().to_string();
+    let _ = SIDECAR_AUTH.set({
+        use base64::Engine;
+        format!(
+            "Basic {}",
+            base64::engine::general_purpose::STANDARD
+                .encode(format!("opencode:{sidecar_password}"))
+        )
+    });
+
     builder
         .plugin(startup_settings::plugin(|app| {
             #[cfg(feature = "worklog-qa")]
@@ -1307,12 +1493,17 @@ pub fn run() {
         .manage(Sidecar {
             child: Mutex::new(None),
             port,
+            password: sidecar_password,
         })
+        .manage(SidecarSupervisor::default())
+        .manage(workbench::WorkbenchHandoff::default())
+        .manage(workbench::WorkbenchOwnership::default())
         .manage(pomodoro::PomodoroState::default())
         .manage(AttachmentStore::default())
         .manage(ccswitch::contract::CcSwitchSetupState::default())
         .manage(agent::AgentPermissionState::default())
         .manage(ChatShown(Mutex::new(false)))
+        .manage(history_entry::HistoryOrganizerRequest::default())
         .manage(pet_visibility::PetVisibility::default())
         .manage(pet_visibility_recovery::VisibilityError::default())
         .manage(pet_geometry::PetGeometryState::default())
@@ -1357,6 +1548,27 @@ pub fn run() {
             worklog::commands::worklog_get_operation,
             worklog::export::worklog_export_report,
             sidecar_base_url,
+            sidecar_auth,
+            workbench::workbench_connection,
+            workbench_theme::workbench_theme,
+            workbench::workbench_open_external,
+            workbench::workbench_open_session,
+            workbench::workbench_session_owned,
+            workbench::workbench_claim_session,
+            workbench::workbench_resolve_session,
+            workbench::workbench_heartbeat,
+            workbench::workbench_release_session,
+            workbench::workbench_session_status,
+            workbench::workbench_abort_session,
+            workbench::chat_abort_session,
+            workbench::workbench_show,
+            workbench::workbench_hide,
+            workbench::workbench_pick_directory,
+            workbench::workbench_pick_files,
+            workbench::workbench_read_file,
+            workbench::workbench_save_file,
+            workbench::workbench_open_path,
+            workbench::workbench_reveal_path,
             load_persona,
             chat_attachments::stage_chat_attachment,
             chat_attachments::read_chat_attachment,
@@ -1367,6 +1579,8 @@ pub fn run() {
             toggle_chat,
             hide_chat,
             show_chat_window,
+            history_entry::show_history_organizer,
+            history_entry::consume_history_organizer_request,
             preview_pet_scale,
             get_settings,
             set_settings,
@@ -1394,8 +1608,13 @@ pub fn run() {
             ccswitch::protocol::restore_ccswitch_recovery,
             ccswitch::protocol::discard_ccswitch_recovery,
             local_ai_deploy::deploy_local_ai_stack,
+            history::commands::history_catalog_list,
+            history::commands::history_catalog_load,
+            history::catalog_mutation::history_catalog_mutate,
+            history::catalog_local::history_save_local_messages,
             history::view::history_list,
             history::view::history_load,
+            history::history_register_native_session,
             history::history_save,
             history::history_delete,
             packs::installed_packs,
@@ -1460,8 +1679,15 @@ pub fn run() {
                 pet_geometry::apply(&pet, loaded.pet_scale, &loaded.persona_id);
                 pet_startup::place(&pet, &loaded.persona_id, loaded.pet_position);
             }
+            // The workbench window is created in code (not config) so its
+            // navigation stays allowlist-gated; see workbench::create_window.
+            if let Err(error) = workbench::create_window(&handle) {
+                eprintln!("workbench window creation failed: {error}");
+            }
             let history = history::load(&handle).map_err(std::io::Error::other)?;
             app.manage(HistoryState(Mutex::new(history)));
+            app.manage(history::NativeSessionIndex::default());
+            history::load_native_index(&handle, &app.state::<history::NativeSessionIndex>())?;
             // Memory is optional infrastructure: if the database cannot open,
             // `MemoryState` records that and every memory command answers
             // MEMORY_DISABLED while chat and the pet keep working.
@@ -1482,6 +1708,7 @@ pub fn run() {
                 &loaded.agent_permission_approvals,
             )?;
             app.manage(agent_runs);
+            history::commands::initialize(&handle)?;
             app.manage(worklog::commands::WorklogState::initialize(&handle));
             app.manage(worklog::bridge::WorklogBridge::initialize(&handle));
             worklog::bridge::start_worker(handle.clone());
@@ -1493,11 +1720,13 @@ pub fn run() {
                     // SAFE-UNWRAP: a poisoned sidecar mutex means an earlier setup command panicked.
                     *app.state::<Sidecar>().child.lock().unwrap() = Some(child);
                     agent::recover_after_start(handle.clone());
+                    history::commands::refresh_after_ready(handle.clone());
                 }
                 Err(e) => {
                     eprintln!("failed to spawn opencode sidecar: {e}");
                 }
             }
+            start_sidecar_supervisor(handle.clone());
             app.manage(tool_permissions::events::PermissionEvents::start(format!(
                 "http://127.0.0.1:{port}"
             )));
@@ -1514,6 +1743,9 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             if let RunEvent::Exit = event {
+                app.state::<SidecarSupervisor>()
+                    .stopping
+                    .store(true, Ordering::SeqCst);
                 if app.try_state::<agent::AgentRunState>().is_some() {
                     agent::interrupt_owned_run(app, "app_exited");
                 }
@@ -1531,3 +1763,6 @@ pub fn run() {
             }
         });
 }
+
+
+

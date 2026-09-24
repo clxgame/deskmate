@@ -41,13 +41,13 @@ describe("ChatApp attachment cache lifecycle", () => {
     await readyComposer();
 
     fireEvent.click(screen.getByRole("button", { name: "历史" }));
-    fireEvent.click(await screen.findByRole("button", { name: /Past/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "打开 Past" }));
 
     await waitFor(() => expect(cleanupSessions()).toEqual(["ses-a"]));
     expect(screen.queryByRole("article", { name: "生成的音频 song.mp3" })).toBeNull();
     dropFiles([new File(["# h"], "hist.md", { type: "text/markdown" })]);
     await waitFor(() => expect(stageSessionIds()).toEqual(["hist-1"]));
-    expect(orderedEvents()).toEqual(["history_load:hist-1", "cleanup:ses-a", "stage:hist-1"]);
+    expect(orderedEvents()).toEqual(["history_catalog_load:hist-1", "cleanup:ses-a", "stage:hist-1"]);
   });
 
   test("cleans a deleted history session through the typed delete callback", async () => {
@@ -56,10 +56,12 @@ describe("ChatApp attachment cache lifecycle", () => {
     await readyComposer();
 
     fireEvent.click(screen.getByRole("button", { name: "历史" }));
-    await screen.findByRole("button", { name: /Past/ });
+    await screen.findByRole("button", { name: "打开 Past" });
+    fireEvent.click(screen.getByRole("button", { name: "会话操作 Past" }));
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    fireEvent.click(screen.getByRole("button", { name: "永久删除" }));
 
-    await waitFor(() => expect(commands("history_delete")).toHaveLength(1));
+    await waitFor(() => expect(commands("history_catalog_mutate")).toHaveLength(1));
     await waitFor(() => expect(cleanupSessions()).toEqual(["hist-1"]));
   });
 

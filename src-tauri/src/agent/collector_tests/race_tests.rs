@@ -71,6 +71,17 @@ fn cancellation_requested_during_snapshot_wins_without_relabeling() -> TestResul
             respond: |_: &RunRecord, _: &PermissionRequest, _: Reply| Ok(()),
         },
     )?;
+    assert!(runs.read()?.recent.is_empty());
+    collect_once_with(
+        &runs,
+        &permissions,
+        CollectorActions {
+            snapshot: |_: &RunRecord| Ok(SnapshotRead::Messages(terminal("msg_run"))),
+            pending: |_: &RunRecord| panic!("settling cancellation does not ask permission"),
+            archive: |_: &RunRecord, _: &[NativeMessage]| Ok(()),
+            respond: |_: &RunRecord, _: &PermissionRequest, _: Reply| Ok(()),
+        },
+    )?;
     assert_eq!(runs.read()?.recent[0].outcome, Some(RunOutcome::Cancelled));
     fs::remove_dir_all(root)?;
     Ok(())
@@ -130,6 +141,30 @@ fn repeated_restart_interruption_keeps_the_exact_reason() -> TestResult<()> {
     let record = &runs.read()?.recent[0];
     assert_eq!(record.outcome, Some(RunOutcome::Interrupted));
     assert_eq!(record.error_summary.as_deref(), Some("sidecar_restarted"));
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
+fn cancellation_discards_snapshot_read_before_native_settlement() -> TestResult<()> {
+    let (root, workspace) = fixture("cancel-stale-tools")?;
+    let (runs, permissions) = active(&root, &workspace)?;
+    collect_once_with(
+        &runs,
+        &permissions,
+        CollectorActions {
+            snapshot: |_: &RunRecord| {
+                runs.request_finish("msg_run", RunOutcome::Cancelled, None)?;
+                Ok(SnapshotRead::Messages(super::permission_snapshot()))
+            },
+            pending: |_: &RunRecord| Ok(Vec::new()),
+            archive: |_: &RunRecord, _: &[NativeMessage]| {
+                panic!("pre-cancel snapshot overwrote settled tools")
+            },
+            respond: |_: &RunRecord, _: &PermissionRequest, _: Reply| Ok(()),
+        },
+    )?;
+    assert!(runs.read()?.active.is_some());
     fs::remove_dir_all(root)?;
     Ok(())
 }

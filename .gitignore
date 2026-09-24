@@ -8,13 +8,20 @@ dist/
 src-tauri/target/
 src-tauri/target-*/
 
+# Workbench bundle built from the pinned upstream OpenCode app at build time
+public/workbench/
+
 # Platform-specific OpenCode sidecar prepared from the locked npm package
 src-tauri/resources/opencode/opencode
 src-tauri/resources/opencode/opencode.exe
+src-tauri/resources/opencode/process-tools/
 
 # ncmdump converter fetched from its pinned upstream release at build time
 src-tauri/resources/ncmdump/ncmdump
 src-tauri/resources/ncmdump/ncmdump.exe
+
+# Windows MCP server fetched from its pinned upstream release at build time
+src-tauri/resources/windows-mcp/
 
 # 3D persona assets fetched from the private assets release at build time
 public/personas/*/figure.glb
@@ -42,6 +49,7 @@ client_secret*.json
 /.claude/
 /namespaces/
 /skills/
+artifacts/
 .idea/
 .vscode/
 *.log

@@ -1,7 +1,7 @@
 use super::test_support::{Checked, TestResult};
 use super::{
     lifecycle::AgentRunState,
-    record_store::{RunOutcome, RunStore},
+    record_store::{NativeMessage, NativePart, NativeToolState, RunOutcome, RunStore},
 };
 use std::{
     fs,
@@ -120,4 +120,81 @@ fn cancel_and_permission_reply_share_one_operation_boundary() -> TestResult<()> 
     handle.join().checked("join boundary contender")??;
     fs::remove_dir_all(root).checked("remove fixture")?;
     Ok(())
+}
+
+fn terminal_message_with_unresolved_tool(
+    tool_in_latest: bool,
+    error: Option<String>,
+) -> TestResult<()> {
+    // Given: an owned tool is still running when a later message looks terminal.
+    let (root, workspace) = fixture()?;
+    let store = RunStore::new(root.join("agent-runs"));
+    let state = AgentRunState::new(store.clone());
+    state.begin("msg_run", &workspace, "input")?;
+    state.bind_session("msg_run", "ses_run")?;
+    state.confirm_submission("msg_run")?;
+    let mut earlier = NativeMessage {
+        id: "msg_earlier".into(),
+        role: Some("assistant".into()),
+        created: Some(1),
+        parent_id: Some("msg_run".into()),
+        completed: true,
+        finish: Some("tool-calls".into()),
+        error: None,
+        parts: vec![NativePart {
+            id: "part_tool".into(),
+            kind: Some("tool".into()),
+            text: None,
+            call_id: Some("call_tool".into()),
+            tool: Some("bash".into()),
+            state: Some(NativeToolState {
+                status: "running".into(),
+                input: serde_json::json!({"command":"Get-Location"}),
+                output: serde_json::Value::Null,
+                metadata: serde_json::Value::Null,
+            }),
+        }],
+    };
+    let mut latest = NativeMessage {
+        id: "msg_latest".into(),
+        created: Some(2),
+        finish: Some("stop".into()),
+        error: error.clone(),
+        parts: Vec::new(),
+        ..earlier.clone()
+    };
+    if tool_in_latest {
+        latest.parts = std::mem::take(&mut earlier.parts);
+    }
+    let messages = vec![earlier, latest];
+
+    // When: reconciliation observes a stop or error before tool settlement.
+    state.reconcile("msg_run", &messages)?;
+
+    // Then: neither memory nor disk releases ownership of the unfinished tool.
+    assert!(
+        state.read()?.active.is_some(),
+        "unfinished tool must retain the busy slot"
+    );
+    let reloaded = AgentRunState::load(store)?;
+    assert_eq!(
+        reloaded.active_record("msg_run")?.call_ids,
+        vec!["call_tool"]
+    );
+    assert_eq!(
+        reloaded.begin("msg_next", &workspace, "next"),
+        Err("agent_run_busy".into())
+    );
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
+fn unresolved_tool_in_earlier_round_prevents_later_stop_from_finishing() -> TestResult<()> {
+    terminal_message_with_unresolved_tool(false, None)
+}
+
+#[test]
+fn unresolved_tool_in_latest_error_prevents_premature_failure() -> TestResult<()> {
+    terminal_message_with_unresolved_tool(true, Some("provider_failed".into()))
 }

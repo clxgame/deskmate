@@ -9,6 +9,8 @@ pub struct ModelEndpoint {
     pub provider_id: String,
     pub model_id: String,
     pub epoch: String,
+    /// Basic-auth header value required by the managed sidecar.
+    pub auth_header: String,
 }
 #[derive(Deserialize)]
 struct Health {
@@ -71,6 +73,7 @@ impl ModelClient {
     pub fn ready(&self, timeout: Duration) -> bool {
         self.agent
             .get(&format!("{}/global/health", self.endpoint.base_url))
+            .set("Authorization", &self.endpoint.auth_header)
             .timeout(timeout)
             .call()
             .ok()
@@ -79,6 +82,7 @@ impl ModelClient {
     }
     pub fn create_session(&self) -> WorklogResult<String> {
         let result: Session = self.agent.post(&format!("{}/session",self.endpoint.base_url))
+            .set("Authorization", &self.endpoint.auth_header)
             .send_json(serde_json::json!({"title":"Work journal report","permission":[{"permission":"*","pattern":"*","action":"deny"}]}))
             .map_err(http_error)?.into_json().map_err(|_| wire_error())?;
         if result.id.is_empty()
@@ -101,14 +105,22 @@ impl ModelClient {
         let tool_ids: Vec<String> = self
             .agent
             .get(&format!("{}/experimental/tool/ids", self.endpoint.base_url))
+            .set("Authorization", &self.endpoint.auth_header)
             .call()
             .map_err(http_error)?
             .into_json()
             .map_err(|_| wire_error())?;
-        let tools: BTreeMap<String, bool> = tool_ids.into_iter().map(|id| (id, false)).collect();
+        let mut tools: BTreeMap<String, bool> =
+            tool_ids.into_iter().map(|id| (id, false)).collect();
+        tools.extend(
+            crate::settings::desktop_mcp_permission_ids()
+                .into_iter()
+                .map(|id| (id, false)),
+        );
         let message_id = format!("msg_{}", uuid::Uuid::new_v4().simple());
         heartbeat()?;
         self.agent.post(&format!("{}/session/{session}/prompt_async",self.endpoint.base_url))
+            .set("Authorization", &self.endpoint.auth_header)
             .send_json(serde_json::json!({"messageID":message_id,"model":Model{provider_id:&self.endpoint.provider_id,model_id:&self.endpoint.model_id},"tools":tools,"system":super::reports::SYSTEM,"parts":[{"type":"text","text":text}]}))
             .map_err(http_error)?;
         loop {
@@ -126,6 +138,7 @@ impl ModelClient {
                     "{}/session/{session}/message?limit=200",
                     self.endpoint.base_url
                 ))
+                .set("Authorization", &self.endpoint.auth_header)
                 .call()
                 .map_err(http_error)?
                 .into_json()
@@ -173,6 +186,7 @@ impl ModelClient {
                 "{}/session/{session}/abort",
                 self.endpoint.base_url
             ))
+            .set("Authorization", &self.endpoint.auth_header)
             .call();
     }
 }

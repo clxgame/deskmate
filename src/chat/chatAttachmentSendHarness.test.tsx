@@ -1,3 +1,6 @@
+import type { AgentHistoryDetails, HistorySession } from "../lib/history";
+import { catalogPageFixture, historyArgument, nativeHistoryFixture, registeredHistoryFixture } from "../testing/historyCatalogFixtures";
+import type { UnifiedHistoryRow } from "../lib/unifiedHistory";
 import { afterEach, beforeEach, expect, mock } from "bun:test";
 import * as tauriCore from "@tauri-apps/api/core";
 import { cleanup } from "@testing-library/react";
@@ -35,8 +38,11 @@ let agentProjection: {
 let selectedWorkspace: string | null = null;
 let holdAgentStart = false;
 let releaseAgentStart: (() => void) | null = null;
-let historyRecords: Record<string, object> = {};
-let historyLoadOverride: ((id: string) => Promise<object | null>) | null = null;
+let historyRecords: Record<string, HistorySession> = {};
+let historyLoadOverride: ((id: string) => Promise<HistorySession | null>) | null = null;
+const archivedHistory = new Set<string>();
+const deletedHistory = new Set<string>();
+let registeredEntry: UnifiedHistoryRow | null = null;
 let sessionCreateRequests = 0;
 let agentStartError: string | null = null;
 let activeEventSource: { onmessage: ((message: MessageEvent) => void) | null } | null = null;
@@ -63,7 +69,7 @@ function jsonResponse(body: unknown): Response {
 
 function installOpenCodeTransport(): void {
   const fetchMock = mock((input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
+    const url = new URL(String(input)).pathname;
     if (url.endsWith("/session") && init?.method === "GET") {
       return Promise.resolve(new Response(null, { status: 200 }));
     }
@@ -89,7 +95,7 @@ function installOpenCodeTransport(): void {
     onmessage: ((message: MessageEvent) => void) | null = null;
 
     constructor(readonly url: string) {
-      expect(url).toBe("http://127.0.0.1:48888/event");
+      expect(new URL(url).pathname).toBe("/event");
       activeEventSource = this;
     }
 
@@ -139,6 +145,9 @@ export function registerChatAttachmentHarness(): void {
   releaseAgentStart = null;
   historyRecords = {};
   historyLoadOverride = null;
+  archivedHistory.clear();
+  deletedHistory.clear();
+  registeredEntry = null;
   sessionCreateRequests = 0;
   agentStartError = null;
   activeEventSource = null;
@@ -211,6 +220,38 @@ export function registerChatAttachmentHarness(): void {
       case "memory_context":
       case "history_save":
         return Promise.resolve({ memories: [], promptBlock: "" });
+      case "history_register_native_session":
+        registeredEntry = nativeHistoryFixture(historyArgument(args, "sessionId"), historyArgument(args, "directory"));
+        return Promise.resolve(registeredHistoryFixture(args));
+      case "history_catalog_list":
+        return Promise.resolve(catalogPageFixture(Object.values(historyRecords).filter(record => !archivedHistory.has(record.id) && !deletedHistory.has(record.id)).map(agentHistoryEntry)));
+      case "history_catalog_mutate": {
+        const key = historyArgument(args, "key");
+        const record = Object.values(historyRecords).find(record => agentHistoryEntry(record).key === key);
+        if (!record || typeof args !== "object" || args === null || !("mutation" in args)) throw new Error("catalog mutation missing");
+        const mutation = args.mutation;
+        if (typeof mutation !== "object" || mutation === null || !("action" in mutation)) throw new Error("catalog action missing");
+        if (mutation.action === "archive" && "archived" in mutation && mutation.archived === true) {
+          archivedHistory.add(record.id);
+          return Promise.resolve(agentHistoryEntry(record));
+        }
+        if (mutation.action === "delete" && "confirmed" in mutation && mutation.confirmed === true) {
+          deletedHistory.add(record.id);
+          return Promise.reject(new Error("remote delete unavailable"));
+        }
+        throw new Error("unexpected catalog mutation");
+      }
+      case "history_catalog_load": {
+        const key = historyArgument(args, "key");
+        if (registeredEntry?.key === key) return Promise.resolve({ entry: registeredEntry, messages: [] });
+        const record = Object.values(historyRecords).find(record => agentHistoryEntry(record).key === key);
+        if (!record || deletedHistory.has(record.id)) throw new Error("history_deleted");
+        const loaded = historyLoadOverride ? historyLoadOverride(record.id) : Promise.resolve(record);
+        return loaded.then(session => {
+          if (!session) throw new Error("catalog entry missing");
+          return { entry: agentHistoryEntry(session), messages: session.messages, agentDetails: agentHistoryDetails(session), originRunId: session.originRunId };
+        });
+      }
       case "history_list":
         return Promise.resolve(Object.values(historyRecords).map((item) => {
           const session = item as { id: string; title: string; created: number; updated: number; messages: readonly object[] };
@@ -218,7 +259,8 @@ export function registerChatAttachmentHarness(): void {
         }));
       case "history_load": {
         const id = (args as { id?: string } | undefined)?.id ?? "";
-        return historyLoadOverride ? historyLoadOverride(id) : Promise.resolve(historyRecords[id] ?? null);
+        const record = historyRecords[id];
+        return historyLoadOverride ? historyLoadOverride(id) : Promise.resolve(record ? { ...record, agentDetails: agentHistoryDetails(record) } : null);
       }
       default:
         return Promise.resolve(undefined);
@@ -261,9 +303,22 @@ export function deferAgentStart(): void { holdAgentStart = true; }
 export function finishAgentStart(): void { releaseAgentStart?.(); }
 export function setAgentProjection(active: typeof agentRun | null): void { agentProjection = { active, recent: [], artifacts: [] }; }
 export function setAgentStartError(error: string | null): void { agentStartError = error; }
-export function setHistory(records: Record<string, object>): void { historyRecords = records; }
-export function historyRecord(id: string): object | undefined { return historyRecords[id]; }
-export function setHistoryLoader(loader: ((id: string) => Promise<object | null>) | null): void { historyLoadOverride = loader; }
+export function setHistory(records: Record<string, HistorySession>): void { historyRecords = records; }
+export function historyRecord(id: string): HistorySession | undefined { return historyRecords[id]; }
+export function setHistoryLoader(loader: ((id: string) => Promise<HistorySession | null>) | null): void { historyLoadOverride = loader; }
 export function sessionCreates(): number { return sessionCreateRequests; }
 export function sendOrdinaryEvent(data: object): void { activeEventSource?.onmessage?.(new MessageEvent("message", { data: JSON.stringify(data) })); }
-export function histories(): Record<string, object> { return historyRecords; }
+export function histories(): Record<string, HistorySession> { return historyRecords; }
+
+function agentHistoryEntry(record: HistorySession): UnifiedHistoryRow {
+  const native = nativeHistoryFixture(record.id, agentRun.workspacePath, record.title);
+  const active = agentHistoryDetails(record).status === "active";
+  return { ...native, source: "workbench", ownership: "agent", archived: archivedHistory.has(record.id),
+    runtime: active ? "running" : "idle",
+    capabilities: { ...native.capabilities, send: false, delete: !active, readOnlyReason: active ? "active_task" : "agent_owned" } };
+}
+function agentHistoryDetails(record: HistorySession): AgentHistoryDetails {
+  if (record.agentDetails) return record.agentDetails;
+  return { workspacePath: agentRun.workspacePath, status: agentProjection.active?.sessionId === record.id ? "active" : "completed",
+    source: "interactive", availability: agentStartError === "agent_history_workspace_missing" ? "workspace_missing" : "ready" };
+}

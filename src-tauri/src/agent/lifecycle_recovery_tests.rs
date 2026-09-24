@@ -181,7 +181,17 @@ fn intermediate_tool_calls_keep_run_active_until_explicit_terminal_message() -> 
         }],
     };
     state
-        .reconcile("msg_run", &[edit_round, final_round])
+        .reconcile("msg_run", &[edit_round.clone(), final_round.clone()])
+        .checked("keep unresolved earlier tool active")?;
+    assert!(state.read()?.active.is_some());
+    let mut settled_edit_round = edit_round;
+    settled_edit_round.parts[0]
+        .state
+        .as_mut()
+        .checked("edit tool state")?
+        .status = "completed".into();
+    state
+        .reconcile("msg_run", &[settled_edit_round, final_round])
         .checked("reconcile final message")?;
     assert_eq!(
         state.read().checked("read completed")?.recent[0].outcome,

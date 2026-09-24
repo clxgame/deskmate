@@ -5,6 +5,8 @@ use serde_json::{json, Value};
 use std::time::Duration;
 use tauri::Manager;
 
+#[cfg(test)]
+pub(crate) use super::scoped::pending_scoped;
 pub(crate) use super::scoped::{pending_scoped_live, respond_scoped};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -36,6 +38,23 @@ pub struct PermissionTool {
 pub enum Reply {
     Once,
     Reject,
+    #[serde(skip)]
+    RejectWithReason(RejectionReason),
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+pub(crate) enum RejectionReason {
+    ApprovalTimeout,
+    InvalidMetadata,
+}
+
+impl RejectionReason {
+    fn message(self) -> &'static str {
+        match self {
+            Self::ApprovalTimeout => "agent_approval_timeout: Approval was not answered within five minutes.",
+            Self::InvalidMetadata => "permission_invalid_metadata: Approval is unavailable because the tool request could not be validated.",
+        }
+    }
 }
 
 fn client() -> ureq::Agent {
@@ -43,12 +62,20 @@ fn client() -> ureq::Agent {
         .timeout(Duration::from_secs(3))
         .build()
 }
+
+/// Attach the managed sidecar's Basic-auth header when it is configured
+/// (always in the running app; absent in tests against fixture servers).
+fn authed(request: ureq::Request) -> ureq::Request {
+    match crate::sidecar_auth_value() {
+        Some(value) => request.set("Authorization", value),
+        None => request,
+    }
+}
 fn pending(base: &str) -> Result<Vec<PermissionRequest>, String> {
     pending_url(&format!("{base}/permission"))
 }
 pub(super) fn pending_url(url: &str) -> Result<Vec<PermissionRequest>, String> {
-    client()
-        .get(url)
+    authed(client().get(url))
         .call()
         .map_err(|error| match error {
             ureq::Error::Status(400, _) => "permission_invalid_metadata".to_owned(),
@@ -72,14 +99,17 @@ pub(super) fn respond_url(
     if !crate::worklog::bridge::safe_id(&request.id) {
         return Err("permission_invalid_id".into());
     }
-    let reply = match reply {
-        Reply::Once => "once",
-        Reply::Reject => "reject",
+    let payload = match reply {
+        Reply::Once => json!({"reply":"once"}),
+        Reply::Reject => json!({"reply":"reject"}),
+        Reply::RejectWithReason(reason) => json!({"reply":"reject", "message":reason.message()}),
     };
-    client()
-        .post(url)
-        .send_json(json!({"reply":reply}))
-        .map_err(|_| "permission_reply_failed".to_owned())?;
+    authed(client().post(url))
+        .send_json(payload)
+        .map_err(|error| match error {
+            ureq::Error::Status(404, _) => "permission_expired".to_owned(),
+            _ => "permission_reply_failed".to_owned(),
+        })?;
     Ok(())
 }
 pub(crate) fn endpoint(app: &tauri::AppHandle) -> String {

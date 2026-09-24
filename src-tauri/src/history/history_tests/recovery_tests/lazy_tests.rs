@@ -62,11 +62,13 @@ fn same_named_and_moved_workspaces_never_borrow_another_path() -> Result<(), Str
     ];
     let list = vec![
         crate::history::HistorySession {
+            local_link: None,
             id: "ses_first".to_owned(),
             origin_run_id: Some("msg_first".to_owned()),
             ..agent("ses_first")
         },
         crate::history::HistorySession {
+            local_link: None,
             id: "ses_second".to_owned(),
             origin_run_id: Some("msg_second".to_owned()),
             ..agent("ses_second")
@@ -138,6 +140,7 @@ fn existing_text_skips_lazy_fetch_and_late_result_cannot_revive_delete() -> Resu
     )];
     let mut with_text = vec![agent("ses_exact")];
     with_text[0].messages.push(HistoryMessage {
+        local_only: false,
         role: "assistant".to_owned(),
         text: "kept".to_owned(),
         time: 1,
@@ -192,3 +195,6 @@ fn recovered_metadata_marks_scheduled_source_and_missing_details() -> Result<(),
     fs::remove_dir_all(workspace).map_err(|error| error.to_string())?;
     Ok(())
 }
+
+
+

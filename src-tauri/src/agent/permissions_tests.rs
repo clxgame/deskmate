@@ -144,6 +144,53 @@ fn asks_for_write_and_shell_with_host_derived_cwd() -> TestResult<()> {
 }
 
 #[test]
+fn asks_for_selected_desktop_mcp_tools_and_rejects_unselected_capabilities() -> TestResult<()> {
+    let root = std::env::temp_dir().join(format!("yume-agent-permission-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&root).checked("create fixture")?;
+    let state = AgentPermissionState::default();
+    state
+        .register_run("run-a", "session-a", &root)
+        .checked("register run")?;
+
+    assert_eq!(
+        state
+            .accept(
+                "run-a",
+                request(
+                    "p-windows-type",
+                    "session-a",
+                    "yume_windows_ui_type",
+                    &["*"],
+                    json!({})
+                )
+            )
+            .checked("ask selected Windows MCP tool")?,
+        PendingDecision::Ask(super::ApprovalDetail {
+            command: None,
+            cwd: root.canonicalize().checked("canonical fixture")?,
+        })
+    );
+    assert_eq!(
+        state
+            .accept(
+                "run-a",
+                request(
+                    "p-windows-process",
+                    "session-a",
+                    "yume_windows_process",
+                    &["*"],
+                    json!({})
+                )
+            )
+            .checked("reject unselected Windows MCP tool")?,
+        PendingDecision::Reject
+    );
+
+    fs::remove_dir_all(root).checked("remove fixture")?;
+    Ok(())
+}
+
+#[test]
 fn denies_unknown_external_stale_cross_run_and_repeated_replies() -> TestResult<()> {
     let root = std::env::temp_dir().join(format!("yume-agent-permission-{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&root).checked("create fixture")?;

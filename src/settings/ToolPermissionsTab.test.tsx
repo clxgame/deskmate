@@ -19,6 +19,20 @@ test("old settings show safe defaults and changing one permission preserves the 
   fireEvent.change(ui.getByRole("combobox",{name:"查询记录"}), {target:{value:"deny"}});
   expect(calls).toEqual([{key:"toolPermissions",value:{...DEFAULT_TOOL_PERMISSIONS,worklogRead:"deny"}}]);
 });
+test("desktop collaboration is opt in and each switch updates only its setting", () => {
+  const calls: unknown[] = [];
+  const ui = render(<ToolPermissionsTab settings={legacySettingsFixture()} patch={(key,value)=>calls.push({key,value})} t={dict("en-US")} />);
+  const browser = ui.getByRole("checkbox", {name:"Isolated browser control"});
+  const windows = ui.getByRole("checkbox", {name:"Windows UI control"});
+  expect(browser).toHaveProperty("checked", false);
+  expect(windows).toHaveProperty("checked", false);
+  fireEvent.click(browser);
+  fireEvent.click(windows);
+  expect(calls).toEqual([
+    {key:"browserMcpEnabled",value:true},
+    {key:"windowsMcpEnabled",value:true},
+  ]);
+});
 test("all supported modes remain selectable for a persisted policy", () => {
   const ui=render(<ToolPermissionsTab settings={legacySettingsFixture({toolPermissions:{...DEFAULT_TOOL_PERMISSIONS,shell:"deny"}})} patch={()=>{}} t={dict("en-US")} />);
   expect(ui.getByRole("combobox",{name:"Run commands"})).toHaveProperty("value","deny");

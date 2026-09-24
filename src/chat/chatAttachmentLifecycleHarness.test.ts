@@ -1,3 +1,5 @@
+import { catalogPageFixture, historyArgument, nativeHistoryFixture, registeredHistoryFixture } from "../testing/historyCatalogFixtures";
+import type { UnifiedHistoryRow } from "../lib/unifiedHistory";
 import { afterEach, beforeEach, mock } from "bun:test";
 import * as tauriCore from "@tauri-apps/api/core";
 import { cleanup, fireEvent, screen } from "@testing-library/react";
@@ -19,6 +21,7 @@ export const promptRequests: PromptRequest[] = [];
 export const transportEvents: string[] = [];
 
 const historySessions = new Map<string, readonly HistoryMessage[]>();
+let registeredEntry: UnifiedHistoryRow | null = null;
 let nextSessionIndex = 0;
 let promptFails = false;
 let cleanupFails = false;
@@ -63,6 +66,7 @@ beforeEach(() => {
   promptRequests.length = 0;
   transportEvents.length = 0;
   historySessions.clear();
+  registeredEntry = null;
   nextSessionIndex = 0;
   promptFails = false;
   cleanupFails = false;
@@ -122,8 +126,8 @@ export function discardedIds(): readonly string[] {
 
 export function orderedEvents(): readonly string[] {
   return transportEvents
-    .map((event) => event.replace("cleanup_chat_session:", "cleanup:"))
-    .filter((event) => event.startsWith("history_load:") || event.startsWith("cleanup:") || event.startsWith("stage:") || event.startsWith("abort:"));
+    .map((event) => event.replace("cleanup_chat_session:", "cleanup:").replace("chat_abort_session:", "abort:"))
+    .filter((event) => event.startsWith("history_catalog_load:hist-") || event.startsWith("cleanup:") || event.startsWith("stage:") || event.startsWith("abort:"));
 }
 
 function handleInvoke(command: string, args?: unknown): Promise<unknown> {
@@ -138,6 +142,25 @@ function handleInvoke(command: string, args?: unknown): Promise<unknown> {
     case "memory_context":
     case "history_save":
       return Promise.resolve({ memories: [], promptBlock: "" });
+    case "history_register_native_session":
+      registeredEntry = nativeHistoryFixture(historyArgument(args, "sessionId"), historyArgument(args, "directory"));
+      return Promise.resolve(registeredHistoryFixture(args));
+    case "history_catalog_list":
+      return Promise.resolve(catalogPageFixture(Array.from(historySessions.keys()).map(id => nativeHistoryFixture(id, ".", "Past"))));
+    case "history_catalog_load": {
+      const key = historyArgument(args, "key");
+      if (registeredEntry?.key === key) return Promise.resolve({ entry: registeredEntry, messages: [] });
+      const id = Array.from(historySessions.keys()).find(id => nativeHistoryFixture(id).key === key);
+      if (!id) throw new Error("catalog entry missing");
+      return Promise.resolve({ entry: nativeHistoryFixture(id, ".", "Past"), messages: historySessions.get(id) ?? [] });
+    }
+    case "history_catalog_mutate": {
+      const key = historyArgument(args, "key");
+      const id = Array.from(historySessions.keys()).find(id => nativeHistoryFixture(id).key === key);
+      if (!id) throw new Error("catalog entry missing");
+      historySessions.delete(id);
+      return Promise.resolve(null);
+    }
     case "history_list":
       return Promise.resolve(Array.from(historySessions.keys()).map(historySummary));
     case "history_load":
@@ -195,9 +218,11 @@ function readyAttachment(id: string, fileName: string, mime: string, kind: strin
 
 function installOpenCodeTransport(): void {
   const fetchMock = mock((input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
+    const url = new URL(String(input)).pathname;
     if (url.endsWith("/session") && init?.method === "GET") return Promise.resolve(new Response(null, { status: 200 }));
     if (url.endsWith("/session") && init?.method === "POST") return Promise.resolve(jsonResponse({ id: nextSessionId(), title: "t", directory: "." }));
+    if (url.endsWith("/session/status") && init?.method === "GET") return Promise.resolve(jsonResponse({}));
+    if (url.endsWith("/message") && init?.method === "GET") return Promise.resolve(jsonResponse([]));
     if (url.includes("/prompt_async") && init?.method === "POST") return promptResponse(init);
     if (url.includes("/abort") && init?.method === "POST") return abortResponse(url);
     return Promise.resolve(new Response("unexpected opencode test request", { status: 500 }));
@@ -221,7 +246,7 @@ function promptResponse(init: RequestInit): Promise<Response> {
 
 function abortResponse(url: string): Promise<Response> {
   transportEvents.push(`abort:${url.split("/session/")[1]?.split("/")[0] ?? ""}`);
-  return Promise.resolve(new Response(null, { status: 204 }));
+  return Promise.resolve(jsonResponse(true));
 }
 
 function nextSessionId(): string {
@@ -256,7 +281,12 @@ function payloadAttachmentId(args: unknown): string {
 }
 
 function commandSessionId(command: string, args: unknown): string | null {
+  if (command === "history_catalog_load") {
+    const key = historyArgument(args, "key");
+    return Array.from(historySessions.keys()).find(id => nativeHistoryFixture(id).key === key) ?? null;
+  }
   if (command === "history_load" || command === "history_delete") return payloadId(args);
+  if (command === "chat_abort_session" && typeof args === "object" && args !== null && "sessionId" in args && typeof args.sessionId === "string") return args.sessionId;
   if (typeof args === "object" && args !== null && "request" in args) return payloadSessionId(args);
   return null;
 }

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { transformWorkbenchRouting } from "./workbench-routing";
 
-const entry = readFileSync(resolve(import.meta.dir, "../../opencode-v1.18.21/packages/app/workbench/entry.tsx"), "utf8");
+const entry = readFileSync(resolve(import.meta.dir, "workbench-overlay/workbench/entry.tsx"), "utf8");
 
 test("handoff and ownership retain directory and session identity in the generated native entry", () => {
   // Given the pinned entry's native memory router.

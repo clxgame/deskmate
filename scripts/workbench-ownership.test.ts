@@ -6,7 +6,7 @@ import { transformWorkbenchRouting } from "./workbench-routing";
 
 test("native show reclaims the current scope after hidden rejection without DOM visibilitychange", async () => {
   // Given the real generated ownership bridge running against a native host boundary.
-  const entry = readFileSync(resolve(import.meta.dir, "../../opencode-v1.18.21/packages/app/workbench/entry.tsx"), "utf8");
+  const entry = readFileSync(resolve(import.meta.dir, "workbench-overlay/workbench/entry.tsx"), "utf8");
   const adapted = transformWorkbenchRouting(entry, "E:/yume/src/workbench/session-route.ts");
   const start = adapted.indexOf("  if (bridge) {\n    let routedSessionId");
   const end = adapted.indexOf("  // In-place navigation", start);

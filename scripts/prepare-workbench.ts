@@ -1,5 +1,5 @@
 import { cp, copyFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { buildWorkbenchThemeCss, injectWorkbenchThemeAssets } from "./workbench-theme";
 
 /**
@@ -22,6 +22,24 @@ const upstreamRoot =
 const appDir = resolve(upstreamRoot, "packages/app");
 const outDir = resolve(projectRoot, "public/workbench");
 const ghosttyWasm = resolve(appDir, "node_modules/ghostty-web/ghostty-vt.wasm");
+
+if (!(await stat(resolve(appDir, "package.json")).catch(() => null))?.isFile()) {
+  throw new Error(`Pinned OpenCode source missing at ${appDir}`);
+}
+
+for (const relativePath of ["vite.workbench.config.ts", "workbench/index.html", "workbench/entry.tsx"]) {
+  const source = resolve(projectRoot, "scripts/workbench-overlay", relativePath);
+  const target = resolve(appDir, relativePath);
+  const existing = await stat(target).catch(() => null);
+  if (existing) {
+    if (!existing.isFile() || !(await readFile(target)).equals(await readFile(source))) {
+      throw new Error(`Upstream workbench overlay differs at ${target}`);
+    }
+    continue;
+  }
+  await mkdir(dirname(target), { recursive: true });
+  await copyFile(source, target);
+}
 
 const config = resolve(appDir, "vite.workbench.config.ts");
 if (!(await stat(config).catch(() => null))?.isFile()) {

@@ -6,7 +6,7 @@ import type { CatalogMutation, CatalogPage, CatalogQuery, UnifiedHistoryRow } fr
 import type { HistoryCopy } from "./historyOrganizerCopy";
 import { useNativeHistoryEvents } from "./useNativeHistoryEvents";
 
-export function useHistoryOrganizer(query: CatalogQuery, copy: HistoryCopy, onDeleted?: (row: UnifiedHistoryRow, forgetMemories: boolean) => Promise<void>, onChanged?: (key: string) => Promise<void>) {
+export function useHistoryOrganizer(query: CatalogQuery, copy: HistoryCopy, onDeleted?: (row: UnifiedHistoryRow, forgetMemories: boolean) => Promise<void>, onChanged?: (key: string) => Promise<void>, enabled = true) {
   const [page, setPage] = useState<CatalogPage | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -15,7 +15,10 @@ export function useHistoryOrganizer(query: CatalogQuery, copy: HistoryCopy, onDe
   const firstLoad = useRef(true);
   const queryRef = useRef(query);
   queryRef.current = query;
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
   const refresh = useCallback(async (native: boolean) => {
+    if (!enabledRef.current) return;
     const request = ++requestId.current;
     setLoading(true);
     setError("");
@@ -30,10 +33,15 @@ export function useHistoryOrganizer(query: CatalogQuery, copy: HistoryCopy, onDe
   }, [copy]);
   useNativeHistoryEvents(refresh);
   useEffect(() => {
+    if (!enabled) {
+      requestId.current += 1;
+      setLoading(false);
+      return;
+    }
     void refresh(firstLoad.current);
     firstLoad.current = false;
     return () => { requestId.current += 1; };
-  }, [query, refresh]);
+  }, [query, refresh, enabled]);
   useEffect(() => {
     let disposed = false;
     let unsubscribe: (() => void) | undefined;

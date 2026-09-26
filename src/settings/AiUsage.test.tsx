@@ -22,6 +22,33 @@ beforeEach(() => {
 });
 
 describe("AI usage", () => {
+  test("shows DeepSeek balance and local token usage in the existing card style", async () => {
+    invoke.mockImplementation(() => Promise.resolve({
+      kind: "deepseek",
+      isAvailable: true,
+      balances: [{ currency: "CNY", totalBalance: "110.00" }],
+      localAvailable: true,
+      todayTokens: 1234,
+      todayRequests: 2,
+      topModels: [{ name: "deepseek-flash", tokens: 1234, requests: 2 }],
+    }));
+    render(<AiUsage enabled providerId="provider-deepseek" label="大肥鱼" index={0} t={t} />);
+    expect(await screen.findByRole("heading", { name: "AI 用量 · 大肥鱼" })).toBeDefined();
+    expect(screen.getByText("¥110.00")).toBeDefined();
+    expect(screen.getByText("账户余额")).toBeDefined();
+    expect(screen.getAllByText("1,234 tokens · 2 次")).toHaveLength(2);
+    expect(screen.getByText("deepseek-flash")).toBeDefined();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect(screen.getByRole("link", { name: "平台明细" }).getAttribute("href"))
+      .toBe("https://platform.deepseek.com/usage");
+  });
+
+  test("does not call a rejected DeepSeek key a usage permission problem", async () => {
+    invoke.mockImplementation(() => Promise.reject("deepseek_auth_failed"));
+    render(<AiUsage enabled providerId="provider-deepseek" label="大肥鱼" index={0} t={t} />);
+    expect(await screen.findByText("DeepSeek API Key 无效，请重新验证")).toBeDefined();
+  });
+
   test("shows the Kuro weekly summary below the AI settings", async () => {
     invoke.mockImplementation(() =>
       Promise.resolve({

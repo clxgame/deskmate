@@ -597,7 +597,12 @@ describe("CC Switch entry in AI settings", () => {
     expect(
       invoke.mock.calls.filter(([command]) => command === "set_settings"),
     ).toEqual([
-      ["set_settings", { settings }],
+      ["set_settings", { settings: {
+        ...settings,
+        activeProviderId: "provider-omo-kuro",
+        providerId: "",
+        modelId: "",
+      } }],
       [
         "set_settings",
         {
@@ -653,7 +658,7 @@ describe("CC Switch entry in AI settings", () => {
     });
   });
 
-  test("keeps the current route when another provider fails verification", async () => {
+  test("keeps the newly selected provider without an old model when verification fails", async () => {
     const settings = multiProviderSettingsFixture({ language: "zh-CN" });
     invoke.mockImplementation((command) => {
       if (command === "get_settings") return Promise.resolve(settings);
@@ -675,7 +680,12 @@ describe("CC Switch entry in AI settings", () => {
     expect(invoke).not.toHaveBeenCalledWith("deploy_local_ai_stack", expect.anything());
     expect(
       invoke.mock.calls.filter(([command]) => command === "set_settings"),
-    ).toEqual([["set_settings", { settings }]]);
+    ).toEqual([["set_settings", { settings: {
+      ...settings,
+      activeProviderId: "provider-omo-kuro",
+      providerId: "",
+      modelId: "",
+    } }]]);
   });
 
   test("discards a verification result after provider settings change", async () => {

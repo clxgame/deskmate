@@ -147,6 +147,15 @@
   color: var(--text-dim);
 }
 
+.set-ai-usage-meta a {
+  color: var(--accent-ink);
+  text-decoration: none;
+}
+
+.set-ai-usage-meta a:hover {
+  text-decoration: underline;
+}
+
 .set-ai-usage-today {
   margin-top: var(--s-1);
   padding-top: var(--s-2);

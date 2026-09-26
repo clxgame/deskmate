@@ -1,15 +1,18 @@
 import { useEffect, useState } from "react";
-import { getAiUsage, type AiUsage as AiUsageData } from "../lib/settings";
+import { getAiUsage, type AiUsage as AiUsageData, type DeepSeekAiUsage, type GatewayAiUsage } from "../lib/settings";
 import type { Dict } from "../lib/i18n";
+import { invoke } from "@tauri-apps/api/core";
 import "./ai-usage.css";
 
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const CNY_UNIT_DIVISOR = 10000;
+const DEEPSEEK_USAGE_URL = "https://platform.deepseek.com/usage";
 
 type AiUsageView =
   | { readonly kind: "loading" }
   | { readonly kind: "missing-key" }
   | { readonly kind: "unauthorized" }
+  | { readonly kind: "invalid-key" }
   | { readonly kind: "unavailable" }
   | { readonly kind: "ready"; readonly usage: AiUsageData };
 
@@ -51,7 +54,7 @@ export function AiUsage({ enabled, providerId, label, index, t }: AiUsageProps) 
           message === "status:401" ||
           message === "status:403";
         if (active) {
-          setView({ kind: isUnauthorized ? "unauthorized" : "unavailable" });
+          setView({ kind: message === "deepseek_auth_failed" ? "invalid-key" : isUnauthorized ? "unauthorized" : "unavailable" });
         }
       }
     };
@@ -90,13 +93,17 @@ export function AiUsage({ enabled, providerId, label, index, t }: AiUsageProps) 
       </div>
 
       {view.kind === "ready" ? (
-        <UsageSummary usage={view.usage} t={t} />
+        "kind" in view.usage && view.usage.kind === "deepseek"
+          ? <DeepSeekSummary usage={view.usage} t={t} />
+          : <UsageSummary usage={view.usage as GatewayAiUsage} t={t} />
       ) : (
         <p className="set-ai-usage-status" role="status">
           {view.kind === "loading"
             ? t.aiUsageLoading
             : view.kind === "missing-key"
               ? t.aiUsageMissingKey
+              : view.kind === "invalid-key"
+                ? t.aiUsageKeyInvalid
               : view.kind === "unauthorized"
                 ? t.aiUsageUnauthorized
               : t.aiUsageUnavailable}
@@ -106,7 +113,7 @@ export function AiUsage({ enabled, providerId, label, index, t }: AiUsageProps) 
   );
 }
 
-function UsageSummary({ usage, t }: { readonly usage: AiUsageData; readonly t: Dict }) {
+function UsageSummary({ usage, t }: { readonly usage: GatewayAiUsage; readonly t: Dict }) {
   const progressTone =
     usage.remainingPct <= 10
       ? "danger"
@@ -158,6 +165,52 @@ function UsageSummary({ usage, t }: { readonly usage: AiUsageData; readonly t: D
               <span>
                 {formatYuan(model.costCny, 2)} · {t.aiUsageRequests(model.requests)}
               </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DeepSeekSummary({ usage, t }: { readonly usage: DeepSeekAiUsage; readonly t: Dict }) {
+  const balances = usage.balances.map((balance) =>
+    `${balance.currency === "CNY" ? "¥" : "$"}${balance.totalBalance}`,
+  ).join(" · ");
+
+  return (
+    <div className="set-ai-usage-card">
+      <div className="set-ai-usage-row">
+        <span>{t.aiUsageAccountBalance}</span>
+        <strong>{balances || "—"}</strong>
+      </div>
+      <div className="set-ai-usage-row set-ai-usage-meta">
+        <span>{usage.isAvailable ? t.aiUsageBalanceAvailable : t.aiUsageBalanceEmpty}</span>
+        <a href={DEEPSEEK_USAGE_URL} target="_blank" rel="noopener noreferrer"
+          onClick={(event) => {
+            if (!("__TAURI_INTERNALS__" in window)) return;
+            event.preventDefault();
+            void invoke("open_chat_link", { url: DEEPSEEK_USAGE_URL });
+          }}>
+          {t.aiUsagePlatformDetails}
+        </a>
+      </div>
+      <div className="set-ai-usage-row set-ai-usage-today">
+        <span>{t.aiUsageYumeToday}</span>
+        <strong>{usage.localAvailable
+          ? `${t.aiUsageTokens(usage.todayTokens)} · ${t.aiUsageRequests(usage.todayRequests)}`
+          : "—"}</strong>
+      </div>
+      <div className="set-ai-usage-row set-ai-usage-meta">
+        <span>{usage.localAvailable ? t.aiUsageLocalHint : t.aiUsageLocalUnavailable}</span>
+      </div>
+      {usage.topModels.length > 0 && (
+        <div className="set-ai-usage-models">
+          <span className="set-ai-usage-models-title">{t.aiUsageLocalTop}</span>
+          {usage.topModels.map((model) => (
+            <div className="set-ai-usage-row set-ai-usage-model" key={model.name}>
+              <span title={model.name}>{model.name}</span>
+              <span>{t.aiUsageTokens(model.tokens)} · {t.aiUsageRequests(model.requests)}</span>
             </div>
           ))}
         </div>

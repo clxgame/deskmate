@@ -2,9 +2,9 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import * as tauriCore from "@tauri-apps/api/core";
 import * as tauriEvent from "@tauri-apps/api/event";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { dict } from "../lib/i18n";
 import type { Settings } from "../lib/settings";
 import {
@@ -207,7 +207,7 @@ describe("AI settings tab extraction", () => {
     });
   });
 
-  test("replaces settings once when a configured sidecar model is selected", async () => {
+  test("shows only the selected provider's verified models and clears the old selection", async () => {
     const user = userEvent.setup();
     const settings = multiProviderSettingsFixture({
       language: "en-US",
@@ -245,32 +245,42 @@ describe("AI settings tab extraction", () => {
       ),
     );
 
-    render(
-      <main className="set-panel">
-        <AiTab
-          settings={settings}
-          patch={patch}
-          replace={replace}
-          persist={persist}
-          t={t}
-        />
-      </main>,
-    );
+    function StatefulAiTab() {
+      const [current, setCurrent] = useState(settings);
+      return <main className="set-panel"><AiTab
+        settings={current}
+        patch={patch}
+        replace={(next) => { replace(next); setCurrent(next); }}
+        persist={persist}
+        t={t}
+      /></main>;
+    }
+    render(<StatefulAiTab />);
 
     await waitFor(() => {
-      expect(
-        screen.getByRole("option", { name: "Claude Sonnet 4.5" }),
-      ).toBeDefined();
+      expect(screen.getByRole("option", { name: "GPT 5.4 Mini" })).toBeDefined();
     });
+    expect(screen.queryByRole("option", { name: "Claude Sonnet 4.5" })).toBeNull();
     expect(screen.queryByRole("option", { name: "Orphan" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "OMO Kuro" }));
+    expect(replace).toHaveBeenCalledWith({
+      ...settings,
+      activeProviderId: "provider-omo-kuro",
+      providerId: "",
+      modelId: "",
+    });
+    expect(screen.getByRole("combobox")).toHaveProperty("value", "");
+    expect(screen.queryByRole("option", { name: "GPT 5.4 Mini" })).toBeNull();
+    expect(screen.getByRole("option", { name: "Claude Sonnet 4.5" })).toBeDefined();
 
     await user.selectOptions(
       screen.getByRole("combobox"),
       "yume-2/claude-sonnet-4.5",
     );
 
-    expect(replace).toHaveBeenCalledTimes(1);
-    expect(replace).toHaveBeenCalledWith({
+    expect(replace).toHaveBeenCalledTimes(2);
+    expect(replace).toHaveBeenLastCalledWith({
       ...settings,
       providerId: "yume-2",
       modelId: "claude-sonnet-4.5",
@@ -282,6 +292,29 @@ describe("AI settings tab extraction", () => {
       "activeProviderId",
       "provider-omo-kuro",
     );
+  });
+
+  test("hides a provider's old models after its API binding changes until verification succeeds", async () => {
+    const user = userEvent.setup();
+    const initial = multiProviderSettingsFixture({ language: "en-US" });
+
+    function StatefulAiTab() {
+      const [current, setCurrent] = useState(initial);
+      return <AiTab settings={current} patch={() => undefined} replace={setCurrent} persist={persist} t={t} />;
+    }
+    render(<StatefulAiTab />);
+
+    await waitFor(() => expect(screen.getByRole("option", { name: "GPT 5.4 Mini" })).toBeDefined());
+    await user.click(screen.getByRole("button", { name: "Kuro" }));
+    fireEvent.change(screen.getByLabelText(`${t.aiProviderBaseUrl} · Kuro`), {
+      target: { value: "https://api.deepseek.com" },
+    });
+
+    expect(screen.queryByRole("option", { name: "GPT 5.4 Mini" })).toBeNull();
+    expect(screen.getByRole("combobox")).toHaveProperty("value", "");
+
+    await user.click(within(screen.getByRole("article", { name: "Kuro" })).getByRole("button", { name: t.verify }));
+    await waitFor(() => expect(screen.getByRole("option", { name: "GPT 5.4 Mini" })).toBeDefined());
   });
 
   test("does not replace settings when the controller receives an unknown sidecar selection", async () => {

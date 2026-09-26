@@ -4,8 +4,11 @@ use crate::settings::{
 use chrono::{Datelike, Local};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tauri::State;
+use tauri::{Manager, State};
 use url::Url;
+
+mod local;
+pub(crate) use local::{capture_agent_usage, record_ai_usage};
 
 const USAGE_PATH: &str = "/my-usage/api/detail";
 const FETCH_TIMEOUT: Duration = Duration::from_secs(8);
@@ -36,7 +39,7 @@ pub struct AiUsageModel {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AiUsage {
+pub struct GatewayUsage {
     remaining_cny: f64,
     limit_cny: f64,
     remaining_pct: u8,
@@ -44,6 +47,84 @@ pub struct AiUsage {
     today_cost_cny: f64,
     today_requests: u64,
     top_models: Vec<AiUsageModel>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum AiUsage {
+    Gateway(GatewayUsage),
+    DeepSeek(DeepSeekUsage),
+}
+
+#[derive(Debug, Deserialize)]
+struct DeepSeekBalanceResponse {
+    is_available: bool,
+    balance_infos: Vec<DeepSeekBalanceInfo>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeepSeekBalanceInfo {
+    currency: String,
+    #[serde(rename(deserialize = "total_balance", serialize = "totalBalance"))]
+    total_balance: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeepSeekUsage {
+    kind: &'static str,
+    is_available: bool,
+    balances: Vec<DeepSeekBalanceInfo>,
+    local_available: bool,
+    today_tokens: u64,
+    today_requests: u64,
+    top_models: Vec<local::LocalUsageModel>,
+}
+
+fn is_deepseek_base_url(base_url: &str) -> bool {
+    Url::parse(base_url.trim()).is_ok_and(|url| {
+        url.scheme() == "https"
+            && url.host_str() == Some("api.deepseek.com")
+            && url.port_or_known_default() == Some(443)
+            && matches!(url.path().trim_end_matches('/'), "" | "/v1")
+            && url.username().is_empty()
+            && url.password().is_none()
+    })
+}
+
+fn parse_deepseek_balance(payload: serde_json::Value) -> Result<DeepSeekBalanceResponse, String> {
+    let response: DeepSeekBalanceResponse =
+        serde_json::from_value(payload).map_err(|_| "invalid_response".to_string())?;
+    if response.balance_infos.iter().any(|balance| {
+        !matches!(balance.currency.as_str(), "CNY" | "USD")
+            || !balance
+                .total_balance
+                .parse::<f64>()
+                .is_ok_and(|amount| amount.is_finite() && amount >= 0.0)
+    }) {
+        return Err("invalid_response".into());
+    }
+    Ok(response)
+}
+
+fn fetch_deepseek_balance(api_key: &str) -> Result<DeepSeekBalanceResponse, String> {
+    let response = ureq::get("https://api.deepseek.com/user/balance")
+        .set("Accept", "application/json")
+        .set("Authorization", &format!("Bearer {api_key}"))
+        .set("User-Agent", concat!("YUME/", env!("CARGO_PKG_VERSION")))
+        .timeout(FETCH_TIMEOUT)
+        .call();
+    match response {
+        Ok(response) => parse_deepseek_balance(
+            response
+                .into_json::<serde_json::Value>()
+                .map_err(|_| "invalid_response".to_string())?,
+        ),
+        Err(ureq::Error::Status(401, _)) => Err("deepseek_auth_failed".into()),
+        Err(ureq::Error::Status(status, _)) => Err(format!("deepseek_status:{status}")),
+        Err(error) => Err(format!("network:{error}")),
+    }
 }
 
 fn usage_url(base_url: &str, date: &str) -> Result<Url, String> {
@@ -72,7 +153,7 @@ fn short_model_name(model: &str) -> &str {
 fn parse_usage_payload(
     payload: serde_json::Value,
     days_until_reset: u8,
-) -> Result<AiUsage, String> {
+) -> Result<GatewayUsage, String> {
     let payload: KuroUsagePayload =
         serde_json::from_value(payload).map_err(|_| "invalid_response".to_string())?;
     let Some(limit_cny) = payload.period_limit_cny.filter(|value| value.is_finite()) else {
@@ -114,7 +195,7 @@ fn parse_usage_payload(
     top_models.sort_by(|left, right| right.cost_cny.total_cmp(&left.cost_cny));
     top_models.truncate(3);
 
-    Ok(AiUsage {
+    Ok(GatewayUsage {
         remaining_cny,
         limit_cny,
         remaining_pct,
@@ -125,7 +206,7 @@ fn parse_usage_payload(
     })
 }
 
-fn fetch_usage(base_url: &str, api_key: &str) -> Result<AiUsage, String> {
+fn fetch_usage(base_url: &str, api_key: &str) -> Result<GatewayUsage, String> {
     let date = Local::now().format("%Y%m%d").to_string();
     let url = usage_url(base_url, &date)?;
     let response = ureq::get(url.as_str())
@@ -201,14 +282,40 @@ pub async fn fetch_ai_usage(
         &saved_key,
     );
     let (base_url, api_key) = verified_usage_target(catalog, &saved_key)?;
-    tauri::async_runtime::spawn_blocking(move || fetch_usage(&base_url, &api_key))
-        .await
-        .map_err(|error| format!("task:{error}"))?
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "usage_storage_unavailable")?;
+    let provider_id = provider.id;
+    tauri::async_runtime::spawn_blocking(move || {
+        if is_deepseek_base_url(&base_url) {
+            let balance = fetch_deepseek_balance(&api_key)?;
+            let local_result = local::today_summary(&app_data_dir, &provider_id);
+            let local_available = local_result.is_ok();
+            let local = local_result.unwrap_or_default();
+            Ok(AiUsage::DeepSeek(DeepSeekUsage {
+                kind: "deepseek",
+                is_available: balance.is_available,
+                balances: balance.balance_infos,
+                local_available,
+                today_tokens: local.tokens,
+                today_requests: local.requests,
+                top_models: local.top_models,
+            }))
+        } else {
+            fetch_usage(&base_url, &api_key).map(AiUsage::Gateway)
+        }
+    })
+    .await
+    .map_err(|error| format!("task:{error}"))?
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_usage_payload, resolve_usage_provider, usage_url, verified_usage_target};
+    use super::{
+        is_deepseek_base_url, parse_deepseek_balance, parse_usage_payload, resolve_usage_provider,
+        usage_url, verified_usage_target,
+    };
     use crate::settings::{AiProvider, ApiModel, ModelCatalog, Settings};
 
     fn usage_settings_fixture() -> Settings {
@@ -344,5 +451,29 @@ mod tests {
             url.as_str(),
             "https://ai-gateway.kurogames.com/my-usage/api/detail?date=20260827"
         );
+    }
+
+    #[test]
+    fn recognizes_only_the_official_deepseek_api_host() {
+        assert!(is_deepseek_base_url("https://api.deepseek.com"));
+        assert!(is_deepseek_base_url("https://api.deepseek.com/v1"));
+        assert!(!is_deepseek_base_url("https://api.deepseek.com.evil.test"));
+        assert!(!is_deepseek_base_url("http://api.deepseek.com"));
+        assert!(!is_deepseek_base_url("https://deepseek.example.test"));
+    }
+
+    #[test]
+    fn reads_the_official_balance_without_inventing_a_weekly_limit() {
+        let balance = parse_deepseek_balance(serde_json::json!({
+            "is_available": true,
+            "balance_infos": [{"currency":"CNY","total_balance":"110.00","granted_balance":"10.00","topped_up_balance":"100.00"}]
+        })).expect("official balance payload");
+        assert!(balance.is_available);
+        assert_eq!(balance.balance_infos[0].total_balance, "110.00");
+        assert_eq!(
+            serde_json::to_value(&balance.balance_infos[0]).unwrap()["totalBalance"],
+            "110.00"
+        );
+        assert!(parse_deepseek_balance(serde_json::json!({"is_available":true,"balance_infos":[{"currency":"CNY","total_balance":"bogus"}]})).is_err());
     }
 }

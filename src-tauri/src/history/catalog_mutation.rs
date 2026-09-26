@@ -56,6 +56,7 @@ fn mutate(app: &tauri::AppHandle, key: &str, mutation: &CatalogMutation) -> Resu
         apply_local(row, mutation, commands::now()?)?;
         Ok(())
     })?;
+    if matches!(mutation, CatalogMutation::Delete { .. }) { super::catalog_preview::invalidate(key); }
     let mut pending_error = None;
     if let (CatalogIdentity::Native { directory, session_id, .. }, CatalogMutation::Delete { .. }) = (&entry.identity, mutation) {
         match commands::client(app)?.delete(directory, session_id) {

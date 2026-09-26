@@ -102,7 +102,7 @@ export interface AiUsageModel {
   readonly requests: number;
 }
 
-export interface AiUsage {
+export interface GatewayAiUsage {
   readonly remainingCny: number;
   readonly limitCny: number;
   readonly remainingPct: number;
@@ -111,6 +111,18 @@ export interface AiUsage {
   readonly todayRequests: number;
   readonly topModels: readonly AiUsageModel[];
 }
+
+export interface DeepSeekAiUsage {
+  readonly kind: "deepseek";
+  readonly isAvailable: boolean;
+  readonly balances: readonly { readonly currency: "CNY" | "USD"; readonly totalBalance: string }[];
+  readonly localAvailable: boolean;
+  readonly todayTokens: number;
+  readonly todayRequests: number;
+  readonly topModels: readonly { readonly name: string; readonly tokens: number; readonly requests: number }[];
+}
+
+export type AiUsage = GatewayAiUsage | DeepSeekAiUsage;
 
 export function getAiUsage(providerId: string): Promise<AiUsage> {
   return invoke<AiUsage>("fetch_ai_usage", { providerId });

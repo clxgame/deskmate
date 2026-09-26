@@ -11,6 +11,7 @@ import {
   selectedModelValue,
   settingsWithSelectedModel,
 } from "./aiProviderModel";
+import type { ProviderField } from "./AiProviderCard";
 import {
   normalizeCcSwitchCapabilityStatus,
   type CcSwitchCapabilityStatus,
@@ -32,6 +33,9 @@ export function useAiTabController({
   t,
 }: AiTabControllerInput) {
   const [models, setModels] = useState<ProviderModel[]>([]);
+  const [invalidProviderIds, setInvalidProviderIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [failed, setFailed] = useState(false);
   const [ccSwitchStatus, setCcSwitchStatus] =
     useState<CcSwitchCapabilityStatus>({ kind: "checking" });
@@ -100,6 +104,11 @@ export function useAiTabController({
     persist,
     refreshModels,
     refreshCcSwitchStatus,
+    onProviderVerified: (providerId) => setInvalidProviderIds((current) => {
+      const next = new Set(current);
+      next.delete(providerId);
+      return next;
+    }),
     t,
   });
 
@@ -111,16 +120,21 @@ export function useAiTabController({
     }
   };
 
-  const clearVerificationState = () => {
+  const clearVerificationState = (providerId?: string, field?: ProviderField) => {
     actions.clearOperationState();
+    if (providerId && (field === "baseUrl" || field === "apiKey")) {
+      setInvalidProviderIds((current) => new Set(current).add(providerId));
+    }
   };
+
+  const visibleModels = invalidProviderIds.has(activeProviderId) ? [] : models;
 
   return {
     activeProviderId,
     ccSwitchStatus,
-    currentModelValue: selectedModelValue(settings),
+    currentModelValue: selectedModelValue(settings, visibleModels),
     failed,
-    groups: groupModelsByConfiguredProvider(settings.providers, models, t),
+    groups: groupModelsByConfiguredProvider(settings.providers, visibleModels, activeProviderId, t),
     pickModel,
     clearVerificationState,
     ...actions,

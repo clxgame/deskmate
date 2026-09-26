@@ -122,6 +122,7 @@ fn refresh_history(app: &tauri::AppHandle) -> Result<Vec<String>, String> {
     let runs = app.state::<crate::agent::AgentRunState>();
     let _operation = runs.lock_operation()?;
     let errors = super::reconcile::reconcile(&store(app)?, &client(app)?, &runs.all_records()?)?;
+    super::catalog_preview::invalidate_all();
     initialize(app)?;
     Ok(errors)
 }

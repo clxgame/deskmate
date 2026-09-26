@@ -1,5 +1,6 @@
 const CREATOR_CONTACT_URL: &str =
     "https://applink.feishu.cn/client/chat/open?openId=ou_a210f858d830187b119d691364a3d628";
+const DEEPSEEK_USAGE_URL: &str = "https://platform.deepseek.com/usage";
 
 fn external_url(raw: &str) -> Result<url::Url, String> {
     let url = url::Url::parse(raw).map_err(|_| "Invalid link".to_string())?;
@@ -10,7 +11,9 @@ fn external_url(raw: &str) -> Result<url::Url, String> {
 }
 
 fn window_link(label: &str, raw: &str) -> Result<url::Url, String> {
-    if label != "chat" && !(label == "settings" && raw == CREATOR_CONTACT_URL) {
+    if label != "chat"
+        && !(label == "settings" && matches!(raw, CREATOR_CONTACT_URL | DEEPSEEK_USAGE_URL))
+    {
         return Err("This window cannot open this link".to_string());
     }
     external_url(raw)
@@ -57,11 +60,12 @@ pub(crate) fn open_system_link(url: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{external_url, window_link, CREATOR_CONTACT_URL};
+    use super::{external_url, window_link, CREATOR_CONTACT_URL, DEEPSEEK_USAGE_URL};
 
     #[test]
-    fn settings_can_only_open_the_creator_contact() {
+    fn settings_can_only_open_approved_links() {
         assert!(window_link("settings", CREATOR_CONTACT_URL).is_ok());
+        assert!(window_link("settings", DEEPSEEK_USAGE_URL).is_ok());
         assert!(window_link("settings", "https://example.com").is_err());
         assert!(window_link("pet", CREATOR_CONTACT_URL).is_err());
         assert!(window_link("chat", "https://example.com").is_ok());

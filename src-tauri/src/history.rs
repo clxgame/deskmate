@@ -11,6 +11,7 @@ pub(crate) mod native_api;
 pub(crate) mod catalog_model;
 mod catalog;
 mod catalog_query;
+pub(crate) mod catalog_preview;
 mod catalog_details;
 pub(crate) mod catalog_local;
 mod catalog_import;
@@ -331,8 +332,6 @@ fn save_scoped_snapshot(path: &Path, list: &mut Vec<HistorySession>, records: &[
     }
     Ok(disposition)
 }
-
-
 
 
 

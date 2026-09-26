@@ -49,6 +49,9 @@ describe("AI provider list", () => {
     await user.click(screen.getByRole("button", { name: t.aiProviderAdd }));
     expect(replace).toHaveBeenLastCalledWith({
       ...settings,
+      activeProviderId: "provider-new",
+      providerId: "",
+      modelId: "",
       providers: [
         ...settings.providers,
         {
@@ -76,22 +79,33 @@ describe("AI provider list", () => {
     await user.click(screen.getByRole("button", { name: "Provider 3" }));
     expect(screen.getByLabelText(`${t.aiProviderApiKey} · Provider 3`)).toHaveProperty("value", "new-provider-draft");
     expect(screen.getAllByRole("article")).toHaveLength(1);
-    expect(replace.mock.calls.at(-1)?.[0].activeProviderId).toBe(settings.activeProviderId);
+    expect(replace.mock.calls.at(-1)?.[0].activeProviderId).toBe("provider-new");
   });
 
-  test("navigates provider tabs by keyboard without changing the active model route", async () => {
+  test("keyboard navigation leaves the route alone until a provider is selected", async () => {
     const user = userEvent.setup();
     const replace = mock<ReplaceSettings>(() => undefined);
-    render(<AiProviderList settings={multiProviderSettingsFixture()} replace={replace} t={t} />);
+    function ProviderSettings() {
+      const [settings, setSettings] = useState(multiProviderSettingsFixture());
+      return <AiProviderList settings={settings} replace={(next) => {
+        replace(next);
+        setSettings(next);
+      }} t={t} />;
+    }
+    render(<ProviderSettings />);
     const first = screen.getByRole("button", { name: "Kuro" });
     const second = screen.getByRole("button", { name: "OMO Kuro" });
     first.focus();
     await user.keyboard("{ArrowRight}");
     expect(document.activeElement).toBe(second);
+    expect(replace).not.toHaveBeenCalled();
     expect(screen.queryByRole("article")).toBeNull();
     expect(second.tabIndex).toBe(0);
     expect(first.tabIndex).toBe(-1);
     await user.keyboard("{Enter}");
+    expect(replace).toHaveBeenCalledWith(expect.objectContaining({
+      activeProviderId: "provider-omo-kuro", providerId: "", modelId: "",
+    }));
     expect(screen.getByRole("region", { name: "OMO Kuro" }).getAttribute("aria-labelledby")).toBe(second.id);
     expect(screen.getByLabelText(`${t.aiProviderBaseUrl} · OMO Kuro`)).toBeDefined();
     await user.keyboard("{ArrowRight}");
@@ -105,7 +119,7 @@ describe("AI provider list", () => {
     expect(second.getAttribute("aria-expanded")).toBe("true");
     await user.keyboard(" ");
     expect(screen.queryByRole("article")).toBeNull();
-    expect(replace).not.toHaveBeenCalled();
+    expect(replace).toHaveBeenCalledTimes(1);
   });
 
   test("requires confirmation to delete and protects the last provider", async () => {

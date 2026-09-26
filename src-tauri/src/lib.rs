@@ -46,7 +46,7 @@ mod workbench;
 mod workbench_theme;
 mod worklog;
 mod yume_context;
-use ai_usage::fetch_ai_usage;
+use ai_usage::{fetch_ai_usage, record_ai_usage};
 use chat_attachments::AttachmentStore;
 use history::HistoryState;
 use settings::{get_settings, set_settings, verify_api_key, SettingsState};
@@ -102,13 +102,17 @@ fn sidecar_base_url(sidecar: State<Sidecar>) -> String {
 }
 
 /// Credentials for the managed sidecar, delivered in memory to YUME's own
-/// chat/workbench windows only. Never logged, never persisted.
+/// chat/settings/workbench windows only. Never logged, never persisted.
+fn can_access_sidecar_credentials(window_label: &str) -> bool {
+    matches!(window_label, "chat" | "settings" | "workbench")
+}
+
 #[tauri::command]
 fn sidecar_auth(
     window: tauri::WebviewWindow,
     app: tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
-    if window.label() != "chat" && window.label() != "workbench" {
+    if !can_access_sidecar_credentials(window.label()) {
         return Err("sidecar credentials are only available to YUME windows".to_string());
     }
     let password = &app.state::<Sidecar>().password;
@@ -229,6 +233,7 @@ mod worklog_tool_tests;
 #[cfg(test)]
 mod tests {
     use super::{
+        can_access_sidecar_credentials,
         configure_sidecar_command, configure_sidecar_environment, migrate_legacy_xiaozhu_intro,
         overwrite_builtin_xiaozhu_persona, overwrite_yume_opencode_tool, resource_error_event,
         should_follow_chat_on_window_event, should_hide_chat, should_restore_settings_focus,
@@ -242,6 +247,18 @@ mod tests {
 
     fn valid_yume_opencode_tool_source() -> &'static str {
         include_str!("../resources/opencode-tools/ccswitch_prepare_opencode_provider.ts")
+    }
+
+    #[test]
+    fn settings_can_authenticate_model_requests_without_exposing_credentials_to_other_windows() {
+        // Settings fetches /config/providers after verifying an upstream API key.
+        // Denying its credentials makes that successful verification appear to fail.
+        for label in ["settings", "chat", "workbench"] {
+            assert!(can_access_sidecar_credentials(label), "{label}");
+        }
+        for label in ["pet", "", "settings-external", "external", "Settings"] {
+            assert!(!can_access_sidecar_credentials(label), "{label}");
+        }
     }
 
     #[test]
@@ -1591,6 +1608,7 @@ pub fn run() {
             pomodoro::pomodoro_reset,
             pomodoro::pomodoro_select_phase,
             fetch_ai_usage,
+            record_ai_usage,
             open_settings,
             open_widget_settings,
             hide_settings,
@@ -1610,6 +1628,7 @@ pub fn run() {
             local_ai_deploy::deploy_local_ai_stack,
             history::commands::history_catalog_list,
             history::commands::history_catalog_load,
+            history::catalog_preview::history_catalog_previews,
             history::catalog_mutation::history_catalog_mutate,
             history::catalog_local::history_save_local_messages,
             history::view::history_list,

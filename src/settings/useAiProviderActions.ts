@@ -29,6 +29,7 @@ type ProviderActionsInput = {
   readonly persist: PersistSettings;
   readonly refreshModels: () => Promise<ProviderModel[]>;
   readonly refreshCcSwitchStatus: () => Promise<void>;
+  readonly onProviderVerified: (providerId: string) => void;
   readonly t: Dict;
 };
 
@@ -74,6 +75,7 @@ export function useAiProviderActions({
   persist,
   refreshModels,
   refreshCcSwitchStatus,
+  onProviderVerified,
   t,
 }: ProviderActionsInput) {
   const [verifyingProviderId, setVerifyingProviderId] = useState<string | null>(
@@ -145,6 +147,7 @@ export function useAiProviderActions({
       if (!modelsMatchVerification(refreshed, provider.sidecarId, count)) {
         throw new Error("models_unavailable");
       }
+      onProviderVerified(provider.id);
       setVerifyResults((current) => ({
         ...current,
         [providerId]: { ok: true, message: t.verifyOk(count) },
@@ -186,6 +189,7 @@ export function useAiProviderActions({
       if (!modelsMatchVerification(refreshed, provider.sidecarId, count)) {
         throw new Error("models_unavailable");
       }
+      onProviderVerified(provider.id);
       const available = refreshed.filter(
         (model) => model.sidecarId === provider.sidecarId,
       );

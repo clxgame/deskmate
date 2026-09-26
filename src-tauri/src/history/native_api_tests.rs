@@ -2,7 +2,9 @@ use super::*;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 
-pub(super) fn serve(responses: Vec<(u16, String)>) -> (String, std::thread::JoinHandle<Vec<String>>) {
+pub(super) fn serve(
+    responses: Vec<(u16, String)>,
+) -> (String, std::thread::JoinHandle<Vec<String>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let worker = std::thread::spawn(move || {
@@ -28,6 +30,37 @@ fn wrong_window_is_denied_before_any_sidecar_access() {
     let result = authorize_history_window("settings");
     // Then no history access is granted.
     assert_eq!(result, Err(NativeApiError::Forbidden));
+}
+
+#[test]
+fn bounded_preview_uses_recent_text_and_excludes_tool_parts() {
+    let body = serde_json::json!([
+        {"info":{"id":"msg_old","role":"user","time":{"created":1}},"parts":[{"id":"p1","type":"text","text":"Earlier question"}]},
+        {"info":{"id":"msg_latest","role":"assistant","time":{"created":2}},"parts":[
+            {"id":"p2","type":"tool","text":"private tool result"},
+            {"id":"p3","type":"text","text":"Actual reply"}
+        ]}
+    ]).to_string();
+    let (url, worker) = serve(vec![(200, body)]);
+    let client = NativeHistoryClient::new(&url, "Basic synthetic").unwrap();
+    let preview = client.preview_text("C:/allowed", "ses_one").unwrap();
+    assert!(preview.exhausted);
+    assert_eq!(preview.message.unwrap().text, "Actual reply");
+    let requests = worker.join().unwrap();
+    assert!(
+        requests[0].starts_with("GET /session/ses_one/message?directory=C%3A%2Fallowed&limit=8 ")
+    );
+}
+
+#[test]
+fn preview_metadata_requires_the_requested_directory() {
+    let (url, worker) = serve(vec![(200, session("ses_one", "C:/other"))]);
+    let client = NativeHistoryClient::new(&url, "Basic synthetic").unwrap();
+    assert_eq!(
+        client.verify_preview_session("C:/allowed", "ses_one"),
+        Err(NativeApiError::ScopeMismatch)
+    );
+    worker.join().unwrap();
 }
 
 #[test]
@@ -200,7 +233,6 @@ fn a_redirect_cannot_relay_the_sidecar_credential() {
     assert_eq!(invalid_id, Err(NativeApiError::InvalidRequest));
 }
 
-
 fn read_request(reader: &mut impl Read) -> String {
     let mut request = Vec::new();
     let mut byte = [0_u8; 1];
@@ -210,10 +242,14 @@ fn read_request(reader: &mut impl Read) -> String {
         assert!(request.len() <= 65536);
     }
     let header = String::from_utf8(request.clone()).unwrap();
-    let body_length: usize = header.lines().find_map(|line| {
-        let (name, value) = line.split_once(':')?;
-        name.eq_ignore_ascii_case("Content-Length").then(|| value.trim().parse().unwrap())
-    }).unwrap_or(0);
+    let body_length: usize = header
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("Content-Length")
+                .then(|| value.trim().parse().unwrap())
+        })
+        .unwrap_or(0);
     let header_length = request.len();
     request.resize(header_length + body_length, 0);
     reader.read_exact(&mut request[header_length..]).unwrap();
@@ -236,4 +272,3 @@ fn wire_fixture_reads_fragmented_headers_and_body_completely() {
     // Then it consumes the complete body rather than resetting an in-flight upload.
     assert_eq!(read, request);
 }
-

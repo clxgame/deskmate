@@ -5,6 +5,7 @@ import type { LocalAiDeploymentStatus } from "./CcSwitchStatus";
 import {
   settingsWithAddedProvider,
   settingsWithDeletedProvider,
+  settingsWithSelectedProvider,
   settingsWithUpdatedProvider,
 } from "./aiProviderModel";
 import { AiProviderCard, type ProviderField } from "./AiProviderCard";
@@ -17,7 +18,7 @@ type AiProviderListProps = {
   readonly replace: ReplaceSettings;
   readonly t: Dict;
   readonly createProviderId?: () => string;
-  readonly onChange?: () => void;
+  readonly onChange?: (providerId?: string, field?: ProviderField) => void;
   readonly onVerify?: (providerId: string) => void;
   readonly onDeploy?: (providerId: string) => void;
   readonly verifyingProviderId?: string | null;
@@ -81,7 +82,7 @@ export function AiProviderList({
     field: ProviderField,
     value: string,
   ) => {
-    onChange?.();
+    onChange?.(providerId, field);
     replace(settingsWithUpdatedProvider(settings, providerId, { [field]: value }));
   };
 
@@ -146,6 +147,11 @@ export function AiProviderList({
           onSelect={(providerId) => {
             setExpanded(providerId !== selectedProvider?.id || !expanded);
             setSelectedId(providerId);
+            const next = settingsWithSelectedProvider(settings, providerId);
+            if (next !== settings) {
+              onChange?.();
+              replace(next);
+            }
           }}
           busyFor={(providerId) => verifyingProviderId === providerId
             || deploymentFor?.(providerId).kind === "working"}

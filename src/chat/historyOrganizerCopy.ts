@@ -19,13 +19,17 @@ const english = {
   failed: "Could not update history. Please retry.", activeError: "Stop the running task before deleting this conversation.",
   loadFailed: "Could not load history. Cached rows remain visible.", openFailed: "Could not open this conversation. Please retry.",
   invalidDates: "The end date must be on or after the start date.", localRecord: "Local text record",
+  filters: "Filters", onlyPinned: "Pinned only", clearCondition: "Remove", clearQuery: "Clear search and filters",
+  pinnedGroup: "Pinned", today: "Today", yesterday: "Yesterday", earlier: "Earlier",
+  previewLoading: "Loading preview…", previewEmpty: "No preview yet", previewUnavailable: "Preview unavailable", localReply: "Local reply",
+  details: "Details", more: "More actions", projectPath: "Full project path", sourceDetail: "Source", updatedDetail: "Updated",
 } as const;
 export type HistoryCopy = { readonly [Key in keyof typeof english]: string };
 const chinese: HistoryCopy = {
   title: "会话历史", close: "关闭历史", refresh: "刷新", retry: "重试", newChat: "新会话",
   archiveNote: "归档仅整理此处的记录，不影响工作台侧栏。",
   search: "搜索标题和项目", searchNote: "搜索标题和项目名称，不搜索消息正文。",
-  active: "未归档", pinned: "已置顶", archived: "已归档", project: "项目", allProjects: "全部项目",
+  active: "会话", pinned: "已置顶", archived: "已归档", project: "项目", allProjects: "全部项目",
   source: "来源", allSources: "全部来源", light_chat: "轻聊天", workbench: "工作台", legacy: "旧版记录",
   from: "开始日期", to: "结束日期", clear: "清除筛选", loading: "正在加载会话…",
   empty: "这里还没有会话", noResults: "没有匹配的会话", offlineEmpty: "暂时无法获取历史，请在连接恢复后重试。",
@@ -42,6 +46,10 @@ const chinese: HistoryCopy = {
   failed: "更新历史失败，请重试。", activeError: "请先停止正在运行的任务，再删除这段历史。",
   loadFailed: "历史加载失败，已缓存的记录仍会保留。", openFailed: "打开会话失败，请重试。",
   invalidDates: "结束日期不能早于开始日期。", localRecord: "本地文本记录",
+  filters: "筛选", onlyPinned: "只看置顶", clearCondition: "移除", clearQuery: "清除搜索和筛选",
+  pinnedGroup: "置顶", today: "今天", yesterday: "昨天", earlier: "更早",
+  previewLoading: "正在加载内容…", previewEmpty: "暂无可预览内容", previewUnavailable: "内容暂不可用", localReply: "本地回复",
+  details: "详情", more: "更多操作", projectPath: "完整项目路径", sourceDetail: "来源", updatedDetail: "更新时间",
 };
 export function historyCopy(language: string): HistoryCopy {
   return language.startsWith("zh") ? chinese : english;

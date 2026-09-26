@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>History QA</title></head>
+<body style="margin:0"><div id="root"></div>
+<script>
+  const now = Date.now();
+  const rows = Array.from({ length: 46 }, (_, index) => ({
+    key: `native:["test","${index < 9 ? "/qa/app-data/workspace" : "/qa/project/deskmate"}","session-${index}"]`,
+    identity: { kind: "native", sidecarId: "test", directory: index < 9 ? "/qa/app-data/workspace" : "/qa/project/deskmate", sessionId: `session-${index}` },
+    title: index < 4 ? "YUME chat" : ["重做历史界面的信息层级", "排查启动时的连接错误", "整理项目笔记", "实现新的筛选菜单"][index % 4],
+    userTitle: null, displayTitle: index < 4 ? "YUME chat" : ["重做历史界面的信息层级", "排查启动时的连接错误", "整理项目笔记", "实现新的筛选菜单"][index % 4],
+    source: "light_chat", created: now - index * 3600000,
+    updated: index < 5 ? now - index * 60000 : now - (index - 4) * 86400000,
+    pinned: index === 0, archived: false, availability: "available", ownership: "unowned", runtime: "idle", tombstone: null,
+    capabilities: { open: true, openWorkbench: false, send: true, rename: true, pin: true, archive: true, delete: true, readOnlyReason: null },
+  }));
+  let callbackId = 0;
+  window.__TAURI_INTERNALS__ = {
+    transformCallback: () => ++callbackId,
+    unregisterCallback: () => {},
+    invoke: async (cmd, args = {}) => {
+      if (cmd === "plugin:event|listen") return ++callbackId;
+      if (cmd === "plugin:event|unlisten") return null;
+      if (cmd === "history_catalog_list") {
+        const q = args.query || {};
+        const matching = rows.filter(row => row.archived === !!q.archived && (!q.search || `${row.displayTitle} ${row.identity.directory}`.toLowerCase().includes(q.search.toLowerCase()))
+          && (!q.pinned || row.pinned) && (!q.directory || row.identity.directory === q.directory) && (!q.source || row.source === q.source)
+          && (!q.from || row.updated >= q.from) && (!q.to || row.updated <= q.to));
+        return { items: matching.slice(q.offset || 0, (q.offset || 0) + (q.limit || 50)), total: matching.length, hasMore: false, offline: false, errors: [], directories: [...new Set(rows.map(row => row.identity.directory))] };
+      }
+      if (cmd === "history_catalog_previews") return (args.keys || []).map(key => {
+        const index = Number(key.match(/session-(\d+)/)?.[1] ?? 0);
+        return { key, status: "ready", text: ["把会话历史改成清晰的列表，先确认每条记录的内容。", "检查刚刚的回复是否保存到对应会话。", "这一段会话讨论了项目设置和下一步安排。", "请看看这个页面在小窗口里是否能完整显示。"][index % 4], role: "user", time: now - index * 60000, localOnly: false };
+      });
+      if (cmd === "opencode_get_base_url") return "http://127.0.0.1:0";
+      return null;
+    },
+  };
+</script>
+<script type="module" src="/scripts/history-organizer-qa/main.tsx"></script>
+</body>
+</html>

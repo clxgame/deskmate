@@ -4,6 +4,9 @@ node_modules/
 # Frontend build output
 dist/
 
+# Local release builds and review artifacts
+/output/
+
 # Rust/Tauri build output
 src-tauri/target/
 src-tauri/target-*/

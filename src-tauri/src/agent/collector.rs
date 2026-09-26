@@ -233,7 +233,16 @@ pub(crate) fn collect_active_run_once(
                         session_id: session,
                         messages,
                     },
-                )
+                )?;
+                if let Err(error) = crate::ai_usage::capture_agent_usage(
+                    app,
+                    &record.workspace_path,
+                    session,
+                    messages,
+                ) {
+                    eprintln!("agent usage capture {}: {error}", record.run_id);
+                }
+                Ok(())
             },
             respond: |record: &RunRecord, request: &PermissionRequest, reply: Reply| {
                 crate::tool_permissions::runtime::respond_scoped(
@@ -289,4 +298,3 @@ pub(super) fn cached_permissions(
         })
         .collect()
 }
-

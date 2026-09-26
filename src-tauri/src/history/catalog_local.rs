@@ -73,6 +73,7 @@ pub(crate) async fn history_save_local_messages(window: tauri::WebviewWindow, ap
         let state = app.state::<HistoryState>();
         let mut list = state.0.lock().map_err(|_| "history_state_unavailable")?;
         append_local(&super::history_path(&app)?, &mut list, (&entry, &messages))?;
+        super::catalog_preview::invalidate(&key);
         app.emit("history-catalog-changed", ()).map_err(|_| "history_event_unavailable".to_owned())
     }).await.map_err(|_| "history_local_messages_unavailable".to_owned())?
 }

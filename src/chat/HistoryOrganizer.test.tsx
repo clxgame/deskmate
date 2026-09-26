@@ -13,6 +13,7 @@ const nativeRow: UnifiedHistoryRow = {
 };
 const legacyRow: UnifiedHistoryRow = { ...nativeRow, key: "legacy:old", identity: { kind: "legacy", historyId: "old" }, title: "Old notes", displayTitle: "Old notes", source: "legacy", capabilities: { ...nativeRow.capabilities, openWorkbench: false, readOnlyReason: "legacy_text_only" } };
 const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
+const lastListCall = () => calls.filter(call => call.command === "history_catalog_list").at(-1);
 let mutationFails = false;
 let listFails = false;
 let rows = [nativeRow, legacyRow];
@@ -24,6 +25,7 @@ function installHost() {
       if (listFails) throw new Error("sidecar unavailable");
       return { items: rows, total: paginated ? 1001 : rows.length, hasMore: paginated, offline: false, errors: [], directories: ["c:/project"] };
     }
+    if (command === "history_catalog_previews") return (args?.keys as string[] ?? []).map(key => ({ key, status: "ready", text: `Preview for ${key}`, role: "user", time: 1, localOnly: false }));
     if (command === "history_catalog_mutate" && mutationFails) throw new Error("history_agent_running");
     if (command === "history_catalog_mutate" && args?.mutation && typeof args.mutation === "object" && "action" in args.mutation && args.mutation.action === "delete") rows = rows.filter(row => row.key !== args.key);
     return null;
@@ -43,6 +45,33 @@ test("native and legacy rows open with their complete identity and capability la
   fireEvent.click(screen.getByRole("button", { name: "Open Native task" }));
   await waitFor(() => expect(opened?.key).toBe(nativeRow.key));
 });
+test("same-title rows show distinct real preview results without opening either row", async () => {
+  rows = [
+    { ...nativeRow, title: "YUME chat", displayTitle: "YUME chat" },
+    { ...legacyRow, title: "YUME chat", displayTitle: "YUME chat" },
+  ];
+  const open = mock(() => {});
+  const originalObserver = globalThis.IntersectionObserver;
+  Object.defineProperty(globalThis, "IntersectionObserver", { configurable: true, value: undefined });
+  try {
+    render(<HistoryOrganizer language="en-US" onOpen={open} onClose={() => {}} />);
+    await screen.findByText(`Preview for ${nativeRow.key}`);
+    expect(screen.getByText(`Preview for ${legacyRow.key}`)).toBeDefined();
+    expect(open).not.toHaveBeenCalled();
+    expect(calls.filter(call => call.command === "history_catalog_previews")).toHaveLength(2);
+  } finally {
+    Object.defineProperty(globalThis, "IntersectionObserver", { configurable: true, value: originalObserver });
+  }
+});
+test("details keeps the full project path behind the action menu", async () => {
+  const open = mock(() => {});
+  render(<HistoryOrganizer language="en-US" onOpen={open} onClose={() => {}} />);
+  await screen.findByText("Native task");
+  fireEvent.click(screen.getByRole("button", { name: "Actions for Native task" }));
+  fireEvent.click(screen.getByRole("button", { name: "Details" }));
+  expect(screen.getByText("Full project path").nextElementSibling?.textContent).toBe("c:/project");
+  expect(open).not.toHaveBeenCalled();
+});
 test("delete requires confirmation; rejected mutation preserves the row and shows an error", async () => {
   mutationFails = true;
   render(<HistoryOrganizer language="en-US" onOpen={() => {}} onClose={() => {}} />);
@@ -60,12 +89,13 @@ test("search and filters reset pagination and query metadata without refreshing 
   fireEvent.change(screen.getByLabelText("Search titles and projects"), { target: { value: "renamed" } });
   await waitFor(() => expect(calls.filter(call => call.command === "history_catalog_list").at(-1)?.args).toMatchObject({ query: { search: "renamed", offset: 0, limit: 50 }, refresh: false }));
   fireEvent.click(screen.getByRole("button", { name: "Archived" }));
-  await waitFor(() => expect(calls.at(-1)?.args).toMatchObject({ query: { archived: true, offset: 0 } }));
+  await waitFor(() => expect(lastListCall()?.args).toMatchObject({ query: { archived: true, offset: 0 } }));
 });
 test("failed refresh keeps cached rows visible and offers retry", async () => {
   render(<HistoryOrganizer language="en-US" onOpen={() => {}} onClose={() => {}} />);
   await screen.findByText("Native task");
   listFails = true;
+  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
   fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
   await screen.findByRole("alert");
   expect(screen.getByText("Native task")).toBeDefined();
@@ -79,10 +109,11 @@ test("large histories navigate bounded pages and reset the page when filters cha
   await screen.findByText("Native task");
   // When: the user moves to the next page and then narrows the source.
   fireEvent.click(screen.getByRole("button", { name: "Next" }));
-  await waitFor(() => expect(calls.at(-1)?.args).toMatchObject({ query: { offset: 50, limit: 50 }, refresh: false }));
+  await waitFor(() => expect(lastListCall()?.args).toMatchObject({ query: { offset: 50, limit: 50 }, refresh: false }));
+  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
   fireEvent.change(screen.getByLabelText("Source"), { target: { value: "legacy" } });
   // Then: the narrowed search starts at the first bounded page.
-  await waitFor(() => expect(calls.at(-1)?.args).toMatchObject({ query: { source: "legacy", offset: 0, limit: 50 }, refresh: false }));
+  await waitFor(() => expect(lastListCall()?.args).toMatchObject({ query: { source: "legacy", offset: 0, limit: 50 }, refresh: false }));
 });
 
 test("a new chat action remains available from the global organizer", async () => {

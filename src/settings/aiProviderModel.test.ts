@@ -15,6 +15,7 @@ import {
   settingsWithAddedProvider,
   settingsWithDeletedProvider,
   settingsWithSelectedModel,
+  settingsWithSelectedProvider,
   settingsWithUpdatedProvider,
 } from "./aiProviderModel";
 
@@ -71,20 +72,15 @@ describe("ai provider model helpers", () => {
     ).toBeNull();
   });
 
-  test("groups models by configured provider sidecar id and omits unknown sidecars", () => {
+  test("shows only the active provider's verified models", () => {
     const groups = groupModelsByConfiguredProvider(
       [kuroProviderFixture, omoKuroProviderFixture],
       modelCatalog,
+      "provider-omo-kuro",
       t,
     );
 
     expect(groups).toEqual([
-      {
-        providerId: "provider-kuro",
-        sidecarId: "yume",
-        label: "Kuro",
-        models: [modelCatalog[0]],
-      },
       {
         providerId: "provider-omo-kuro",
         sidecarId: "yume-2",
@@ -92,6 +88,12 @@ describe("ai provider model helpers", () => {
         models: [modelCatalog[1]],
       },
     ]);
+    expect(groupModelsByConfiguredProvider(
+      [kuroProviderFixture, omoKuroProviderFixture],
+      modelCatalog,
+      "provider-kuro",
+      t,
+    )[0]?.models).toEqual([modelCatalog[0]]);
   });
 
   test("allocates frontier sidecar ids with the backend sequence", () => {
@@ -116,6 +118,9 @@ describe("ai provider model helpers", () => {
       baseUrl: "",
       apiKey: "",
     });
+    expect(added.activeProviderId).toBe("provider-new");
+    expect(added.providerId).toBe("");
+    expect(added.modelId).toBe("");
     expect(settings.providers).toHaveLength(2);
 
     const edited = settingsWithUpdatedProvider(added, "provider-new", {
@@ -139,23 +144,42 @@ describe("ai provider model helpers", () => {
         multiProviderSettingsFixture({
           providerId: "yume-2",
           modelId: "claude-sonnet-4.5",
+          activeProviderId: "provider-omo-kuro",
         }),
+        modelCatalog,
       ),
     ).toBe("yume-2/claude-sonnet-4.5");
-    expect(selectedModelValue(multiProviderSettingsFixture({ providerId: "" }))).toBe(
+    expect(selectedModelValue(multiProviderSettingsFixture({ providerId: "" }), modelCatalog)).toBe(
       "",
     );
+    expect(selectedModelValue(multiProviderSettingsFixture({
+      providerId: "yume-2",
+      modelId: "claude-sonnet-4.5",
+    }), modelCatalog)).toBe("");
+    expect(selectedModelValue(multiProviderSettingsFixture({
+      providerId: "yume-2",
+      modelId: "claude-sonnet-4.5",
+      activeProviderId: "provider-omo-kuro",
+    }), [])).toBe("");
   });
 
-  test("builds one settings object for yume-2 model selection and leaves unknown sidecars unchanged", () => {
+  test("switches provider and clears the old model before selecting from its verified catalog", () => {
     const settings = multiProviderSettingsFixture({
       activeProviderId: "provider-kuro",
       providerId: "yume",
       modelId: "gpt-5.4-mini",
     });
 
+    expect(settingsWithSelectedModel(settings, "yume-2/claude-sonnet-4.5")).toBe(settings);
+    const switched = settingsWithSelectedProvider(settings, "provider-omo-kuro");
+    expect(switched.activeProviderId).toBe("provider-omo-kuro");
+    expect(switched.providerId).toBe("");
+    expect(switched.modelId).toBe("");
+    expect(settingsWithSelectedProvider(switched, "provider-omo-kuro")).toBe(switched);
+    expect(settingsWithSelectedProvider(settings, "missing")).toBe(settings);
+
     const selected = settingsWithSelectedModel(
-      settings,
+      switched,
       "yume-2/claude-sonnet-4.5",
     );
     expect(selected.providerId).toBe("yume-2");
@@ -167,7 +191,20 @@ describe("ai provider model helpers", () => {
     expect(blank.modelId).toBe("");
     expect(blank.activeProviderId).toBe("provider-omo-kuro");
 
-    expect(settingsWithSelectedModel(settings, "unknown/model-x")).toBe(settings);
+    expect(settingsWithSelectedModel(switched, "unknown/model-x")).toBe(switched);
+  });
+
+  test("editing the active provider's API binding clears its previously selected model", () => {
+    const settings = multiProviderSettingsFixture();
+    const renamed = settingsWithUpdatedProvider(settings, "provider-kuro", { label: "Office" });
+    expect(renamed.providerId).toBe("yume");
+    expect(renamed.modelId).toBe("gpt-5.4-mini");
+
+    const changed = settingsWithUpdatedProvider(settings, "provider-kuro", {
+      baseUrl: "https://api.deepseek.com",
+    });
+    expect(changed.providerId).toBe("");
+    expect(changed.modelId).toBe("");
   });
 
   test("deletes with confirmation semantics while preserving the last provider", () => {

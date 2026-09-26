@@ -57,6 +57,14 @@ export interface CatalogLoadResult {
   readonly agentDetails?: AgentHistoryDetails;
   readonly originRunId?: string;
 }
+export interface CatalogPreview {
+  readonly key: string;
+  readonly status: "ready" | "empty" | "unavailable";
+  readonly text: string | null;
+  readonly role: "user" | "assistant" | null;
+  readonly time: number | null;
+  readonly localOnly: boolean;
+}
 export type CatalogMutation =
   | { readonly action: "rename"; readonly title: string }
   | { readonly action: "pin"; readonly pinned: boolean }
@@ -68,6 +76,10 @@ export function catalogList(query: CatalogQuery, refresh = false): Promise<Catal
 }
 export function catalogLoad(key: string): Promise<CatalogLoadResult> {
   return invoke<CatalogLoadResult>("history_catalog_load", { key });
+}
+
+export function catalogPreviews(keys: readonly string[]): Promise<CatalogPreview[]> {
+  return invoke<CatalogPreview[]>("history_catalog_previews", { keys });
 }
 export function catalogMutate(key: string, mutation: CatalogMutation): Promise<UnifiedHistoryRow | null> {
   return invoke<UnifiedHistoryRow | null>("history_catalog_mutate", { key, mutation });

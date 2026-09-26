@@ -25,6 +25,7 @@ import {
   type OpenCodeEvent,
 } from "../lib/opencode";
 import { broadcastMood, broadcastPetActivity } from "../lib/petState";
+import { recordCompletedAiUsage } from "../lib/localAiUsage";
 import { createChatPetActivity } from "./petActivity";
 import { DEFAULT_PERSONA_ID } from "../pet/personaCatalog";
 import {
@@ -860,6 +861,7 @@ export default function ChatApp() {
         if (info.sessionID === sessionRef.current) {
           rolesRef.current.set(info.id, info.role);
           petActivity.message(props.info);
+          void recordCompletedAiUsage(props.info).catch(() => {});
         }
         break;
       }

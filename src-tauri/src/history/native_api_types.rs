@@ -66,4 +66,3 @@ impl std::fmt::Display for NativeApiError {
 }
 
 impl std::error::Error for NativeApiError {}
-

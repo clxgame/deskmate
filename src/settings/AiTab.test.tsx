@@ -140,10 +140,18 @@ describe("AI settings tab extraction", () => {
     expect(screen.queryByDisplayValue(settings.apiKey)).toBeNull();
     await user.click(screen.getByRole("button", { name: "Kuro" }));
 
-    const orderedLabels = [
+    const providerCard = screen.getByRole("article", { name: "Kuro" });
+    const providerLabels = [
       t.baseUrl,
+      t.aiProviderManualModelIds,
       t.apiKey,
-      t.verify,
+      t.aiProviderVerify,
+    ];
+    const providerPositions = providerLabels.map((label) => textIndex(providerCard, label));
+    expect(providerPositions.every((position) => position >= 0)).toBe(true);
+    expect(providerPositions).toEqual([...providerPositions].sort((left, right) => left - right));
+
+    const orderedLabels = [
       t.model,
       t.ccSwitchStatusTitle,
       t.aiUsageTitle,
@@ -161,11 +169,17 @@ describe("AI settings tab extraction", () => {
 
   test("renders usage per provider and verifies the selected provider card", async () => {
     const user = userEvent.setup();
-    const settings = multiProviderSettingsFixture({
+    const configured = multiProviderSettingsFixture({
       activeProviderId: "provider-omo-kuro",
       baseUrl: "https://omo-kuro.example.test/v1",
       apiKey: "omo-configured-key",
     });
+    const settings = {
+      ...configured,
+      providers: configured.providers.map((provider) => provider.id === "provider-omo-kuro"
+        ? { ...provider, manualModelIds: "glm-4.7" }
+        : provider),
+    };
     const patch = mock<Patch>((_key, _value) => undefined);
     const replace = mock<ReplaceSettings>((_settings) => undefined);
 
@@ -203,6 +217,7 @@ describe("AI settings tab extraction", () => {
         providerId: "provider-omo-kuro",
         baseUrl: "https://omo-kuro.example.test/v1",
         apiKey: "omo-configured-key",
+        manualModelIds: "glm-4.7",
       });
     });
   });
@@ -286,6 +301,12 @@ describe("AI settings tab extraction", () => {
       modelId: "claude-sonnet-4.5",
       activeProviderId: "provider-omo-kuro",
     });
+
+    await user.type(
+      within(screen.getByRole("article", { name: "OMO Kuro" })).getByRole("textbox", { name: "Model IDs (optional) · OMO Kuro" }),
+      "new-model",
+    );
+    expect(screen.queryByRole("option", { name: "Claude Sonnet 4.5" })).toBeNull();
     expect(patch).not.toHaveBeenCalledWith("providerId", "yume-2");
     expect(patch).not.toHaveBeenCalledWith("modelId", "claude-sonnet-4.5");
     expect(patch).not.toHaveBeenCalledWith(

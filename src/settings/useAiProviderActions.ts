@@ -34,7 +34,14 @@ type ProviderActionsInput = {
 };
 
 function safeVerifyMessage(t: Dict, error: Error | string): string {
-  const code = error instanceof Error ? error.message : error;
+  const code = (error instanceof Error ? error.message : error).replace(/^Error:?\s*/i, "");
+  if (code.startsWith("model_probe_failed:")) {
+    return t.aiProviderManualVerifyFailed(code.slice("model_probe_failed:".length));
+  }
+  if (code === "manual_models_protocol") return t.aiProviderManualProtocol;
+  if (["invalid_manual_model", "too_many_manual_models"].includes(code)) {
+    return t.aiProviderManualInvalid;
+  }
   if (
     [
       "empty_key",
@@ -140,6 +147,7 @@ export function useAiProviderActions({
         provider.id,
         provider.baseUrl,
         provider.apiKey,
+        provider.manualModelIds,
       );
       if (!isCurrentOperation(requestId)) return;
       const refreshed = await refreshModels();
@@ -182,6 +190,7 @@ export function useAiProviderActions({
         provider.id,
         provider.baseUrl,
         provider.apiKey,
+        provider.manualModelIds,
       );
       if (!isCurrentOperation(requestId)) return;
       const refreshed = await refreshModels();

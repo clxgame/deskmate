@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { dict } from "../lib/i18n";
 import { beginStagingAttachment, reduceAttachmentState, type AttachmentLifecycleState } from "./attachmentState";
@@ -85,6 +85,26 @@ function failedConversion(): AttachmentLifecycleState {
 afterEach(cleanup);
 
 describe("AttachmentTray", () => {
+  test("shows a removable GIF thumbnail and falls back to file details on decode failure", () => {
+    const onRemove = mock(() => undefined);
+    const gif: AttachmentLifecycleState = {
+      kind: "ready", localId: "gif", operationToken: 1,
+      source: { id: "gif", name: "cat.gif", mime: "image/gif", size: 1024, kind: "ordinary",
+        previewDataUrl: "data:image/gif;base64,R0lGODlh" },
+    };
+    render(<AttachmentTray t={labels} items={[gif, readyMarkdown()]}
+      onCancel={() => {}} onConfirm={() => {}} onRetry={() => {}} onRemove={onRemove} />);
+    const image = screen.getByRole("img", { name: "cat.gif" });
+    expect(image.getAttribute("src")).toBe("data:image/gif;base64,R0lGODlh");
+    expect(screen.queryByRole("img", { name: "notes.md" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: `${labels.chatAttachmentRemove} cat.gif` }));
+    expect(onRemove).toHaveBeenCalledWith("gif");
+    fireEvent.error(image);
+    expect(screen.queryByRole("img", { name: "cat.gif" })).toBeNull();
+    expect(screen.getByText("cat.gif")).toBeDefined();
+    expect(screen.getByRole("button", { name: `${labels.chatAttachmentRemove} cat.gif` })).toBeDefined();
+  });
+
   test("renders staging, ready, failure, and NCM confirmation states accessibly", () => {
     const onConfirm = mock(() => undefined);
     const onCancel = mock(() => undefined);

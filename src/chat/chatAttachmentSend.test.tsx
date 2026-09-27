@@ -283,6 +283,10 @@ describe("native attachment picker", () => {
     fireEvent.click(plus);
     await screen.findByText("notes.md");
     await screen.findByText("second.txt");
+    const tray = screen.getByRole("region", { name: "附件" });
+    expect(tray.closest(".chat-input-wrap")).toBeNull();
+    expect(tray.parentElement).toBe(input.closest(".chat-input-row"));
+    expect(tray.nextElementSibling?.contains(input)).toBe(true);
     const staged = invoke.mock.calls.filter(([name]) => name === "stage_chat_attachment");
     expect(staged.map(([, args]) => (args as { request: { fileName: string } }).request.fileName)).toEqual(["notes.md", "second.txt"]);
     expect(staged[0]?.[1]).toMatchObject({ request: { bytes: Array.from(new TextEncoder().encode("# selected")) } });

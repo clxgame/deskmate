@@ -84,6 +84,7 @@ export function settingsWithAddedProvider(
         sidecarId: frontierSidecarId(settings.providers),
         label: "",
         baseUrl: "",
+        manualModelIds: "",
         apiKey: "",
       },
     ],
@@ -93,7 +94,7 @@ export function settingsWithAddedProvider(
 export function settingsWithUpdatedProvider(
   settings: Settings,
   providerId: string,
-  update: Partial<Pick<AiProvider, "label" | "baseUrl" | "apiKey">>,
+  update: Partial<Pick<AiProvider, "label" | "baseUrl" | "manualModelIds" | "apiKey">>,
 ): Settings {
   let changed = false;
   let selectedBindingChanged = false;
@@ -102,6 +103,7 @@ export function settingsWithUpdatedProvider(
     changed = true;
     selectedBindingChanged = provider.sidecarId === settings.providerId && (
       (update.baseUrl !== undefined && update.baseUrl !== provider.baseUrl) ||
+      (update.manualModelIds !== undefined && update.manualModelIds !== provider.manualModelIds) ||
       (update.apiKey !== undefined && update.apiKey !== provider.apiKey)
     );
     return { ...provider, ...update };

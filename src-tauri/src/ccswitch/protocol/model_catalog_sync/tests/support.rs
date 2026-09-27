@@ -128,6 +128,7 @@ pub(super) fn catalog(ids: &[&str]) -> ModelCatalog {
     ModelCatalog {
         base_url: ENDPOINT.to_owned(),
         api_key_fingerprint: "a".repeat(64),
+        manual_model_ids: None,
         models: ids
             .iter()
             .map(|id| ApiModel {

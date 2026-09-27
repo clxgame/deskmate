@@ -40,6 +40,28 @@ function Harness(props: { readonly host: AttachmentHost; readonly onArtifact?: (
 }
 
 describe("useChatAttachments staged controller", () => {
+  test("infers GIF previews from picker bytes, sends the original image and clears the preview after sending", async () => {
+    const host = createFakeHost();
+    render(createElement(Harness, { host }));
+    const bytes = "GIF89a-synthetic-image";
+    const dataUrl = `data:image/gif;base64,${btoa(bytes)}`;
+    await drive(() => getController().stageFromPicker([file("cat.GIF", bytes, "")]));
+    await waitFor(() => expect(host.stageRequests).toHaveLength(1));
+    await resolveStage(host, 0, "stage-gif", "image");
+    await waitFor(() => expect(getController().items[0]?.kind).toBe("ready"));
+    expect(getController().items[0]).toMatchObject({ source: { mime: "image/gif", previewDataUrl: dataUrl } });
+    expect(host.readRequests).toHaveLength(0);
+    host.readResponses.set("stage-gif", {
+      id: "stage-gif", sessionId: "ses-1", fileName: "cat.GIF", mime: "image/gif",
+      size: bytes.length, kind: "image", status: "ready", dataUrl,
+    });
+    expect((await getController().prepareModelAttachments("")).fileParts).toEqual([
+      { type: "file", filename: "cat.GIF", mime: "image/gif", url: dataUrl },
+    ]);
+    await drive(() => getController().discardSentSources(["local-1"]));
+    expect(getController().items).toEqual([]);
+  });
+
   test("stages picker drop and paste files through one backend path", async () => {
     const host = createFakeHost();
     render(createElement(Harness, { host }));

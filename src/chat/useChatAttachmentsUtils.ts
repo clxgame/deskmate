@@ -85,14 +85,27 @@ export async function planStageUpload(
 export function toStagedSource(
   attachment: StagedChatAttachment,
   sourceKind: StagedSourceKind,
+  bytes?: readonly number[],
 ): StagedSource {
+  const previewDataUrl = bytes && /^(image\/(gif|jpeg|png|webp))$/.test(attachment.mime)
+    ? imagePreviewDataUrl(attachment.mime, bytes)
+    : undefined;
   return {
     id: attachment.id,
     name: attachment.fileName,
     mime: attachment.mime,
     size: attachment.size,
     kind: sourceKind,
+    ...(previewDataUrl ? { previewDataUrl } : {}),
   };
+}
+
+function imagePreviewDataUrl(mime: string, bytes: readonly number[]): string {
+  const chunks: string[] = [];
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    chunks.push(String.fromCharCode(...bytes.slice(offset, offset + 0x8000)));
+  }
+  return `data:${mime};base64,${btoa(chunks.join(""))}`;
 }
 
 export function toGeneratedArtifact(

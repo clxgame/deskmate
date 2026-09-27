@@ -46,7 +46,8 @@ export function useChatAttachments(options: UseChatAttachmentsOptions): UseChatA
       dispatchItem(localId, { type: "stageFailed", operationToken: token, message: retry.plan.message });
       return;
     }
-    stageChatAttachment(retry.plan.request, host)
+    const request = retry.plan.request;
+    stageChatAttachment(request, host)
       .then((staged) => {
         const current = findItem(itemsRef.current, localId);
         if (current?.kind !== "staging" || current.operationToken !== token) {
@@ -57,7 +58,7 @@ export function useChatAttachments(options: UseChatAttachmentsOptions): UseChatA
         dispatchItem(localId, {
           type: "stageSucceeded",
           operationToken: token,
-          source: toStagedSource(staged, retry.sourceKind),
+          source: toStagedSource(staged, retry.sourceKind, request.bytes),
         });
       })
       .catch((error: unknown) => {

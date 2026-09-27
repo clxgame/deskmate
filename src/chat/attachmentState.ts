@@ -42,6 +42,8 @@ export type StagedSource = {
   readonly mime: string;
   readonly size: number;
   readonly kind: StagedSourceKind;
+  /** Local image preview only; model requests still read the staged source. */
+  readonly previewDataUrl?: string;
 };
 
 export type GeneratedArtifact = {

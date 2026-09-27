@@ -122,7 +122,7 @@ export function useAiTabController({
 
   const clearVerificationState = (providerId?: string, field?: ProviderField) => {
     actions.clearOperationState();
-    if (providerId && (field === "baseUrl" || field === "apiKey")) {
+    if (providerId && (field === "baseUrl" || field === "apiKey" || field === "manualModelIds")) {
       setInvalidProviderIds((current) => new Set(current).add(providerId));
     }
   };

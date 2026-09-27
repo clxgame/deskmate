@@ -10,7 +10,7 @@ use tauri::{Emitter, Manager};
 
 mod ai_endpoint;
 mod update_repo;
-use ai_endpoint::{migrated_ai_base_url, normalize_base_url, DEFAULT_AI_BASE_URL};
+use ai_endpoint::{api_protocol, migrated_ai_base_url, model_list_url, normalize_base_url, sidecar_base_url, ApiProtocol, DEFAULT_AI_BASE_URL};
 use update_repo::{migrated_update_repo, DEFAULT_UPDATE_REPO};
 
 const PET_SCALE_MIN: f64 = 0.1;
@@ -43,6 +43,9 @@ fn validate_provider_identifiers(settings: &Settings) -> Result<(), String> {
     let mut provider_ids = HashSet::new();
     let mut sidecar_ids = HashSet::new();
     for provider in &settings.providers {
+        if !provider.manual_model_ids.trim().is_empty() {
+            parse_manual_model_ids(&provider.manual_model_ids)?;
+        }
         if !provider_identifier_is_safe(&provider.id) {
             return Err("invalid_provider_id".into());
         }
@@ -119,6 +122,8 @@ pub struct AiProvider {
     pub sidecar_id: String,
     pub label: String,
     pub base_url: String,
+    /// Optional comma/newline-separated model IDs for providers without a models API.
+    pub manual_model_ids: String,
     /// In-memory only; `redacted_for_disk` clears it before persisting.
     pub api_key: String,
 }
@@ -130,6 +135,7 @@ impl Default for AiProvider {
             sidecar_id: "yume".into(),
             label: String::new(),
             base_url: DEFAULT_AI_BASE_URL.into(),
+            manual_model_ids: String::new(),
             api_key: String::new(),
         }
     }
@@ -306,6 +312,8 @@ pub(crate) struct ApiModel {
 pub(crate) struct ModelCatalog {
     pub(crate) base_url: String,
     pub(crate) api_key_fingerprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) manual_model_ids: Option<Vec<String>>,
     pub(crate) models: Vec<ApiModel>,
 }
 
@@ -337,7 +345,7 @@ pub(crate) fn verified_chat_models(app: &tauri::AppHandle, settings: &Settings) 
     let provider = settings.providers.iter()
         .find(|provider| provider.id == settings.active_provider_id)
         .ok_or("chat_model_provider_missing")?;
-    let catalog = load_verified_model_catalog_for_provider(app, &provider.id, &provider.base_url, &provider.api_key)
+    let catalog = load_verified_model_catalog_for_provider(app, &provider.id, &provider.base_url, &provider.api_key, &provider.manual_model_ids)
         .ok_or("chat_model_catalog_unverified")?;
     let models: Vec<ChatModelChoice> = catalog.models.into_iter().map(|model| ChatModelChoice {
         configured_provider_id: provider.id.clone(), sidecar_id: provider.sidecar_id.clone(),
@@ -707,6 +715,7 @@ fn migrate_legacy_key_and_catalog(
             sidecar_id,
             label: String::new(),
             base_url: settings.base_url.clone(),
+            manual_model_ids: String::new(),
             api_key: std::mem::take(&mut settings.api_key),
         });
         settings.active_provider_id = id.clone();
@@ -1561,10 +1570,18 @@ fn model_catalog_matches_verified_binding(
     catalog: &ModelCatalog,
     expected_base_url: &str,
     api_key: &str,
+    expected_manual_model_ids: &str,
 ) -> bool {
+    let expected_manual = if expected_manual_model_ids.trim().is_empty() {
+        None
+    } else {
+        let Ok(models) = parse_manual_model_ids(expected_manual_model_ids) else { return false };
+        Some(models.into_iter().map(|model| model.id).collect::<Vec<_>>())
+    };
     !catalog.models.is_empty()
         && catalog.base_url == normalize_base_url(expected_base_url)
         && catalog.api_key_fingerprint == api_key_fingerprint(api_key)
+        && catalog.manual_model_ids == expected_manual
 }
 
 pub(crate) fn load_verified_model_catalog_for_provider(
@@ -1572,9 +1589,10 @@ pub(crate) fn load_verified_model_catalog_for_provider(
     provider_id: &str,
     expected_base_url: &str,
     api_key: &str,
+    expected_manual_model_ids: &str,
 ) -> Option<ModelCatalog> {
     let catalog = load_model_catalog_for_provider(app, provider_id)?;
-    if model_catalog_matches_verified_binding(&catalog, expected_base_url, api_key) {
+    if model_catalog_matches_verified_binding(&catalog, expected_base_url, api_key, expected_manual_model_ids) {
         Some(catalog)
     } else {
         None
@@ -1624,7 +1642,7 @@ pub(crate) fn build_multi_provider_sidecar_environment(
             continue;
         }
         let Some(catalog) =
-            load_verified_model_catalog_for_provider(app, &provider.id, &provider.base_url, &key)
+            load_verified_model_catalog_for_provider(app, &provider.id, &provider.base_url, &key, &provider.manual_model_ids)
         else {
             continue;
         };
@@ -1682,6 +1700,13 @@ fn insert_verified_sidecar_provider(
     catalog: &ModelCatalog,
     api_key: &str,
 ) {
+    let npm = match api_protocol(&catalog.base_url) {
+        ApiProtocol::OpenAi => "@ai-sdk/openai",
+        ApiProtocol::Anthropic => "@ai-sdk/anthropic",
+        ApiProtocol::Gemini => "@ai-sdk/google",
+        ApiProtocol::Cohere => "@ai-sdk/cohere",
+        ApiProtocol::OpenAiCompatible => "@ai-sdk/openai-compatible",
+    };
     let models = catalog
         .models
         .iter()
@@ -1690,9 +1715,9 @@ fn insert_verified_sidecar_provider(
     providers.insert(
         sidecar_id.to_owned(),
         serde_json::json!({
-            "npm": "@ai-sdk/openai-compatible",
+            "npm": npm,
             "name": display_name,
-            "options": { "baseURL": catalog.base_url },
+            "options": { "baseURL": sidecar_base_url(&catalog.base_url) },
             "models": models,
         }),
     );
@@ -2023,12 +2048,13 @@ pub fn apply(app: &tauri::AppHandle, old: &Settings, new: &Settings) {
 fn parse_api_models(payload: &serde_json::Value) -> Result<Vec<ApiModel>, String> {
     let data = payload
         .get("data")
+        .or_else(|| payload.get("models"))
         .and_then(serde_json::Value::as_array)
         .ok_or_else(|| "invalid_response".to_string())?;
     let mut seen = std::collections::HashSet::new();
     let mut models = Vec::new();
     for item in data {
-        let Some(id) = ["id", "model", "slug"]
+        let Some(raw_id) = ["id", "model", "slug", "name"]
             .into_iter()
             .find_map(|key| item.get(key).and_then(serde_json::Value::as_str))
             .map(str::trim)
@@ -2036,11 +2062,34 @@ fn parse_api_models(payload: &serde_json::Value) -> Result<Vec<ApiModel>, String
         else {
             continue;
         };
+        if item
+            .get("supportedGenerationMethods")
+            .is_some_and(|methods| {
+                !methods
+                    .as_array()
+                    .is_some_and(|methods| methods.iter().any(|method| method == "generateContent"))
+            })
+        {
+            continue;
+        }
+        if item
+            .get("capabilities")
+            .and_then(|capabilities| capabilities.get("completion_chat"))
+            == Some(&serde_json::Value::Bool(false))
+        {
+            continue;
+        }
+        if item.get("is_deprecated") == Some(&serde_json::Value::Bool(true)) {
+            continue;
+        }
+        let id = raw_id.strip_prefix("models/").unwrap_or(raw_id);
         if !seen.insert(id.to_string()) {
             continue;
         }
         let name = item
-            .get("name")
+            .get("displayName")
+            .or_else(|| item.get("display_name"))
+            .or_else(|| item.get("name"))
             .and_then(serde_json::Value::as_str)
             .map(str::trim)
             .filter(|name| !name.is_empty())
@@ -2055,29 +2104,138 @@ fn parse_api_models(payload: &serde_json::Value) -> Result<Vec<ApiModel>, String
 }
 
 fn fetch_api_models(base_url: &str, api_key: &str) -> Result<Vec<ApiModel>, String> {
-    let base = base_url.trim().trim_end_matches('/');
-    if !base.starts_with("http://") && !base.starts_with("https://") {
-        return Err("bad_url".into());
+    let mut url = model_list_url(base_url)?;
+    let protocol = api_protocol(base_url);
+    if protocol == ApiProtocol::Anthropic {
+        url.query_pairs_mut().append_pair("limit", "1000");
+    } else if protocol == ApiProtocol::Gemini {
+        url.query_pairs_mut().append_pair("pageSize", "1000");
+    } else if protocol == ApiProtocol::Cohere {
+        url.query_pairs_mut().append_pair("page_size", "1000").append_pair("endpoint", "chat");
     }
-    let url = format!("{base}/v1/models");
-    let resp = ureq::get(&url)
-        .set("Authorization", &format!("Bearer {}", api_key.trim()))
-        .timeout(std::time::Duration::from_secs(10))
-        .call();
-    match resp {
-        Ok(r) => {
-            let payload = r
+    let mut models = Vec::new();
+    let mut seen = HashSet::new();
+    for _ in 0..20 {
+        let request = ureq::get(url.as_str())
+            .set("Accept", "application/json")
+            .timeout(std::time::Duration::from_secs(10));
+        let request = match protocol {
+            ApiProtocol::Anthropic => request
+                .set("x-api-key", api_key.trim())
+                .set("anthropic-version", "2023-06-01"),
+            ApiProtocol::Gemini => request.set("x-goog-api-key", api_key.trim()),
+            _ => request.set("Authorization", &format!("Bearer {}", api_key.trim())),
+        };
+        let payload = match request.call() {
+            Ok(response) => response
                 .into_json::<serde_json::Value>()
-                .map_err(|_| "invalid_response".to_string())?;
-            parse_api_models(&payload)
+                .map_err(|_| "invalid_response".to_string())?,
+            Err(ureq::Error::Status(code, _)) => {
+                return Err(match code {
+                    401 | 403 => "unauthorized".into(),
+                    404 => "not_found".into(),
+                    _ => format!("status:{code}"),
+                })
+            }
+            Err(error) => return Err(format!("network:{error}")),
+        };
+        for model in parse_api_models(&payload)? {
+            if seen.insert(model.id.clone()) {
+                models.push(model);
+            }
         }
-        Err(ureq::Error::Status(code, _)) => match code {
-            401 | 403 => Err("unauthorized".into()),
-            404 => Err("not_found".into()),
-            _ => Err(format!("status:{code}")),
-        },
-        Err(e) => Err(format!("network:{e}")),
+        let page = match protocol {
+            ApiProtocol::Anthropic
+                if payload.get("has_more") == Some(&serde_json::Value::Bool(true)) =>
+            {
+                Some((
+                    "after_id",
+                    payload
+                        .get("last_id")
+                        .and_then(serde_json::Value::as_str)
+                        .ok_or("invalid_response")?,
+                ))
+            }
+            ApiProtocol::Gemini => payload
+                .get("nextPageToken")
+                .and_then(serde_json::Value::as_str)
+                .map(|cursor| ("pageToken", cursor)),
+            ApiProtocol::Cohere => payload
+                .get("next_page_token")
+                .and_then(serde_json::Value::as_str)
+                .map(|cursor| ("page_token", cursor)),
+            _ => None,
+        };
+        let Some((parameter, cursor)) = page else {
+            return Ok(models);
+        };
+        if cursor.is_empty() {
+            return Err("invalid_response".into());
+        }
+        let mut query = url.query_pairs_mut();
+        query.clear();
+        let size_parameter = match protocol {
+            ApiProtocol::Anthropic => "limit",
+            ApiProtocol::Cohere => "page_size",
+            _ => "pageSize",
+        };
+        query.append_pair(size_parameter, "1000");
+        if protocol == ApiProtocol::Cohere {
+            query.append_pair("endpoint", "chat");
+        }
+        query.append_pair(parameter, cursor);
     }
+    Err("model_catalog_too_large".into())
+}
+
+fn parse_manual_model_ids(input: &str) -> Result<Vec<ApiModel>, String> {
+    let mut seen = HashSet::new();
+    let mut models = Vec::new();
+    for raw in input.split([',', '\n']) {
+        let id = raw.trim();
+        if id.is_empty() {
+            continue;
+        }
+        if id.len() > 128 || !id.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._:/-".contains(&byte)) {
+            return Err("invalid_manual_model".into());
+        }
+        if seen.insert(id.to_owned()) {
+            models.push(ApiModel { id: id.to_owned(), name: id.to_owned() });
+        }
+        if models.len() > 12 {
+            return Err("too_many_manual_models".into());
+        }
+    }
+    Ok(models)
+}
+
+fn probe_manual_models(base_url: &str, api_key: &str, models: &[ApiModel]) -> Result<(), String> {
+    if api_protocol(base_url) != ApiProtocol::OpenAiCompatible {
+        return Err("manual_models_protocol".into());
+    }
+    let mut url = model_list_url(base_url)?;
+    let prefix = url.path().strip_suffix("/models").ok_or("bad_url")?;
+    url.set_path(&format!("{prefix}/chat/completions"));
+    for model in models {
+        let response = ureq::post(url.as_str())
+            .set("Accept", "application/json")
+            .set("Authorization", &format!("Bearer {}", api_key.trim()))
+            .timeout(std::time::Duration::from_secs(12))
+            .send_json(serde_json::json!({
+                "model": model.id,
+                "messages": [{ "role": "user", "content": "Hi" }],
+                "max_tokens": 16,
+                "stream": false,
+            }));
+        let payload: serde_json::Value = response
+            .map_err(|_| format!("model_probe_failed:{}", model.id))?
+            .into_json()
+            .map_err(|_| format!("model_probe_failed:{}", model.id))?;
+        if !payload.get("choices").and_then(serde_json::Value::as_array).is_some_and(|choices| !choices.is_empty()) {
+            return Err(format!("model_probe_failed:{}", model.id));
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -2087,6 +2245,7 @@ pub fn verify_api_key(
     provider_id: Option<String>,
     base_url: String,
     api_key: String,
+    manual_model_ids: Option<String>,
 ) -> Result<Option<usize>, String> {
     if api_key.trim().is_empty() {
         return Err("empty_key".into());
@@ -2100,7 +2259,14 @@ pub fn verify_api_key(
     };
     let base = normalize_base_url(&base_url);
     let key = api_key.trim().to_owned();
-    let models = fetch_api_models(&base, &key)?;
+    let manual = manual_model_ids.unwrap_or_default();
+    let models = if manual.trim().is_empty() {
+        fetch_api_models(&base, &key)?
+    } else {
+        let models = parse_manual_model_ids(&manual)?;
+        probe_manual_models(&base, &key, &models)?;
+        models
+    };
     if models.is_empty() {
         return Err("no_models".into());
     }
@@ -2113,10 +2279,14 @@ pub fn verify_api_key(
         let catalog = ModelCatalog {
             base_url: base.clone(),
             api_key_fingerprint: api_key_fingerprint(&key),
+            manual_model_ids: if manual.trim().is_empty() { None } else { Some(models.iter().map(|model| model.id.clone()).collect()) },
             models: models.clone(),
         };
         let mut next = current.clone();
         reconcile_verified_settings_binding(&mut next, &provider_id, &base, &key);
+        if let Some(provider) = next.providers.iter_mut().find(|provider| provider.id == provider_id) {
+            provider.manual_model_ids = manual.clone();
+        }
         persist_verified_settings(
             &AppSettingsTransactionOps { app: &app },
             &VerifiedSettingsWrite {
@@ -2236,7 +2406,7 @@ mod tests {
         finalize_sidecar_environment, hydrate_provider_api_keys, insert_verified_sidecar_provider,
         migrate_legacy_api_key_to_provider_after_persisted, migrate_legacy_model_catalog_in_dir,
         model_catalog_matches_verified_binding, normalize_pet_scale, normalize_render_value,
-        normalize_theme, parse_api_models, persist_settings_update, persist_verified_settings,
+        normalize_theme, parse_api_models, parse_manual_model_ids, persist_settings_update, persist_verified_settings,
         provider_model_catalog_relative_path, providers_requiring_catalog_clear,
         reconcile_verified_settings_binding, redacted_for_disk, resolve_verify_provider_id,
         saved_api_key, store_api_key, validate_provider_identifiers, AiProvider, ApiModel,
@@ -2563,6 +2733,7 @@ mod tests {
                 sidecar_id: "yume".into(),
                 label: "Test".into(),
                 base_url: base_url.into(),
+                manual_model_ids: String::new(),
                 api_key: api_key.into(),
             }],
             active_provider_id: "provider-under-test".into(),
@@ -2613,10 +2784,101 @@ mod tests {
     }
 
     #[test]
+    fn parses_gemini_generation_models_and_skips_embedding_only_models() {
+        let payload = serde_json::json!({
+            "models": [
+                { "name": "models/gemini-2.5-pro", "displayName": "Gemini 2.5 Pro", "supportedGenerationMethods": ["generateContent"] },
+                { "name": "models/text-embedding-004", "supportedGenerationMethods": ["embedContent"] }
+            ]
+        });
+        let models = parse_api_models(&payload).unwrap();
+        assert_eq!(
+            models,
+            vec![ApiModel {
+                id: "gemini-2.5-pro".into(),
+                name: "Gemini 2.5 Pro".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn parses_cohere_chat_models_and_skips_deprecated_models() {
+        let payload = serde_json::json!({
+            "models": [
+                { "name": "command-a", "endpoints": ["chat"], "is_deprecated": false },
+                { "name": "command-old", "endpoints": ["chat"], "is_deprecated": true }
+            ]
+        });
+        assert_eq!(parse_api_models(&payload).unwrap(), vec![ApiModel { id: "command-a".into(), name: "command-a".into() }]);
+    }
+
+    #[test]
+    fn manual_model_ids_are_bounded_and_deduplicated_before_probing() {
+        let models = parse_manual_model_ids("glm-4.7, kimi-k2.5\nglm-4.7").unwrap();
+        assert_eq!(models.iter().map(|model| model.id.as_str()).collect::<Vec<_>>(), ["glm-4.7", "kimi-k2.5"]);
+        assert!(parse_manual_model_ids("bad model").is_err());
+        assert!(parse_manual_model_ids(&(0..13).map(|index| format!("model-{index}")).collect::<Vec<_>>().join(",")).is_err());
+    }
+
+    #[test]
+    fn older_provider_settings_default_to_model_discovery() {
+        let provider: AiProvider = serde_json::from_value(serde_json::json!({
+            "id": "legacy", "sidecarId": "yume", "label": "Legacy",
+            "baseUrl": "https://api.deepseek.com", "apiKey": ""
+        })).unwrap();
+        assert!(provider.manual_model_ids.is_empty());
+    }
+
+    #[test]
+    fn official_providers_use_native_sidecar_packages() {
+        for (base_url, npm, sidecar_base) in [
+            (
+                "https://api.openai.com",
+                "@ai-sdk/openai",
+                "https://api.openai.com/v1",
+            ),
+            (
+                "https://api.anthropic.com",
+                "@ai-sdk/anthropic",
+                "https://api.anthropic.com/v1",
+            ),
+            (
+                "https://generativelanguage.googleapis.com",
+                "@ai-sdk/google",
+                "https://generativelanguage.googleapis.com/v1beta",
+            ),
+            (
+                "https://api.moonshot.ai/v1",
+                "@ai-sdk/openai-compatible",
+                "https://api.moonshot.ai/v1",
+            ),
+            ("https://api.cohere.com", "@ai-sdk/cohere", "https://api.cohere.com/v2"),
+        ] {
+            let catalog = ModelCatalog {
+                base_url: base_url.into(),
+                api_key_fingerprint: api_key_fingerprint("secret-key"),
+                manual_model_ids: None,
+                models: vec![ApiModel {
+                    id: "test-model".into(),
+                    name: "Test model".into(),
+                }],
+            };
+            let (config, _) = single_provider_sidecar_environment(&catalog, "secret-key").unwrap();
+            let config: serde_json::Value = serde_json::from_str(&config).unwrap();
+            assert_eq!(config["provider"]["yume"]["npm"], npm);
+            assert_eq!(
+                config["provider"]["yume"]["options"]["baseURL"],
+                sidecar_base
+            );
+        }
+    }
+
+    #[test]
     fn generated_sidecar_environment_declares_the_yume_provider() {
         let catalog = ModelCatalog {
             base_url: "https://models.example.test".into(),
             api_key_fingerprint: api_key_fingerprint("secret-key"),
+            manual_model_ids: None,
             models: vec![ApiModel {
                 id: "model-a".into(),
                 name: "Model A".into(),
@@ -2646,6 +2908,7 @@ mod tests {
         let catalog = ModelCatalog {
             base_url: "https://models.example.test".into(),
             api_key_fingerprint: api_key_fingerprint("secret-key"),
+            manual_model_ids: None,
             models: vec![ApiModel {
                 id: "model-a".into(),
                 name: "Model A".into(),
@@ -2682,6 +2945,7 @@ mod tests {
         let catalog = ModelCatalog {
             base_url: "https://models.example.test/v1".into(),
             api_key_fingerprint: api_key_fingerprint("secret-key"),
+            manual_model_ids: None,
             models: vec![ApiModel {
                 id: "model-a".into(),
                 name: "Model A".into(),
@@ -2691,18 +2955,29 @@ mod tests {
         assert!(model_catalog_matches_verified_binding(
             &catalog,
             " https://models.example.test/v1/ ",
-            " secret-key "
+            " secret-key ",
+            ""
         ));
         assert!(!model_catalog_matches_verified_binding(
             &catalog,
             "https://models.example.test/v2",
-            "secret-key"
+            "secret-key",
+            ""
         ));
         assert!(!model_catalog_matches_verified_binding(
             &catalog,
             "https://models.example.test/v1",
-            "changed-key"
+            "changed-key",
+            ""
         ));
+
+        let manual_catalog = ModelCatalog {
+            manual_model_ids: Some(vec!["model-a".into()]),
+            ..catalog.clone()
+        };
+        assert!(model_catalog_matches_verified_binding(&manual_catalog, "https://models.example.test/v1", "secret-key", "model-a"));
+        assert!(!model_catalog_matches_verified_binding(&manual_catalog, "https://models.example.test/v1", "secret-key", "model-b"));
+        assert!(!model_catalog_matches_verified_binding(&manual_catalog, "https://models.example.test/v1", "secret-key", ""));
 
         let empty_catalog = ModelCatalog {
             models: Vec::new(),
@@ -2711,7 +2986,8 @@ mod tests {
         assert!(!model_catalog_matches_verified_binding(
             &empty_catalog,
             "https://models.example.test/v1",
-            "secret-key"
+            "secret-key",
+            ""
         ));
     }
 
@@ -2906,6 +3182,7 @@ mod tests {
                     sidecar_id: "yume".into(),
                     label: String::new(),
                     base_url: "https://a.example.test".into(),
+                    manual_model_ids: String::new(),
                     api_key: String::new(),
                 },
                 AiProvider {
@@ -2913,6 +3190,7 @@ mod tests {
                     sidecar_id: "yume-2".into(),
                     label: String::new(),
                     base_url: "https://b.example.test".into(),
+                    manual_model_ids: String::new(),
                     api_key: String::new(),
                 },
             ],
@@ -2939,6 +3217,7 @@ mod tests {
                     sidecar_id: "yume".into(),
                     label: String::new(),
                     base_url: "https://a.example.test/v1".into(),
+                    manual_model_ids: String::new(),
                     api_key: "old-key".into(),
                 },
                 AiProvider {
@@ -2946,6 +3225,7 @@ mod tests {
                     sidecar_id: "yume-2".into(),
                     label: String::new(),
                     base_url: "https://b.example.test/v1".into(),
+                    manual_model_ids: String::new(),
                     api_key: "stable-key".into(),
                 },
             ],
@@ -2972,6 +3252,7 @@ mod tests {
         let catalog = ModelCatalog {
             base_url: "https://models.example.test/v1".into(),
             api_key_fingerprint: api_key_fingerprint("secret-key"),
+            manual_model_ids: None,
             models: vec![ApiModel {
                 id: "model-a".into(),
                 name: "Model A".into(),
@@ -3007,6 +3288,7 @@ mod tests {
         let catalog = ModelCatalog {
             base_url: "https://models.example.test/v1".into(),
             api_key_fingerprint: api_key_fingerprint("secret-key"),
+            manual_model_ids: None,
             models: vec![ApiModel {
                 id: "model-a".into(),
                 name: "Model A".into(),
@@ -3041,6 +3323,7 @@ mod tests {
         let legacy_catalog = ModelCatalog {
             base_url: "https://legacy.example.test/v1".into(),
             api_key_fingerprint: api_key_fingerprint("legacy-key"),
+            manual_model_ids: None,
             models: vec![ApiModel {
                 id: "legacy-model".into(),
                 name: "Legacy Model".into(),
@@ -3049,6 +3332,7 @@ mod tests {
         let provider_catalog = ModelCatalog {
             base_url: "https://provider.example.test/v1".into(),
             api_key_fingerprint: api_key_fingerprint("provider-key"),
+            manual_model_ids: None,
             models: vec![ApiModel {
                 id: "provider-model".into(),
                 name: "Provider Model".into(),
@@ -3108,6 +3392,7 @@ mod tests {
             sidecar_id: "yume-2".into(),
             label: "Provider B".into(),
             base_url: "https://b.example.test".into(),
+            manual_model_ids: String::new(),
             api_key: "old-key-b".into(),
         });
         let mut new = old.clone();
@@ -3176,6 +3461,7 @@ mod tests {
         let catalog = ModelCatalog {
             base_url: "https://verified.example.test".into(),
             api_key_fingerprint: api_key_fingerprint("verified-key"),
+            manual_model_ids: None,
             models: vec![ApiModel {
                 id: "model-a".into(),
                 name: "Model A".into(),
@@ -3232,6 +3518,7 @@ mod tests {
                 sidecar_id: "yume".into(),
                 label: String::new(),
                 base_url: "https://models.example.test".into(),
+                manual_model_ids: String::new(),
                 api_key: String::new(),
             }],
             active_provider_id: "provider-a".into(),
@@ -3441,6 +3728,7 @@ mod tests {
                 sidecar_id: "yume".into(),
                 label: String::new(),
                 base_url: "https://models.example.test/v1/".into(),
+                manual_model_ids: String::new(),
                 api_key: " stale-key ".into(),
             }],
             active_provider_id: provider_id.into(),
@@ -3511,6 +3799,7 @@ mod tests {
                 sidecar_id: "yume".into(),
                 label: "Test".into(),
                 base_url: "https://models.example.test".into(),
+                manual_model_ids: String::new(),
                 api_key: "provider-secret-key".into(),
             }],
             ..Settings::default()

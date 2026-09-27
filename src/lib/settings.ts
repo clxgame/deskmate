@@ -23,6 +23,7 @@ export interface AiProvider {
   readonly sidecarId: string;
   readonly label: string;
   readonly baseUrl: string;
+  readonly manualModelIds?: string;
   readonly apiKey: string;
 }
 
@@ -92,8 +93,12 @@ export function verifyApiKey(
   providerId: string,
   baseUrl: string,
   apiKey: string,
+  manualModelIds?: string,
 ): Promise<number | null> {
-  return invoke<number | null>("verify_api_key", { providerId, baseUrl, apiKey });
+  return invoke<number | null>("verify_api_key", {
+    providerId, baseUrl, apiKey,
+    ...(manualModelIds === undefined ? {} : { manualModelIds }),
+  });
 }
 
 export interface AiUsageModel {
@@ -122,7 +127,22 @@ export interface DeepSeekAiUsage {
   readonly topModels: readonly { readonly name: string; readonly tokens: number; readonly requests: number }[];
 }
 
-export type AiUsage = GatewayAiUsage | DeepSeekAiUsage;
+export interface LocalAiUsage {
+  readonly kind: "local";
+  readonly localAvailable: boolean;
+  readonly todayTokens: number;
+  readonly todayRequests: number;
+  readonly topModels: readonly { readonly name: string; readonly tokens: number; readonly requests: number }[];
+}
+
+export interface OpenRouterAiUsage extends Omit<LocalAiUsage, "kind"> {
+  readonly kind: "openrouter";
+  readonly limitUsd: number | null;
+  readonly remainingUsd: number | null;
+  readonly todayCostUsd: number;
+}
+
+export type AiUsage = GatewayAiUsage | DeepSeekAiUsage | OpenRouterAiUsage | LocalAiUsage;
 
 export function getAiUsage(providerId: string): Promise<AiUsage> {
   return invoke<AiUsage>("fetch_ai_usage", { providerId });

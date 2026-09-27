@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Dict } from "../lib/i18n";
 import { formatAttachmentSize } from "./attachments";
 import type { AttachmentLifecycleState } from "./attachmentState";
@@ -39,7 +40,7 @@ export function AttachmentTrayItem({
       );
     case "ready":
       return (
-        <AttachmentChip
+        <ReadyAttachment
           label={t.chatAttachmentReady}
           localId={item.localId}
           name={item.source.name}
@@ -47,6 +48,7 @@ export function AttachmentTrayItem({
           tone="ready"
           t={t}
           onRemove={onRemove}
+          previewDataUrl={item.source.previewDataUrl}
         />
       );
     case "awaiting-confirmation":
@@ -96,6 +98,25 @@ type AttachmentChipProps = {
   readonly tone: "ready" | "staging" | "failed";
   readonly onRemove: (localId: string) => void;
 };
+
+function ReadyAttachment({ previewDataUrl, ...props }: AttachmentChipProps & {
+  readonly previewDataUrl?: string;
+}) {
+  const [failedPreview, setFailedPreview] = useState<string | null>(null);
+  if (!previewDataUrl || failedPreview === previewDataUrl) return <AttachmentChip {...props} />;
+  const { name, size, label, t, localId, onRemove } = props;
+  return (
+    <div className="chat-attachment-thumbnail" title={`${name} · ${formatAttachmentSize(size)} · ${label}`}>
+      <img src={previewDataUrl} alt={name} onError={() => setFailedPreview(previewDataUrl)} />
+      <span className="chat-attachment-name">{name}</span>
+      <button className="chat-attachment-action chat-attachment-thumbnail-remove" type="button"
+        aria-label={`${t.chatAttachmentRemove} ${name}`} title={t.chatAttachmentRemove}
+        onClick={() => onRemove(localId)}>
+        <span aria-hidden="true">×</span>
+      </button>
+    </div>
+  );
+}
 
 function AttachmentChip({
   t,

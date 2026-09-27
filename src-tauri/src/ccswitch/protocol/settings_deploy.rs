@@ -39,6 +39,7 @@ pub(crate) fn prepare_automatic_deployment(
         &provider.id,
         &provider.base_url,
         &api_key,
+        &provider.manual_model_ids,
     )
     .ok_or_else(|| fixed_error("ccswitch_verified_model_catalog_missing"))?;
     let chosen_model = if requested_model.trim().is_empty() {

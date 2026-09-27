@@ -150,6 +150,7 @@ pub fn prepare_ccswitch_opencode_provider_from_settings(
         })?;
     let provider_id = provider.id.clone();
     let base_url = provider.base_url.clone();
+    let manual_model_ids = provider.manual_model_ids.clone();
     let in_memory_key = provider.api_key.clone();
     drop(settings);
     let api_key = if in_memory_key.trim().is_empty() {
@@ -168,6 +169,7 @@ pub fn prepare_ccswitch_opencode_provider_from_settings(
         &provider_id,
         &base_url,
         &api_key,
+        &manual_model_ids,
     )
     .ok_or_else(missing_verified_catalog_error)?;
     let source = SettingsProviderSource {

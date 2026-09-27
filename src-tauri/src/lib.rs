@@ -480,6 +480,7 @@ mod tests {
             sidecar_id: "yume".into(),
             display_name: "YUME".into(),
             catalog: ModelCatalog {
+                manual_model_ids: None,
                 base_url: "https://models.example.test".into(),
                 api_key_fingerprint:
                     "4c806362b613f7496abf284146efd31da90e4b16169fe001841ca17290f427c4".into(),

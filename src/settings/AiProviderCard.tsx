@@ -4,7 +4,7 @@ import type { LocalAiDeploymentStatus } from "./CcSwitchStatus";
 import { displayProviderLabel } from "./aiProviderModel";
 import type { ProviderVerifyResult } from "./useAiProviderActions";
 
-export type ProviderField = "label" | "baseUrl" | "apiKey";
+export type ProviderField = "label" | "baseUrl" | "manualModelIds" | "apiKey";
 
 type AiProviderCardProps = {
   readonly provider: AiProvider;
@@ -94,6 +94,7 @@ function ProviderBody({
   const fields = [
     { key: "label", label: t.aiProviderLabel, type: "text" },
     { key: "baseUrl", label: t.aiProviderBaseUrl, type: "text" },
+    { key: "manualModelIds", label: t.aiProviderManualModelIds, type: "text" },
     { key: "apiKey", label: t.aiProviderApiKey, type: "password" },
   ] as const;
   return (
@@ -104,13 +105,15 @@ function ProviderBody({
           <input
             className={`set-input${field.key === "baseUrl" ? " set-ai-base-url" : ""}`}
             type={field.type}
-            value={provider[field.key]}
+            value={provider[field.key] ?? ""}
+            maxLength={field.key === "manualModelIds" ? 2048 : undefined}
             aria-label={`${field.label} · ${label}`}
             disabled={operationLocked}
             onChange={(event) => onFieldChange(field.key, event.target.value)}
           />
         </label>
       ))}
+      <p className="set-note">{t.aiProviderManualModelHint}</p>
       <div className="set-ai-provider-actions">
         <button
           className="set-btn set-verify"

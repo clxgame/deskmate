@@ -234,6 +234,7 @@ pub(crate) fn expand_deployed_provider_catalog(
         &provider.id,
         &provider.base_url,
         &api_key,
+        &provider.manual_model_ids,
     )
     .ok_or_else(|| sync_error("local_ai_model_catalog_missing"))?;
     let paths = super::recovery_manager(app)?;

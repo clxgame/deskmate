@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getAiUsage, type AiUsage as AiUsageData, type DeepSeekAiUsage, type GatewayAiUsage } from "../lib/settings";
+import { getAiUsage, type AiUsage as AiUsageData, type DeepSeekAiUsage, type GatewayAiUsage, type LocalAiUsage, type OpenRouterAiUsage } from "../lib/settings";
 import type { Dict } from "../lib/i18n";
 import { invoke } from "@tauri-apps/api/core";
 import "./ai-usage.css";
@@ -95,6 +95,10 @@ export function AiUsage({ enabled, providerId, label, index, t }: AiUsageProps) 
       {view.kind === "ready" ? (
         "kind" in view.usage && view.usage.kind === "deepseek"
           ? <DeepSeekSummary usage={view.usage} t={t} />
+          : "kind" in view.usage && view.usage.kind === "openrouter"
+            ? <OpenRouterSummary usage={view.usage} t={t} />
+          : "kind" in view.usage && view.usage.kind === "local"
+            ? <LocalSummary usage={view.usage} t={t} />
           : <UsageSummary usage={view.usage as GatewayAiUsage} t={t} />
       ) : (
         <p className="set-ai-usage-status" role="status">
@@ -195,6 +199,48 @@ function DeepSeekSummary({ usage, t }: { readonly usage: DeepSeekAiUsage; readon
           {t.aiUsagePlatformDetails}
         </a>
       </div>
+      <LocalUsageRows usage={usage} t={t} />
+    </div>
+  );
+}
+
+function LocalSummary({ usage, t }: { readonly usage: LocalAiUsage; readonly t: Dict }) {
+  return (
+    <div className="set-ai-usage-card">
+      <div className="set-ai-usage-row">
+        <span>{t.aiUsageAccountBalance}</span>
+        <strong>—</strong>
+      </div>
+      <div className="set-ai-usage-row set-ai-usage-meta">
+        <span>{t.aiUsageAccountUnavailable}</span>
+      </div>
+      <LocalUsageRows usage={usage} t={t} />
+    </div>
+  );
+}
+
+function OpenRouterSummary({ usage, t }: { readonly usage: OpenRouterAiUsage; readonly t: Dict }) {
+  return (
+    <div className="set-ai-usage-card">
+      <div className="set-ai-usage-row">
+        <span>{t.aiUsageKeyRemaining}</span>
+        <strong>{usage.remainingUsd === null ? "—" : `$${usage.remainingUsd.toFixed(2)}`}</strong>
+      </div>
+      <div className="set-ai-usage-row set-ai-usage-meta">
+        <span>{usage.limitUsd === null ? t.aiUsageNoKeyLimit : t.aiUsageKeyLimit(usage.limitUsd)}</span>
+      </div>
+      <div className="set-ai-usage-row set-ai-usage-today">
+        <span>{t.aiUsagePlatformToday}</span>
+        <strong>${usage.todayCostUsd.toFixed(2)}</strong>
+      </div>
+      <LocalUsageRows usage={usage} t={t} />
+    </div>
+  );
+}
+
+function LocalUsageRows({ usage, t }: { readonly usage: LocalAiUsage | DeepSeekAiUsage | OpenRouterAiUsage; readonly t: Dict }) {
+  return (
+    <>
       <div className="set-ai-usage-row set-ai-usage-today">
         <span>{t.aiUsageYumeToday}</span>
         <strong>{usage.localAvailable
@@ -215,6 +261,6 @@ function DeepSeekSummary({ usage, t }: { readonly usage: DeepSeekAiUsage; readon
           ))}
         </div>
       )}
-    </div>
+    </>
   );
 }

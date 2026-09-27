@@ -100,6 +100,7 @@ fn missing_verified_catalog_is_rejected_without_touching_the_file() {
     let empty = ModelCatalog {
         base_url: ENDPOINT.to_owned(),
         api_key_fingerprint: "a".repeat(64),
+        manual_model_ids: None,
         models: Vec::new(),
     };
     let error = expand(&home, &empty).expect_err("empty catalog");

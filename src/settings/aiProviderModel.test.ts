@@ -116,6 +116,7 @@ describe("ai provider model helpers", () => {
       sidecarId: "yume-3",
       label: "",
       baseUrl: "",
+      manualModelIds: "",
       apiKey: "",
     });
     expect(added.activeProviderId).toBe("provider-new");
@@ -126,6 +127,7 @@ describe("ai provider model helpers", () => {
     const edited = settingsWithUpdatedProvider(added, "provider-new", {
       label: "Frontier",
       baseUrl: "https://frontier.example.test/v1",
+      manualModelIds: "model-x",
       apiKey: "frontier-key",
     });
     expect(edited.providers[2]).toEqual({
@@ -133,6 +135,7 @@ describe("ai provider model helpers", () => {
       sidecarId: "yume-3",
       label: "Frontier",
       baseUrl: "https://frontier.example.test/v1",
+      manualModelIds: "model-x",
       apiKey: "frontier-key",
     });
     expect(edited.providers[0]).toBe(settings.providers[0]);

@@ -2035,7 +2035,6 @@ export default function ChatApp() {
             <>
               <ToolApprovalCards requests={permissions.requests} error={permissions.error} onReply={permissions.reply} t={t} />
               <footer className="chat-input-row">
-            <div className="chat-input-wrap">
               <AttachmentTray
                 t={t}
                 items={chatAttachments.items}
@@ -2045,6 +2044,7 @@ export default function ChatApp() {
                 onRemove={chatAttachments.remove}
                 onRetry={chatAttachments.retry}
               />
+            <div className="chat-input-wrap">
               <div className="chat-textarea-wrap">
                 <textarea
                   className="chat-input"

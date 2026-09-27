@@ -49,6 +49,39 @@ describe("AI usage", () => {
     expect(await screen.findByText("DeepSeek API Key 无效，请重新验证")).toBeDefined();
   });
 
+  test("shows local usage for providers without an account usage API", async () => {
+    invoke.mockImplementation(() => Promise.resolve({
+      kind: "local",
+      localAvailable: true,
+      todayTokens: 640,
+      todayRequests: 1,
+      topModels: [{ name: "claude-sonnet", tokens: 640, requests: 1 }],
+    }));
+    render(<AiUsage enabled providerId="provider-claude" label="Claude" index={0} t={t} />);
+    expect(await screen.findByText("当前 API Key 未接入账户用量查询")).toBeDefined();
+    expect(screen.getAllByText("640 tokens · 1 次")).toHaveLength(2);
+    expect(screen.getByText("claude-sonnet")).toBeDefined();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
+  test("shows OpenRouter key spending with local tokens in the same card", async () => {
+    invoke.mockImplementation(() => Promise.resolve({
+      kind: "openrouter",
+      limitUsd: 100,
+      remainingUsd: 74.5,
+      todayCostUsd: 1.25,
+      localAvailable: true,
+      todayTokens: 300,
+      todayRequests: 2,
+      topModels: [],
+    }));
+    render(<AiUsage enabled providerId="provider-openrouter" label="OpenRouter" index={0} t={t} />);
+    expect(await screen.findByText("$74.50")).toBeDefined();
+    expect(screen.getByText("平台今日费用")).toBeDefined();
+    expect(screen.getByText("$1.25")).toBeDefined();
+    expect(screen.getByText("300 tokens · 2 次")).toBeDefined();
+  });
+
   test("shows the Kuro weekly summary below the AI settings", async () => {
     invoke.mockImplementation(() =>
       Promise.resolve({

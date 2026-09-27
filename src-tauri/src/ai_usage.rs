@@ -54,6 +54,31 @@ pub struct GatewayUsage {
 pub enum AiUsage {
     Gateway(GatewayUsage),
     DeepSeek(DeepSeekUsage),
+    OpenRouter(OpenRouterUsage),
+    Local(LocalUsage),
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenRouterUsage {
+    kind: &'static str,
+    limit_usd: Option<f64>,
+    remaining_usd: Option<f64>,
+    today_cost_usd: f64,
+    local_available: bool,
+    today_tokens: u64,
+    today_requests: u64,
+    top_models: Vec<local::LocalUsageModel>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalUsage {
+    kind: &'static str,
+    local_available: bool,
+    today_tokens: u64,
+    today_requests: u64,
+    top_models: Vec<local::LocalUsageModel>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -91,6 +116,52 @@ fn is_deepseek_base_url(base_url: &str) -> bool {
             && url.username().is_empty()
             && url.password().is_none()
     })
+}
+
+fn is_kuro_base_url(base_url: &str) -> bool {
+    Url::parse(base_url.trim()).is_ok_and(|url| {
+        url.scheme() == "https"
+            && url.host_str() == Some("ai-gateway.kurogames.com")
+            && url.port_or_known_default() == Some(443)
+            && matches!(url.path().trim_end_matches('/'), "" | "/v1")
+            && url.username().is_empty()
+            && url.password().is_none()
+    })
+}
+
+fn is_openrouter_base_url(base_url: &str) -> bool {
+    Url::parse(base_url.trim()).is_ok_and(|url| {
+        url.scheme() == "https"
+            && url.host_str() == Some("openrouter.ai")
+            && url.port_or_known_default() == Some(443)
+            && url.path().trim_end_matches('/') == "/api/v1"
+            && url.username().is_empty()
+            && url.password().is_none()
+    })
+}
+
+fn parse_openrouter_key_usage(payload: &serde_json::Value) -> Result<(Option<f64>, Option<f64>, f64), String> {
+    let data = payload.get("data").ok_or("invalid_response")?;
+    let number = |name: &str| -> Result<Option<f64>, String> {
+        match data.get(name) {
+            None | Some(serde_json::Value::Null) => Ok(None),
+            Some(value) => value.as_f64().filter(|amount| amount.is_finite() && *amount >= 0.0).map(Some).ok_or_else(|| "invalid_response".into()),
+        }
+    };
+    let today = number("usage_daily")?.ok_or("invalid_response")?;
+    Ok((number("limit")?, number("limit_remaining")?, today))
+}
+
+fn fetch_openrouter_key_usage(api_key: &str) -> Result<(Option<f64>, Option<f64>, f64), String> {
+    let response = ureq::get("https://openrouter.ai/api/v1/key")
+        .set("Accept", "application/json")
+        .set("Authorization", &format!("Bearer {api_key}"))
+        .set("User-Agent", concat!("YUME/", env!("CARGO_PKG_VERSION")))
+        .timeout(FETCH_TIMEOUT)
+        .call()
+        .map_err(|error| format!("openrouter:{error}"))?;
+    let payload: serde_json::Value = response.into_json().map_err(|_| "invalid_response")?;
+    parse_openrouter_key_usage(&payload)
 }
 
 fn parse_deepseek_balance(payload: serde_json::Value) -> Result<DeepSeekBalanceResponse, String> {
@@ -280,6 +351,7 @@ pub async fn fetch_ai_usage(
         &provider.id,
         &provider.base_url,
         &saved_key,
+        &provider.manual_model_ids,
     );
     let (base_url, api_key) = verified_usage_target(catalog, &saved_key)?;
     let app_data_dir = app
@@ -288,22 +360,68 @@ pub async fn fetch_ai_usage(
         .map_err(|_| "usage_storage_unavailable")?;
     let provider_id = provider.id;
     tauri::async_runtime::spawn_blocking(move || {
+        let local_result = local::today_summary(&app_data_dir, &provider_id);
+        let local_available = local_result.is_ok();
+        let local = local_result.unwrap_or_default();
         if is_deepseek_base_url(&base_url) {
-            let balance = fetch_deepseek_balance(&api_key)?;
-            let local_result = local::today_summary(&app_data_dir, &provider_id);
-            let local_available = local_result.is_ok();
-            let local = local_result.unwrap_or_default();
-            Ok(AiUsage::DeepSeek(DeepSeekUsage {
-                kind: "deepseek",
-                is_available: balance.is_available,
-                balances: balance.balance_infos,
+            match fetch_deepseek_balance(&api_key) {
+                Ok(balance) => Ok(AiUsage::DeepSeek(DeepSeekUsage {
+                    kind: "deepseek",
+                    is_available: balance.is_available,
+                    balances: balance.balance_infos,
+                    local_available,
+                    today_tokens: local.tokens,
+                    today_requests: local.requests,
+                    top_models: local.top_models,
+                })),
+                Err(error) if error == "deepseek_auth_failed" => Err(error),
+                Err(_) => Ok(AiUsage::Local(LocalUsage {
+                    kind: "local",
+                    local_available,
+                    today_tokens: local.tokens,
+                    today_requests: local.requests,
+                    top_models: local.top_models,
+                })),
+            }
+        } else if is_kuro_base_url(&base_url) {
+            match fetch_usage(&base_url, &api_key) {
+                Ok(usage) => Ok(AiUsage::Gateway(usage)),
+                Err(_) => Ok(AiUsage::Local(LocalUsage {
+                    kind: "local",
+                    local_available,
+                    today_tokens: local.tokens,
+                    today_requests: local.requests,
+                    top_models: local.top_models,
+                })),
+            }
+        } else if is_openrouter_base_url(&base_url) {
+            match fetch_openrouter_key_usage(&api_key) {
+                Ok((limit_usd, remaining_usd, today_cost_usd)) => Ok(AiUsage::OpenRouter(OpenRouterUsage {
+                    kind: "openrouter",
+                    limit_usd,
+                    remaining_usd,
+                    today_cost_usd,
+                    local_available,
+                    today_tokens: local.tokens,
+                    today_requests: local.requests,
+                    top_models: local.top_models,
+                })),
+                Err(_) => Ok(AiUsage::Local(LocalUsage {
+                    kind: "local",
+                    local_available,
+                    today_tokens: local.tokens,
+                    today_requests: local.requests,
+                    top_models: local.top_models,
+                })),
+            }
+        } else {
+            Ok(AiUsage::Local(LocalUsage {
+                kind: "local",
                 local_available,
                 today_tokens: local.tokens,
                 today_requests: local.requests,
                 top_models: local.top_models,
             }))
-        } else {
-            fetch_usage(&base_url, &api_key).map(AiUsage::Gateway)
         }
     })
     .await
@@ -313,8 +431,9 @@ pub async fn fetch_ai_usage(
 #[cfg(test)]
 mod tests {
     use super::{
-        is_deepseek_base_url, parse_deepseek_balance, parse_usage_payload, resolve_usage_provider,
-        usage_url, verified_usage_target,
+        is_deepseek_base_url, is_openrouter_base_url, parse_deepseek_balance,
+        parse_openrouter_key_usage, parse_usage_payload, resolve_usage_provider, usage_url,
+        verified_usage_target,
     };
     use crate::settings::{AiProvider, ApiModel, ModelCatalog, Settings};
 
@@ -326,6 +445,7 @@ mod tests {
                     sidecar_id: "yume".to_string(),
                     label: "Legacy".to_string(),
                     base_url: "https://legacy.example.test/v1".to_string(),
+                    manual_model_ids: String::new(),
                     api_key: "legacy-key".to_string(),
                 },
                 AiProvider {
@@ -333,12 +453,22 @@ mod tests {
                     sidecar_id: "yume-2".to_string(),
                     label: "Stage C".to_string(),
                     base_url: "https://stage-c.example.test/v1".to_string(),
+                    manual_model_ids: String::new(),
                     api_key: "stage-c-key".to_string(),
                 },
             ],
             active_provider_id: "stage-c-uuid".to_string(),
             ..Settings::default()
         }
+    }
+
+    #[test]
+    fn parses_openrouter_key_usage_without_inventing_a_limit() {
+        let payload = serde_json::json!({"data":{"limit":null,"limit_remaining":null,"usage_daily":1.25}});
+        assert_eq!(parse_openrouter_key_usage(&payload), Ok((None, None, 1.25)));
+        assert!(parse_openrouter_key_usage(&serde_json::json!({"data":{"usage_daily":-1}})).is_err());
+        assert!(is_openrouter_base_url("https://openrouter.ai/api/v1"));
+        assert!(!is_openrouter_base_url("https://openrouter.ai.evil.test/api/v1"));
     }
 
     #[test]
@@ -354,6 +484,7 @@ mod tests {
         let catalog = ModelCatalog {
             base_url: "https://verified.example.test/v1".to_string(),
             api_key_fingerprint: "a".repeat(64),
+            manual_model_ids: None,
             models: vec![ApiModel {
                 id: "model-a".to_string(),
                 name: "Model A".to_string(),

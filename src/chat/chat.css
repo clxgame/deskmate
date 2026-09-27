@@ -765,15 +765,56 @@
 
 .chat-attachment-tray {
   display: flex;
+  align-items: flex-start;
   flex-wrap: wrap;
   gap: var(--s-2);
   max-height: var(--attachment-tray-max-h);
   min-width: 0;
   overflow-y: auto;
-  padding: 0 var(--s-0-5);
+  padding: 3px var(--s-0-5);
+  margin-bottom: 8px;
   background: transparent;
   flex-shrink: 0;
   width: 100%;
+}
+
+.chat-attachment-thumbnail {
+  position: relative;
+  flex: 0 0 76px;
+  width: 76px;
+  min-width: 0;
+  padding: 3px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+}
+.chat-attachment-thumbnail img {
+  display: block;
+  width: 68px;
+  height: 54px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+.chat-attachment-thumbnail .chat-attachment-name {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  line-height: 14px;
+}
+.chat-attachment-thumbnail .chat-attachment-thumbnail-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--surface-raised);
+  font-size: 18px;
+  line-height: 1;
 }
 
 .chat-attachment-chip {
@@ -1273,6 +1314,7 @@
   display: block;
   position: relative;
   padding: 7px 9px 9px;
+  background: var(--surface-raised);
 }
 .chat-input-wrap {
   display: flex;

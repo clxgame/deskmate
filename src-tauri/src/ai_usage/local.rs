@@ -90,10 +90,10 @@ fn save_observations(
         if !valid_observation(&observation) {
             continue;
         }
-        let Some(provider) = providers.iter().find(|provider| {
-            provider.sidecar_id == observation.sidecar_id
-                && super::is_deepseek_base_url(&provider.base_url)
-        }) else {
+        let Some(provider) = providers
+            .iter()
+            .find(|provider| provider.sidecar_id == observation.sidecar_id)
+        else {
             continue;
         };
         let next = StoredUsage {
@@ -233,10 +233,7 @@ pub(crate) fn capture_agent_usage(
         .map_err(|_| "settings_state")?
         .providers
         .clone();
-    if !providers
-        .iter()
-        .any(|provider| super::is_deepseek_base_url(&provider.base_url))
-    {
+    if providers.is_empty() {
         return Ok(());
     }
     let mut url = url::Url::parse(&format!(
@@ -292,6 +289,7 @@ mod tests {
             sidecar_id: "yume".into(),
             label: "DeepSeek".into(),
             base_url: "https://api.deepseek.com".into(),
+            manual_model_ids: String::new(),
             api_key: String::new(),
         };
         let observation = UsageObservation {
@@ -321,6 +319,35 @@ mod tests {
         let updated = today_summary(&root, "deepseek-provider").unwrap();
         assert_eq!((updated.tokens, updated.requests), (30, 1));
         assert_eq!(updated.top_models[0].name, "deepseek-flash");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn local_ledger_records_non_deepseek_providers() {
+        let root =
+            std::env::temp_dir().join(format!("yume-ai-usage-test-{}", uuid::Uuid::new_v4()));
+        let provider = AiProvider {
+            id: "claude-provider".into(),
+            sidecar_id: "yume-2".into(),
+            label: "Claude".into(),
+            base_url: "https://api.anthropic.com".into(),
+            manual_model_ids: String::new(),
+            api_key: String::new(),
+        };
+        save_observations(
+            &root,
+            &[provider],
+            [UsageObservation {
+                message_id: "claude-msg-1".into(),
+                sidecar_id: "yume-2".into(),
+                model_id: "claude-sonnet".into(),
+                created_at_ms: Local::now().timestamp_millis(),
+                tokens: 42,
+            }],
+        )
+        .unwrap();
+        let summary = today_summary(&root, "claude-provider").unwrap();
+        assert_eq!((summary.tokens, summary.requests), (42, 1));
         fs::remove_dir_all(root).unwrap();
     }
 }

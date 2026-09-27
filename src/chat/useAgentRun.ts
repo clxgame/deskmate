@@ -4,6 +4,7 @@ import { broadcastPetActivity } from "../lib/petState";
 import { cancelAgentRun, locateAgentArtifact, pendingAgentPermissions, readAgentRuns, replyAgentPermission, startAgentRun, type AgentArtifact, type AgentProjection } from "../lib/agent";
 import type { PermissionReply, PermissionRequest } from "../lib/toolPermissions";
 import { dict } from "../lib/i18n";
+import type { ChatModelChoice, ConversationModelSelection } from "../lib/conversationModel";
 
 const empty: AgentProjection = { active: null, recent: [], artifacts: [] };
 function isBusy(error: unknown): boolean { return error instanceof Error && /(?:^|\b)busy(?:\b|$)/i.test(error.message); }
@@ -75,12 +76,12 @@ export function useAgentRun(language: string) {
       return typeof selected === "string" ? selected : null;
     } catch { setError(t.agentPickerFailed); return null; }
   }, [projection.active, t.agentPickerFailed, t.agentPickerTitle]);
-  const start = useCallback(async (input: string, historyId?: string, catalogKey?: string) => {
+  const start = useCallback(async (input: string, historyId?: string, catalogKey?: string, modelSelection?: ConversationModelSelection, expectedModel?: ChatModelChoice) => {
     if ((!workspace && !historyId) || projection.active || starting.current || !input.trim()) return null;
     starting.current = true;
     setIsStarting(true);
     try {
-      const run = await startAgentRun(historyId ? null : workspace, input.trim(), historyId, catalogKey);
+      const run = await startAgentRun(historyId ? null : workspace, input.trim(), historyId, catalogKey, modelSelection, expectedModel);
       ownedRun.current = run.runId;
       setProjection((current) => ({ ...current, active: run }));
       if (run.sessionId) broadcastPetActivity({ sessionId: run.sessionId, requestId: run.runId, eventId: crypto.randomUUID(), type: "start" });
@@ -128,7 +129,8 @@ export function useAgentRun(language: string) {
   const busy = projection.active !== null || isStarting;
   const clear = useCallback(() => { if (!busy) setWorkspace(null); }, [busy]);
   const clearSelection = useCallback(() => setWorkspace(null), []);
-  return { projection, workspace, requests, error, busy, isStopping, choose, clear, clearSelection, start, stop, reply, locate, refresh };
+  const selectWorkspace = useCallback((path: string) => { if (!busy) setWorkspace(path); }, [busy]);
+  return { projection, workspace, requests, error, busy, isStopping, choose, clear, clearSelection, selectWorkspace, start, stop, reply, locate, refresh };
 }
 
 export type AgentRunController = ReturnType<typeof useAgentRun>;

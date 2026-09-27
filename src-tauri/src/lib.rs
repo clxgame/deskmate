@@ -1420,6 +1420,12 @@ fn open_widget_settings(app: tauri::AppHandle) {
 }
 
 #[tauri::command]
+fn open_ai_model_settings(app: tauri::AppHandle) {
+    show_settings_window(&app);
+    let _ = app.emit("deskmate://settings-tab", "ai");
+}
+
+#[tauri::command]
 fn open_worklog_settings(app: tauri::AppHandle, target: Option<serde_json::Value>) {
     show_settings_window(&app);
     let _ = app.emit("deskmate://settings-tab", "worklog");
@@ -1601,6 +1607,8 @@ pub fn run() {
             preview_pet_scale,
             get_settings,
             set_settings,
+            settings::chat_model_catalog,
+            settings::chat_model_resolve,
             verify_api_key,
             pomodoro::pomodoro_get,
             pomodoro::pomodoro_start,
@@ -1611,6 +1619,7 @@ pub fn run() {
             record_ai_usage,
             open_settings,
             open_widget_settings,
+            open_ai_model_settings,
             hide_settings,
             app_version,
             ccswitch::protocol::ccswitch_capability_status,
@@ -1627,6 +1636,12 @@ pub fn run() {
             ccswitch::protocol::discard_ccswitch_recovery,
             local_ai_deploy::deploy_local_ai_stack,
             history::commands::history_catalog_list,
+            history::commands::history_model_selection_get,
+            history::commands::history_model_selection_set,
+            history::commands::history_recent_workspaces,
+            history::commands::history_remember_workspace,
+            history::commands::history_validate_workspace,
+            history::commands::history_catalog_native_key,
             history::commands::history_catalog_load,
             history::catalog_preview::history_catalog_previews,
             history::catalog_mutation::history_catalog_mutate,

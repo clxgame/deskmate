@@ -82,6 +82,7 @@ export default function SettingsApp() {
   useEffect(() => {
     const unlisten = listen<string>("deskmate://settings-tab", (event) => {
       if (event.payload === "widget") setTab("widget");
+      if (event.payload === "ai") setTab("ai");
       if (event.payload === "worklog") {
         setTab("widget"); setActiveWidget("worklog");
       }

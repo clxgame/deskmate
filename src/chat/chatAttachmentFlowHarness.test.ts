@@ -108,6 +108,14 @@ export function discardedIds(): readonly string[] {
 
 function handleInvoke(command: string, args?: unknown): Promise<unknown> {
   switch (command) {
+    case "chat_model_resolve":
+      return Promise.resolve({ configuredProviderId: "test-entry", sidecarId: "yume-2", modelId: "claude-sonnet-4.5", modelName: "Claude Sonnet 4.5" });
+    case "history_model_selection_get":
+      return Promise.resolve({ mode: "inherit" });
+    case "history_model_selection_set":
+      return Promise.resolve(undefined);
+    case "history_recent_workspaces":
+      return Promise.resolve([]);
     case "sidecar_base_url":
       return Promise.resolve("http://127.0.0.1:48888");
     case "get_settings":

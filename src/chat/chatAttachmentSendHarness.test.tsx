@@ -18,6 +18,17 @@ type PromptRequest = Readonly<{
 }>;
 
 export const promptRequests: PromptRequest[] = [];
+const defaultModel = { configuredProviderId: "test-entry", sidecarId: "yume-2", modelId: "claude-sonnet-4.5", modelName: "Claude Sonnet 4.5" };
+const alternativeModel = { configuredProviderId: "test-entry", sidecarId: "yume-2", modelId: "selected-model-b", modelName: "Selected Model B" };
+let verifiedModels = [defaultModel, alternativeModel];
+const modelSelections = new Map<string, unknown>();
+export function removeAlternativeModel(): void { verifiedModels = [defaultModel]; }
+export function addSyntheticModels(count: number): void {
+  verifiedModels = [...verifiedModels, ...Array.from({ length: count }, (_, index) => ({
+    configuredProviderId: "test-entry", sidecarId: "yume-2",
+    modelId: `synthetic-${index}`, modelName: `Synthetic ${index}`,
+  }))];
+}
 export const agentRun = {
   runId: "run_workspace",
   sessionId: "ses_workspace",
@@ -139,6 +150,8 @@ export function registerChatAttachmentHarness(): void {
   installNativeMocks();
   invoke.mockReset();
   promptRequests.length = 0;
+  verifiedModels = [defaultModel, alternativeModel];
+  modelSelections.clear();
   agentProjection = { active: null, recent: [], artifacts: [] };
   selectedWorkspace = null;
   holdAgentStart = false;
@@ -153,6 +166,32 @@ export function registerChatAttachmentHarness(): void {
   activeEventSource = null;
   invoke.mockImplementation((command: string, args?: unknown) => {
     switch (command) {
+      case "chat_model_resolve":
+        {
+          const selection = (args as { selection?: { mode?: string; configuredProviderId?: string; sidecarId?: string; modelId?: string } } | undefined)?.selection;
+          if (selection?.mode === "inherit") return Promise.resolve(defaultModel);
+          const chosen = verifiedModels.find(model => model.configuredProviderId === selection?.configuredProviderId
+            && model.sidecarId === selection?.sidecarId && model.modelId === selection?.modelId);
+          return chosen ? Promise.resolve(chosen) : Promise.reject(new Error("chat_model_selection_invalid"));
+        }
+      case "chat_model_catalog":
+        return Promise.resolve({ models: verifiedModels, defaultModel });
+      case "history_model_selection_get":
+        return Promise.resolve(modelSelections.get(historyArgument(args, "key")) ?? { mode: "inherit" });
+      case "history_model_selection_set":
+        modelSelections.set(historyArgument(args, "key"), (args as { selection?: unknown }).selection);
+        return Promise.resolve(undefined);
+      case "history_recent_workspaces":
+        return Promise.resolve([]);
+      case "history_validate_workspace":
+        return Promise.resolve(historyArgument(args, "directory"));
+      case "history_remember_workspace":
+        return Promise.resolve(undefined);
+      case "history_catalog_native_key":
+        return Promise.resolve(agentHistoryEntry({
+          id: "ses_workspace", title: "Workspace task", created: 1, updated: 1,
+          messages: [], originRunId: agentRun.runId,
+        }).key);
       case "sidecar_base_url":
         return Promise.resolve("http://127.0.0.1:48888");
       case "get_settings":

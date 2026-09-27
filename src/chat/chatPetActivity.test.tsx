@@ -142,6 +142,14 @@ beforeEach(() => {
   invoke.mockReset();
   invoke.mockImplementation((command: string) => {
     switch (command) {
+      case "chat_model_resolve":
+        return Promise.resolve({ configuredProviderId: "test-entry", sidecarId: "yume-2", modelId: "claude-sonnet-4.5", modelName: "Claude Sonnet 4.5" });
+      case "history_model_selection_get":
+        return Promise.resolve({ mode: "inherit" });
+      case "history_model_selection_set":
+        return Promise.resolve(undefined);
+      case "history_recent_workspaces":
+        return Promise.resolve([]);
       case "history_register_native_session":
         return Promise.resolve(registeredHistoryFixture({ sessionId: "ses_fixed", directory: "." }));
       case "history_catalog_load":

@@ -2,15 +2,36 @@ import { ToolApprovalCards } from "./ToolApprovalCards";
 import type { AgentRunController } from "./useAgentRun";
 import { dict } from "../lib/i18n";
 import type { AgentHistoryDetails } from "../lib/history";
+import { taskStatusCopy } from "./composerCopy";
 
-type Props = { readonly language: string; readonly agent: AgentRunController; readonly historyDetails?: AgentHistoryDetails; readonly onWorkspaceSelected?: () => void };
-export function WorkspaceTask({ language, agent, historyDetails, onWorkspaceSelected }: Props) {
+type Props = { readonly language: string; readonly agent: AgentRunController; readonly historyDetails?: AgentHistoryDetails; readonly onWorkspaceSelected?: () => void; readonly compact?: boolean; readonly sessionId?: string | null; readonly directory?: string };
+export function WorkspaceTask({ language, agent, historyDetails, onWorkspaceSelected, compact = false, sessionId, directory }: Props) {
   const t = dict(language);
   const active = agent.projection.active;
   const recent = agent.projection.recent[0];
   const recentLabel = recent?.errorSummary === "scheduled_agent_busy" ? t.agentScheduledBusy : recent?.errorSummary === "scheduled_submission_failed" ? t.agentScheduledFailed : recent?.outcome ?? "—";
   const visibleWorkspace = agent.workspace ?? historyDetails?.workspacePath;
   const detailError = historyDetails?.availability === "retryable" ? t.agentHistoryDetailsRetryable : historyDetails?.availability === "missing" ? t.agentHistoryDetailsMissing : historyDetails?.availability === "workspace_missing" ? t.agentHistoryWorkspaceMissing : null;
+  if (compact) {
+    const sameScope = (run: { sessionId: string | null; workspacePath: string }) =>
+      run.sessionId === sessionId && directory !== undefined &&
+      normalizeWorkspace(run.workspacePath) === normalizeWorkspace(directory);
+    const ownActive = active && sameScope(active) ? active : null;
+    const ownRecent = agent.projection.recent.find(sameScope);
+    const ownArtifacts = agent.projection.artifacts.filter(artifact => artifact.runId === (ownActive?.runId ?? ownRecent?.runId));
+    if (!ownActive && !ownRecent && !historyDetails && ownArtifacts.length === 0) return null;
+    const status = ownActive?.outcome ?? (ownActive ? "active" : ownRecent?.outcome ?? (ownRecent?.errorSummary ? "failed" : historyDetails?.status));
+    return <section className="workspace-task workspace-task-inline" aria-label={t.agentStart}>
+      {status && <p className="workspace-task-recent" role="status">{taskStatusCopy(language, status)}</p>}
+      {agent.error && (ownActive || ownRecent) && <p className="workspace-task-error" role="alert">{agent.error}</p>}
+      {detailError && <p className="workspace-task-error" role="alert">{detailError}</p>}
+      {ownArtifacts.map(artifact => <div className="workspace-task-artifact" key={artifact.reference}>
+        <span title={artifact.path ?? artifact.command ?? artifact.label}>{artifact.path ?? artifact.command ?? artifact.label}</span>
+        <small>{artifact.verified ? t.agentVerified : t.agentUnverified}</small>
+        {artifact.kind === "file" && artifact.verified && <button type="button" onClick={() => void agent.locate(artifact)}>{t.agentOpenArtifact}</button>}
+      </div>)}
+    </section>;
+  }
   const chooseWorkspace = async () => {
     if (await agent.choose()) onWorkspaceSelected?.();
   };
@@ -35,4 +56,9 @@ export function WorkspaceTask({ language, agent, historyDetails, onWorkspaceSele
     </div>}
     {!active && recent && <p className="workspace-task-recent"><strong>{t.agentRecent}</strong> · {recentLabel}</p>}
   </section>;
+}
+
+function normalizeWorkspace(path: string): string {
+  const slash = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  return /^[A-Za-z]:/.test(slash) || slash.startsWith("//") ? slash.toLowerCase() : slash;
 }

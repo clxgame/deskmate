@@ -4,6 +4,7 @@ import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { ClockIcon } from "@phosphor-icons/react/dist/csr/Clock";
 import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ClockCounterClockwise";
 import { GearSixIcon } from "@phosphor-icons/react/dist/csr/GearSix";
+import { FolderIcon } from "@phosphor-icons/react/dist/csr/Folder";
 import { GlobeSimpleIcon } from "@phosphor-icons/react/dist/csr/GlobeSimple";
 import { InfoIcon } from "@phosphor-icons/react/dist/csr/Info";
 import { KeyboardIcon } from "@phosphor-icons/react/dist/csr/Keyboard";
@@ -34,6 +35,7 @@ const ICONS = {
   close: XIcon,
   history: ClockCounterClockwiseIcon,
   attachment: PaperclipIcon,
+  folder: FolderIcon,
   pack: PackageIcon,
   add: PlusIcon,
   delete: TrashIcon,

@@ -11,7 +11,7 @@ fn client_for(port: u16, workspace: &Path) -> OpenCodeClient {
     OpenCodeClient::new(AgentEndpoint {
         base_url: format!("http://127.0.0.1:{port}"),
         provider_id: "provider".into(),
-        model_id: "model".into(),
+        model_id: "selected-model-b".into(),
         workspace: workspace.to_path_buf(),
         auth_header: String::new(),
     })
@@ -107,6 +107,9 @@ fn workspace_directory_scopes_every_session_request() -> Result<(), String> {
     server.join().map_err(|_| "server join".to_owned())??;
     let requests = requests.lock().map_err(|_| "requests lock".to_owned())?;
     assert_eq!(requests.len(), 4);
+    let prompt_body = requests[1].split_once("\r\n\r\n").map(|(_, body)| body).ok_or("missing prompt body")?;
+    let prompt: serde_json::Value = serde_json::from_str(prompt_body).map_err(|error| error.to_string())?;
+    assert_eq!(prompt["model"], serde_json::json!({"providerID":"provider","modelID":"selected-model-b"}));
     let create_body = requests[0]
         .split_once("\r\n\r\n")
         .map(|(_, body)| body)

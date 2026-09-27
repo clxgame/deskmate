@@ -18,6 +18,70 @@ pub(crate) fn register_known_directory(app: &tauri::AppHandle, directory: &str) 
     if !path.is_dir() { return Err("history_directory_unavailable".into()); }
     store(app)?.register_directory(&catalog_import::canonical_directory(&path.to_string_lossy()))
 }
+
+#[tauri::command]
+pub(crate) fn history_model_selection_get(window: tauri::WebviewWindow, app: tauri::AppHandle, key: String) -> Result<crate::settings::ConversationModelSelection, String> {
+    crate::tool_permissions::runtime::require_chat(&window)?;
+    store(&app)?.model_selection(&key)
+}
+
+#[tauri::command]
+pub(crate) fn history_model_selection_set(
+    window: tauri::WebviewWindow, app: tauri::AppHandle, key: String,
+    selection: crate::settings::ConversationModelSelection,
+) -> Result<(), String> {
+    crate::tool_permissions::runtime::require_chat(&window)?;
+    let catalog = store(&app)?;
+    let entry = catalog.get(&key)?;
+    if entry.tombstone.is_some() || entry.archived || entry.runtime != RuntimeState::Idle
+        || entry.availability != Availability::Available || entry.ownership == Ownership::Workbench
+        || !matches!(entry.identity, CatalogIdentity::Native { .. }) {
+        return Err("history_model_selection_locked".into());
+    }
+    if matches!(selection, crate::settings::ConversationModelSelection::Override { .. }) {
+        let settings = app.state::<crate::settings::SettingsState>().0.lock().map_err(|_| "chat_model_settings_unavailable")?.clone();
+        crate::settings::resolve_chat_model(&app, &settings, &selection)?;
+    }
+    catalog.set_model_selection(&key, &selection)
+}
+
+#[tauri::command]
+pub(crate) fn history_recent_workspaces(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    crate::tool_permissions::runtime::require_chat(&window)?;
+    store(&app)?.recent_workspaces()
+}
+
+#[tauri::command]
+pub(crate) fn history_remember_workspace(window: tauri::WebviewWindow, app: tauri::AppHandle, directory: String) -> Result<(), String> {
+    crate::tool_permissions::runtime::require_chat(&window)?;
+    let path = std::path::Path::new(&directory).canonicalize().map_err(|_| "history_directory_unavailable")?;
+    if !path.is_dir() { return Err("history_directory_unavailable".into()); }
+    store(&app)?.remember_workspace(&path.to_string_lossy(), now()?)
+}
+
+#[tauri::command]
+pub(crate) fn history_validate_workspace(window: tauri::WebviewWindow, directory: String) -> Result<String, String> {
+    crate::tool_permissions::runtime::require_chat(&window)?;
+    let path = std::path::Path::new(&directory).canonicalize().map_err(|_| "history_directory_unavailable")?;
+    if !path.is_dir() { return Err("history_directory_unavailable".into()); }
+    crate::history::catalog_model::canonical_directory(&path.to_string_lossy()).map_err(|_| "history_directory_unavailable".into())
+}
+
+#[tauri::command]
+pub(crate) fn history_catalog_native_key(
+    window: tauri::WebviewWindow, app: tauri::AppHandle, directory: String, session_id: String,
+) -> Result<String, String> {
+    crate::tool_permissions::runtime::require_chat(&window)?;
+    let identity = CatalogIdentity::Native {
+        sidecar_id: SIDECAR_ID.into(),
+        directory: canonical_directory(&directory).map_err(|_| "history_identity_invalid")?,
+        session_id,
+    };
+    let key = identity.key();
+    initialize(&app)?;
+    store(&app)?.get(&key)?;
+    Ok(key)
+}
 pub(crate) fn authorize_directory(app: &tauri::AppHandle, directory: Option<&str>) -> Result<String, String> {
     let default = workspace(app)?;
     let directory = directory.map(catalog_import::canonical_directory).unwrap_or_else(|| default.clone());

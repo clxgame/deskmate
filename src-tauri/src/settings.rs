@@ -309,6 +309,104 @@ pub(crate) struct ModelCatalog {
     pub(crate) models: Vec<ApiModel>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case", rename_all_fields = "camelCase")]
+pub(crate) enum ConversationModelSelection {
+    #[default]
+    Inherit,
+    Override { configured_provider_id: String, sidecar_id: String, model_id: String },
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ChatModelChoice {
+    pub(crate) configured_provider_id: String,
+    pub(crate) sidecar_id: String,
+    pub(crate) model_id: String,
+    pub(crate) model_name: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ChatModelCatalog {
+    pub(crate) models: Vec<ChatModelChoice>,
+    pub(crate) default_model: Option<ChatModelChoice>,
+}
+
+pub(crate) fn verified_chat_models(app: &tauri::AppHandle, settings: &Settings) -> Result<ChatModelCatalog, String> {
+    let provider = settings.providers.iter()
+        .find(|provider| provider.id == settings.active_provider_id)
+        .ok_or("chat_model_provider_missing")?;
+    let catalog = load_verified_model_catalog_for_provider(app, &provider.id, &provider.base_url, &provider.api_key)
+        .ok_or("chat_model_catalog_unverified")?;
+    let models: Vec<ChatModelChoice> = catalog.models.into_iter().map(|model| ChatModelChoice {
+        configured_provider_id: provider.id.clone(), sidecar_id: provider.sidecar_id.clone(),
+        model_id: model.id, model_name: model.name,
+    }).collect();
+    let default_model = models.iter().find(|model|
+        model.sidecar_id == settings.provider_id && model.model_id == settings.model_id
+    ).cloned();
+    Ok(ChatModelCatalog { models, default_model })
+}
+
+pub(crate) fn resolve_chat_model(
+    app: &tauri::AppHandle,
+    settings: &Settings,
+    selection: &ConversationModelSelection,
+) -> Result<ChatModelChoice, String> {
+    let catalog = verified_chat_models(app, settings)?;
+    resolve_verified_chat_model(catalog, selection)
+}
+
+fn resolve_verified_chat_model(catalog: ChatModelCatalog, selection: &ConversationModelSelection) -> Result<ChatModelChoice, String> {
+    match selection {
+        ConversationModelSelection::Inherit => catalog.default_model.ok_or("chat_model_default_missing".into()),
+        ConversationModelSelection::Override { configured_provider_id, sidecar_id, model_id } => {
+            catalog.models.into_iter().find(|model|
+                &model.configured_provider_id == configured_provider_id
+                    && &model.sidecar_id == sidecar_id && &model.model_id == model_id
+            ).ok_or("chat_model_selection_invalid".into())
+        }
+    }
+}
+
+#[cfg(test)]
+mod chat_model_tests {
+    use super::*;
+    #[test]
+    fn override_requires_both_configured_and_runtime_provider_id() {
+        let model = ChatModelChoice {
+            configured_provider_id: "entry-a".into(), sidecar_id: "runtime-a".into(),
+            model_id: "model-2".into(), model_name: "Model 2".into(),
+        };
+        let catalog = || ChatModelCatalog { models: vec![model.clone()], default_model: Some(model.clone()) };
+        assert_eq!(resolve_verified_chat_model(catalog(), &ConversationModelSelection::Inherit).unwrap().model_id, "model-2");
+        for selection in [
+            ConversationModelSelection::Override { configured_provider_id: "entry-b".into(), sidecar_id: "runtime-a".into(), model_id: "model-2".into() },
+            ConversationModelSelection::Override { configured_provider_id: "entry-a".into(), sidecar_id: "runtime-b".into(), model_id: "model-2".into() },
+            ConversationModelSelection::Override { configured_provider_id: "entry-a".into(), sidecar_id: "runtime-a".into(), model_id: "model-3".into() },
+        ] {
+            assert_eq!(resolve_verified_chat_model(catalog(), &selection).unwrap_err(), "chat_model_selection_invalid");
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) fn chat_model_catalog(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<ChatModelCatalog, String> {
+    crate::tool_permissions::runtime::require_chat(&window)?;
+    let settings = app.state::<SettingsState>().0.lock().map_err(|_| "chat_model_settings_unavailable")?.clone();
+    verified_chat_models(&app, &settings)
+}
+
+#[tauri::command]
+pub(crate) fn chat_model_resolve(
+    window: tauri::WebviewWindow, app: tauri::AppHandle, selection: ConversationModelSelection,
+) -> Result<ChatModelChoice, String> {
+    crate::tool_permissions::runtime::require_chat(&window)?;
+    let settings = app.state::<SettingsState>().0.lock().map_err(|_| "chat_model_settings_unavailable")?.clone();
+    resolve_chat_model(&app, &settings, &selection)
+}
+
 impl Default for SettingsState {
     fn default() -> Self {
         Self(Mutex::new(Settings::default()))

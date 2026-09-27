@@ -220,3 +220,16 @@ test("shows recovered history workspace and retryable detail state", async () =>
   expect(screen.getByText("C:\\recorded\\old-workspace")).toBeDefined();
   expect(screen.getByRole("alert").textContent).toContain("Open this history again to retry");
 });
+
+test("compact task feedback shows one localized status for the exact session scope", () => {
+  const completed = { ...run, outcome: "completed" as const };
+  const agent = {
+    projection: { active: null, recent: [completed], artifacts: [] },
+    workspace: null, requests: [], error: null,
+  } as unknown as ReturnType<typeof useAgentRun>;
+  const historyDetails = { workspacePath: "C:\\workspace", status: "completed" as const, source: "interactive" as const, availability: "ready" as const };
+  const view = render(<WorkspaceTask language="zh-CN" agent={agent} compact sessionId="ses_run" directory="C:\\workspace" historyDetails={historyDetails} />);
+  expect(screen.getAllByText("任务已完成")).toHaveLength(1);
+  view.rerender(<WorkspaceTask language="zh-CN" agent={agent} compact sessionId="ses_run" directory="C:\\another" />);
+  expect(screen.queryByText("任务已完成")).toBeNull();
+});

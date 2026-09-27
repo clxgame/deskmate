@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { PermissionReply, PermissionRequest } from "./toolPermissions";
+import type { ChatModelChoice, ConversationModelSelection } from "./conversationModel";
 
 export type AgentOutcome = "completed" | "failed" | "cancelled" | "interrupted";
 export type AgentRun = {
@@ -54,8 +55,9 @@ export async function readAgentRuns(): Promise<AgentProjection> {
   if (!Array.isArray(value.artifacts)) throw new AgentWireError("recent");
   return { active: value.active === null ? null : parseRun(value.active), recent: value.recent.map(parseRun), artifacts: value.artifacts.map(parseArtifact) };
 }
-export async function startAgentRun(workspacePath: string | null, input: string, historyId?: string, catalogKey?: string): Promise<AgentRun> {
-  const request = historyId ? { historyId, input, ...(catalogKey ? { catalogKey } : {}) } : { workspacePath, input };
+export async function startAgentRun(workspacePath: string | null, input: string, historyId?: string, catalogKey?: string, modelSelection?: ConversationModelSelection, expectedModel?: ChatModelChoice): Promise<AgentRun> {
+  const modelRequest = { ...(modelSelection ? { modelSelection } : {}), ...(expectedModel ? { expectedModel: { providerId: expectedModel.sidecarId, modelId: expectedModel.modelId } } : {}) };
+  const request = historyId ? { historyId, input, ...(catalogKey ? { catalogKey } : {}), ...modelRequest } : { workspacePath, input, ...modelRequest };
   return parseRun(await invoke("agent_run_start", { request }));
 }
 export function cancelAgentRun(runId: string): Promise<void> { return invoke("agent_run_cancel", { runId }); }

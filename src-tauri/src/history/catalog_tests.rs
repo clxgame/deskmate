@@ -1,4 +1,5 @@
 use super::{catalog::CatalogStore, catalog_model::*};
+use crate::settings::ConversationModelSelection;
 fn entry(directory: &str) -> CatalogEntry {
     CatalogEntry { identity: CatalogIdentity::Native { sidecar_id: "managed-local-v1".into(), directory: canonical_directory(directory).unwrap(), session_id: "ses_same".into() }, title: "Native title".into(), user_title: None, source: ConversationSource::LightChat, created: 1, updated: 2, pinned: false, archived: false, availability: Availability::Available, ownership: Ownership::Unowned, runtime: RuntimeState::Idle, tombstone: None }
 }
@@ -13,6 +14,46 @@ fn metadata_reopens_when_same_native_id_occurs_in_two_projects() {
     let reopened = CatalogStore::open(&path).unwrap();
     // Then both composite identities survive without content storage.
     assert_eq!(reopened.all().unwrap().len(), 2);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn model_selection_uses_full_key_and_survives_metadata_refresh_without_reordering() {
+    let root = std::env::temp_dir().join(format!("yume-model-selection-{}", uuid::Uuid::new_v4()));
+    let path = root.join("catalog.sqlite");
+    let store = CatalogStore::open(&path).unwrap();
+    let a = entry("C:/project-a");
+    let b = entry("C:/project-b");
+    store.update(|rows| { rows.extend([a.clone(), b.clone()]); Ok(()) }).unwrap();
+    let selected = ConversationModelSelection::Override {
+        configured_provider_id: "configured-a".into(), sidecar_id: "runtime-a".into(), model_id: "model-b".into(),
+    };
+    store.set_model_selection(&a.key(), &selected).unwrap();
+    store.update(|rows| { rows[0].pinned = true; rows[0].user_title = Some("Renamed".into()); Ok(()) }).unwrap();
+    let reopened = CatalogStore::open(&path).unwrap();
+    assert_eq!(reopened.model_selection(&a.key()).unwrap(), selected);
+    assert_eq!(reopened.model_selection(&b.key()).unwrap(), ConversationModelSelection::Inherit);
+    assert_eq!(reopened.get(&a.key()).unwrap().updated, 2);
+    reopened.update(|rows| { rows.retain(|row| row.key() != a.key()); Ok(()) }).unwrap();
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    let remaining: i64 = connection.query_row("SELECT COUNT(*) FROM model_selections", [], |row| row.get(0)).unwrap();
+    assert_eq!(remaining, 0);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn old_catalog_migrates_without_inventing_model_selection() {
+    let root = std::env::temp_dir().join(format!("yume-model-migrate-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("catalog.sqlite");
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection.execute_batch("CREATE TABLE entries (key TEXT PRIMARY KEY NOT NULL, metadata TEXT NOT NULL); CREATE TABLE directories (directory TEXT PRIMARY KEY NOT NULL); PRAGMA user_version = 1;").unwrap();
+    let old = entry("C:/project-a");
+    connection.execute("INSERT INTO entries(key, metadata) VALUES (?1, ?2)", (&old.key(), serde_json::to_string(&old).unwrap())).unwrap();
+    drop(connection);
+    let store = CatalogStore::open(&path).unwrap();
+    assert_eq!(store.model_selection(&old.key()).unwrap(), ConversationModelSelection::Inherit);
+    assert_eq!(store.get(&old.key()).unwrap(), old);
     std::fs::remove_dir_all(root).unwrap();
 }
 

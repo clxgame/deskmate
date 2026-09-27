@@ -28,7 +28,11 @@ describe("Agent history view", () => {
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
     await waitFor(() => expect(invoke.mock.calls.filter(([command]) => command === "agent_run_start")).toHaveLength(1));
     expect(invoke.mock.calls.find(([command]) => command === "agent_run_start")?.[1]).toEqual({
-      request: { historyId: "ses_history", catalogKey: nativeHistoryFixture("ses_history", agentRun.workspacePath).key, input: "继续处理" },
+      request: {
+        historyId: "ses_history", catalogKey: nativeHistoryFixture("ses_history", agentRun.workspacePath).key, input: "继续处理",
+        modelSelection: { mode: "inherit" },
+        expectedModel: { providerId: "yume-2", modelId: "claude-sonnet-4.5" },
+      },
     });
     expect(promptRequests).toHaveLength(0);
   });
@@ -92,6 +96,23 @@ describe("Agent history view", () => {
     expect(invoke.mock.calls.filter(([command]) => command === "agent_run_start")).toHaveLength(startsBeforeFinish);
     expect(invoke.mock.calls.filter(([command]) => command === "history_save")).toHaveLength(savesBeforeFinish);
     expect(promptRequests).toHaveLength(0);
+  });
+
+  test("active Agent history keeps its own Stop control when the catalog becomes read-only", async () => {
+    histories().ses_history = {
+      id: "ses_history", title: "运行中任务", created: 1, updated: 2, originRunId: "msg_origin",
+      messages: [{ role: "user", text: "执行任务", time: 2 }],
+    };
+    setAgentProjection({ ...agentRun, sessionId: "ses_history" });
+    render(<ChatApp />);
+    await screen.findByPlaceholderText("输入消息,Enter 发送");
+    fireEvent.click(screen.getByRole("button", { name: "历史" }));
+    fireEvent.click(await screen.findByRole("button", { name: "打开 运行中任务" }));
+    await screen.findByText("执行任务");
+    const stop = await screen.findByRole("button", { name: "停" });
+    fireEvent.click(stop);
+    await waitFor(() => expect(invoke.mock.calls.some(([command, args]) => command === "agent_run_cancel"
+      && (args as { runId?: string })?.runId === agentRun.runId)).toBe(true));
   });
 
   test("keeps Agent history and input readable when its original workspace is missing", async () => {

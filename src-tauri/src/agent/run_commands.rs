@@ -13,7 +13,13 @@ pub(crate) struct AgentStartInput {
     pub(super) history_id: Option<String>,
     pub(super) catalog_key: Option<String>,
     pub(super) input: String,
+    pub(super) model_selection: Option<crate::settings::ConversationModelSelection>,
+    pub(super) expected_model: Option<ExpectedModel>,
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ExpectedModel { provider_id: String, model_id: String }
 
 pub(super) use super::start_context::{current_start_settings, lifecycle_client, StartSettings};
 
@@ -51,6 +57,24 @@ pub(crate) async fn agent_run_start(
             }
             None => super::continuation::start_target(&request, &history, &state)?,
         };
+        let app_settings = app.state::<crate::settings::SettingsState>().0.lock()
+            .map_err(|_| "agent_settings_unavailable")?.clone();
+        let selection = match &request.model_selection {
+            Some(selection) => selection.clone(),
+            None => match request.catalog_key.as_deref() {
+                Some(key) => crate::history::commands::store(&app)?.model_selection(key)?,
+                None => crate::settings::ConversationModelSelection::Inherit,
+            },
+        };
+        let selected_model = crate::settings::resolve_chat_model(&app, &app_settings, &selection)?;
+        if request.expected_model.as_ref().is_some_and(|expected|
+            expected.provider_id != selected_model.sidecar_id || expected.model_id != selected_model.model_id
+        ) {
+            return Err("chat_model_changed_before_send".into());
+        }
+        let mut snapshot = StartSettings::from(&app_settings);
+        snapshot.provider_id = selected_model.sidecar_id;
+        snapshot.model_id = selected_model.model_id;
         state.begin(&run_id, &target.workspace, &request.input)?;
         drop(operation);
         let workspace = state
@@ -59,13 +83,6 @@ pub(crate) async fn agent_run_start(
             .ok_or_else(|| "agent_run_unknown".to_owned())?
             .workspace_path;
         let prepared = (|| {
-            let settings = app
-                .state::<crate::settings::SettingsState>()
-                .0
-                .lock()
-                .map_err(|_| "agent_settings_unavailable")?
-                .clone();
-            let snapshot = StartSettings::from(&settings);
             let (persona, _, skills) = crate::packs::persona_files(&app, &snapshot.persona_id)?;
             let memory = app
                 .state::<crate::memory::MemoryState>()
@@ -92,7 +109,7 @@ pub(crate) async fn agent_run_start(
                     .collect::<Vec<_>>()
                     .join("\n\n"),
                 snapshot,
-                settings.agent_permission_approvals.clone(),
+                app_settings.agent_permission_approvals.clone(),
             ))
         })();
         let (system, settings, approvals) = match prepared {
@@ -151,6 +168,20 @@ pub(crate) async fn agent_run_start(
         .is_err()
         {
             return fail_history_start(&state, &app.state::<AgentPermissionState>(), &run_id);
+        }
+        if request.model_selection.is_some() {
+            let identity = crate::history::catalog_model::CatalogIdentity::Native {
+                sidecar_id: crate::history::catalog_model::SIDECAR_ID.into(),
+                directory: crate::history::catalog_model::canonical_directory(&workspace.to_string_lossy()).map_err(|_| "history_identity_invalid")?,
+                session_id: session.clone(),
+            };
+            let persistence = (|| {
+                crate::history::commands::initialize(&app)?;
+                crate::history::commands::store(&app)?.set_model_selection(&identity.key(), &selection)
+            })();
+            if persistence.is_err() {
+                return fail_history_start(&state, &app.state::<AgentPermissionState>(), &run_id);
+            }
         }
         let _operation = state.lock_operation()?;
         state.active_record(&run_id)?;

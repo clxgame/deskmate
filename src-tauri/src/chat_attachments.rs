@@ -10,6 +10,7 @@ pub(crate) mod export_io;
 #[cfg(not(test))]
 mod export_io;
 mod ncm;
+pub(crate) mod picker;
 mod store;
 mod types;
 mod validation;

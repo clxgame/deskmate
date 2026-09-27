@@ -272,3 +272,61 @@ fn wire_fixture_reads_fragmented_headers_and_body_completely() {
     // Then it consumes the complete body rather than resetting an in-flight upload.
     assert_eq!(read, request);
 }
+
+#[test]
+fn history_presence_distinguishes_empty_from_files_tools_and_unanswered_users() {
+    for (body, expected) in [
+        (serde_json::json!([]), false),
+        (serde_json::json!([{"info":{"id":"msg_user"},"parts":[{"type":"text","text":"Pending question"}]}]), true),
+        (serde_json::json!([{"info":{"id":"msg_file"},"parts":[{"type":"file","filename":"notes.pdf"}]}]), true),
+        (serde_json::json!([{"info":{"id":"msg_tool"},"parts":[{"type":"tool","state":{"status":"completed"}}]}]), true),
+        (serde_json::json!([{"info":{"id":"msg_pending"},"parts":[]}]), true),
+    ] {
+        let (url, worker) = serve(vec![(200, session("ses_one", "/fixture")), (200, body.to_string())]);
+        let client = NativeHistoryClient::new(&url, "Basic synthetic").unwrap();
+        assert_eq!(client.has_messages("/fixture", "ses_one").unwrap(), expected);
+        let requests = worker.join().unwrap();
+        assert!(requests[1].contains("limit=1"));
+    }
+}
+
+#[test]
+fn presence_errors_cannot_be_mistaken_for_empty_and_scope_is_verified() {
+    for (status, body) in [(503, "[]"), (200, "{}"), (200, "[{}]")] {
+        let (url, worker) = serve(vec![(200, session("ses_one", "/fixture")), (status, body.into())]);
+        let client = NativeHistoryClient::new(&url, "Basic synthetic").unwrap();
+        assert!(client.has_messages("/fixture", "ses_one").is_err());
+        worker.join().unwrap();
+    }
+    let (url, worker) = serve(vec![(200, session("ses_one", "/other"))]);
+    let client = NativeHistoryClient::new(&url, "Basic synthetic").unwrap();
+    assert_eq!(client.has_messages("/fixture", "ses_one"), Err(NativeApiError::ScopeMismatch));
+    assert_eq!(worker.join().unwrap().len(), 1);
+}
+
+#[test]
+fn history_refresh_removes_existing_empty_rows_from_history_then_restores_first_message() {
+    use crate::history::{catalog::CatalogStore, catalog_import::new_entry, catalog_model::*, catalog_query::{page, CatalogQuery}, catalog_content};
+    let root = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open(&root.path().join("catalog.sqlite")).unwrap();
+    let mut row = new_entry(CatalogIdentity::Native { sidecar_id: SIDECAR_ID.into(), directory: "/fixture".into(), session_id: "ses_one".into() }, "YUME chat".into(), ConversationSource::LightChat, 1, 2);
+    row.availability = Availability::Available;
+    row.runtime = RuntimeState::Idle;
+    store.update(|rows| { rows.push(row.clone()); Ok(()) }).unwrap();
+    let (url, worker) = serve(vec![
+        (200, session("ses_one", "/fixture")), (200, "[]".into()),
+        (200, session("ses_one", "/fixture")), (503, "[]".into()),
+        (200, session("ses_one", "/fixture")), (200, r#"[{"info":{"id":"msg_user"},"parts":[{"type":"file"}]}]"#.into()),
+    ]);
+    let client = NativeHistoryClient::new(&url, "Basic synthetic").unwrap();
+    assert!(catalog_content::refresh(&store, &client).unwrap().is_empty());
+    assert_eq!(page(store.all().unwrap(), CatalogQuery::default(), vec![], vec![]).total, 0);
+    assert!(store.get(&row.key()).unwrap().tombstone.is_none());
+    assert!(!catalog_content::refresh(&store, &client).unwrap().is_empty());
+    assert!(catalog_content::refresh(&store, &client).unwrap().is_empty());
+    assert_eq!(page(store.all().unwrap(), CatalogQuery::default(), vec![], vec![]).total, 1);
+    assert_eq!(store.get(&row.key()).unwrap().has_records, Some(true));
+    // Once confirmed, subsequent refreshes preserve content even if the provider is offline.
+    assert!(catalog_content::refresh(&store, &client).unwrap().is_empty());
+    assert_eq!(worker.join().unwrap().len(), 6);
+}

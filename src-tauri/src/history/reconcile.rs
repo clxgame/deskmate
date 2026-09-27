@@ -49,6 +49,9 @@ pub(crate) fn apply_discovery(store: &CatalogStore, directory: &str, sessions: &
             });
             let row = &mut rows[index];
             if row.tombstone.is_some() { continue; }
+            if row.has_records == Some(false) && row.updated != session.time.updated {
+                row.has_records = None;
+            }
             row.title = session.title.clone(); row.created = session.time.created; row.updated = session.time.updated;
             row.availability = Availability::Available;
             // The pinned native server cannot restore an archived session; user archive is catalog-owned.

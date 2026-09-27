@@ -1,7 +1,7 @@
 use super::{catalog::CatalogStore, catalog_model::*};
 use crate::settings::ConversationModelSelection;
 fn entry(directory: &str) -> CatalogEntry {
-    CatalogEntry { identity: CatalogIdentity::Native { sidecar_id: "managed-local-v1".into(), directory: canonical_directory(directory).unwrap(), session_id: "ses_same".into() }, title: "Native title".into(), user_title: None, source: ConversationSource::LightChat, created: 1, updated: 2, pinned: false, archived: false, availability: Availability::Available, ownership: Ownership::Unowned, runtime: RuntimeState::Idle, tombstone: None }
+    CatalogEntry { identity: CatalogIdentity::Native { sidecar_id: "managed-local-v1".into(), directory: canonical_directory(directory).unwrap(), session_id: "ses_same".into() }, title: "Native title".into(), user_title: None, source: ConversationSource::LightChat, created: 1, updated: 2, pinned: false, archived: false, availability: Availability::Available, ownership: Ownership::Unowned, runtime: RuntimeState::Idle, has_records: None, tombstone: None }
 }
 #[test]
 fn metadata_reopens_when_same_native_id_occurs_in_two_projects() {

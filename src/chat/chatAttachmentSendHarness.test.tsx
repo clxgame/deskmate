@@ -18,6 +18,9 @@ type PromptRequest = Readonly<{
 }>;
 
 export const promptRequests: PromptRequest[] = [];
+let attachmentPicker: () => Promise<unknown> = async () => [];
+export function setAttachmentPicker(pick: () => Promise<unknown>): void { attachmentPicker = pick; }
+
 const defaultModel = { configuredProviderId: "test-entry", sidecarId: "yume-2", modelId: "claude-sonnet-4.5", modelName: "Claude Sonnet 4.5" };
 const alternativeModel = { configuredProviderId: "test-entry", sidecarId: "yume-2", modelId: "selected-model-b", modelName: "Selected Model B" };
 let verifiedModels = [defaultModel, alternativeModel];
@@ -150,6 +153,7 @@ export function registerChatAttachmentHarness(): void {
   installNativeMocks();
   invoke.mockReset();
   promptRequests.length = 0;
+  attachmentPicker = async () => [];
   verifiedModels = [defaultModel, alternativeModel];
   modelSelections.clear();
   agentProjection = { active: null, recent: [], artifacts: [] };
@@ -198,6 +202,8 @@ export function registerChatAttachmentHarness(): void {
         return Promise.resolve(SETTINGS);
       case "load_persona":
         return Promise.resolve({ persona: "你是小著。", placeholders: null });
+      case "pick_chat_attachment_files":
+        return attachmentPicker();
       case "stage_chat_attachment":
         return Promise.resolve(stageResponse(args));
       case "read_chat_attachment":

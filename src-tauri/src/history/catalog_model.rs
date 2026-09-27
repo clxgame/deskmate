@@ -124,6 +124,10 @@ pub(crate) struct CatalogEntry {
     pub ownership: Ownership,
     pub runtime: RuntimeState,
     pub tombstone: Option<DeletionTombstone>,
+    /// None means unverified, not empty. Only verified empty contexts are
+    /// excluded from history; their identity remains usable by the composer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_records: Option<bool>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -140,6 +144,11 @@ pub(crate) struct HistoryCapabilities {
 }
 
 impl CatalogEntry {
+    pub(crate) fn visible_in_history(&self) -> bool {
+        self.has_records != Some(false)
+            || self.ownership == Ownership::Agent
+            || self.runtime == RuntimeState::Running
+    }
     pub(crate) fn key(&self) -> String {
         self.identity.key()
     }

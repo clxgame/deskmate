@@ -24,6 +24,31 @@ pub(crate) fn authorize_history_window(label: &str) -> Result<(), NativeApiError
 }
 
 impl NativeHistoryClient {
+    /// Presence of any native message preserves the session, including file-only,
+    /// tool-only, or a user message that has not received an assistant response.
+    pub(crate) fn has_messages(&self, directory: &str, id: &str) -> Result<bool, NativeApiError> {
+        self.verify_preview_session(directory, id)?;
+        let route = format!("{}/message", Self::session_route(id)?);
+        let response = self.request("GET", directory, &route)?
+            .query("limit", "1").timeout(Duration::from_secs(2))
+            .call().map_err(http_error)?;
+        let more = response.header("x-next-cursor").is_some();
+        let mut bytes = Vec::new();
+        response.into_reader().take(1024 * 1024 + 1).read_to_end(&mut bytes)
+            .map_err(|_| NativeApiError::InvalidResponse)?;
+        if bytes.len() > 1024 * 1024 { return Err(NativeApiError::Incomplete); }
+        #[derive(serde::Deserialize)]
+        struct Message { info: Info, parts: Vec<serde_json::Value> }
+        #[derive(serde::Deserialize)]
+        struct Info { id: String }
+        let messages: Vec<Message> = serde_json::from_slice(&bytes).map_err(|_| NativeApiError::InvalidResponse)?;
+        if messages.iter().any(|message| message.info.id.is_empty() || message.parts.iter().any(|part| !part.is_object())) {
+            return Err(NativeApiError::InvalidResponse);
+        }
+        if messages.is_empty() && more { return Err(NativeApiError::Incomplete); }
+        Ok(!messages.is_empty())
+    }
+
     /// Fetch only the newest text messages for a history-row preview. The
     /// ordinary transcript loader deliberately remains unrestricted.
     pub(crate) fn preview_text(

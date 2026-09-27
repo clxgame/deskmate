@@ -5,7 +5,6 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type ChangeEvent,
   type ClipboardEvent,
   type DragEvent,
 } from "react";
@@ -427,7 +426,13 @@ export default function ChatApp() {
   const listRef = useRef<HTMLDivElement>(null);
   const followLatestRef = useRef(true);
   const lastScrollUserRef = useRef<string | undefined>(undefined);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const filePickerPendingRef = useRef(false);
+  const filePickerContextRef = useRef(0);
+  useLayoutEffect(() => {
+    filePickerContextRef.current += 1;
+    return () => { filePickerContextRef.current += 1; };
+  }, [currentSessionId, agent.workspace, agentHistoryId]);
+  const [filePickerPending, setFilePickerPending] = useState(false);
   const dragDepthRef = useRef(0);
   /** mirror of `messages` for persisting history outside render. */
   const messagesRef = useRef<ChatMessage[]>([]);
@@ -463,7 +468,7 @@ export default function ChatApp() {
   const cleanupAttachmentSession = chatAttachments.cleanupSession;
   const discardSentAttachmentSources = chatAttachments.discardSentSources;
   const resetAttachmentSession = chatAttachments.resetSession;
-  const attachmentBusy = chatAttachments.items.some((item) => item.kind === "staging");
+  const attachmentBusy = filePickerPending || chatAttachments.items.some((item) => item.kind === "staging");
   const attachmentBlocked = chatAttachments.items.some(
     (item) => item.kind === "failed" && item.phase === "staging",
   );
@@ -1451,10 +1456,32 @@ export default function ChatApp() {
     [noticeForMemoryFailure],
   );
 
-  const handleFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    event.target.value = "";
-    stageAttachmentFiles(files);
+  const pickAttachmentFiles = async () => {
+    if (filePickerPendingRef.current || attachmentBusy || status === "busy" ||
+        !currentSessionId || agent.workspace || agentHistoryId) return;
+    const generation = viewGenerationRef.current;
+    const sessionId = sessionRef.current;
+    const pickerContext = filePickerContextRef.current;
+    filePickerPendingRef.current = true;
+    setFilePickerPending(true);
+    setOpenPicker(null);
+    try {
+      const picked = await invoke<Array<{ fileName: string; base64: string }>>("pick_chat_attachment_files", { title: t.chatAttachHint });
+      if (generation !== viewGenerationRef.current || sessionId !== sessionRef.current || pickerContext !== filePickerContextRef.current) return;
+      if (picked.length === 0) return;
+      const files = picked.map(item => new File([
+        Uint8Array.from(atob(item.base64), char => char.charCodeAt(0)),
+      ], item.fileName));
+      setAttachmentError(null);
+      stageAttachmentFiles(files);
+    } catch {
+      if (generation === viewGenerationRef.current && sessionId === sessionRef.current && pickerContext === filePickerContextRef.current) {
+        setAttachmentError(tRef.current.chatAttachmentReadFailed);
+      }
+    } finally {
+      filePickerPendingRef.current = false;
+      setFilePickerPending(false);
+    }
   };
 
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -1722,7 +1749,7 @@ export default function ChatApp() {
           {t.chatDropHere}
         </div>
       )}
-      <header className="chat-header" data-tauri-drag-region="">
+      {view !== "history" && <header className="chat-header" data-tauri-drag-region="">
         <span className="chat-title">{activePersonaName}</span>
         <span className={`chat-status chat-status-${status}`}>
           {statusLabel[status]}
@@ -1741,8 +1768,8 @@ export default function ChatApp() {
           <AppIcon name="widget" size={18} />
         </button>
         <button
-          className={`chat-iconbtn${view === "history" ? " chat-iconbtn-active" : ""}`}
-          onClick={() => setView(view === "history" ? "chat" : "history")}
+          className="chat-iconbtn"
+          onClick={() => setView("history")}
           aria-label={t.tabHistory}
           title={t.tabHistory}
         >
@@ -1763,8 +1790,8 @@ export default function ChatApp() {
         >
           <AppIcon name="close" size={18} />
         </button>
-      </header>
-      {workbenchOpenError?.sessionId === currentSessionId && (
+      </header>}
+      {view !== "history" && workbenchOpenError?.sessionId === currentSessionId && (
         <div className="chat-memory-notice" role="alert">
           {workbenchOpenError.reason === "missing" ? t.workbenchSessionMissing : t.workbenchOpenFailed}
         </div>
@@ -2008,14 +2035,6 @@ export default function ChatApp() {
             <>
               <ToolApprovalCards requests={permissions.requests} error={permissions.error} onReply={permissions.reply} t={t} />
               <footer className="chat-input-row">
-            <input
-              ref={fileInputRef}
-              className="chat-file-input"
-              type="file"
-              multiple
-              accept="image/png,image/jpeg,image/gif,image/webp,.txt,.md,.json,.csv,.pdf,.docx,.ncm,.ts,.tsx,.js,.jsx,.css,.html,.xml,.yaml,.yml,.toml,.log"
-              onChange={handleFileInputChange}
-            />
             <div className="chat-input-wrap">
               <AttachmentTray
                 t={t}
@@ -2049,7 +2068,7 @@ export default function ChatApp() {
                 <button
                   className="chat-attach"
                   type="button"
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={() => void pickAttachmentFiles()}
                   disabled={status === "busy" || !currentSessionId || attachmentBusy || !!agent.workspace || !!agentHistoryId}
                   aria-label={t.chatAttach}
                   title={agent.workspace || agentHistoryId ? t.agentAttachmentsUnsupported : t.chatAttachHint}

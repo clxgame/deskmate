@@ -17,6 +17,7 @@ mod agent;
 mod ai_usage;
 pub mod ccswitch;
 mod chat_attachments;
+mod file_picker;
 mod chat_links;
 mod history;
 mod history_entry;
@@ -1593,6 +1594,7 @@ pub fn run() {
             workbench::workbench_open_path,
             workbench::workbench_reveal_path,
             load_persona,
+            chat_attachments::picker::pick_chat_attachment_files,
             chat_attachments::stage_chat_attachment,
             chat_attachments::read_chat_attachment,
             chat_attachments::discard_chat_attachment,

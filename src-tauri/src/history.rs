@@ -10,6 +10,7 @@ mod archive;
 pub(crate) mod native_api;
 pub(crate) mod catalog_model;
 mod catalog;
+mod catalog_content;
 mod catalog_query;
 pub(crate) mod catalog_preview;
 mod catalog_details;

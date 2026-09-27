@@ -127,6 +127,7 @@ pub(crate) fn register_native(app: &tauri::AppHandle, session_id: &str, source: 
     let directory = directory.map(catalog_import::canonical_directory).unwrap_or(workspace(app)?);
     let native = client(app)?.get(&directory, session_id).map_err(|error| error.to_string())?;
     if native.parent_id.is_some() { return Err("history_child_session".into()); }
+    let has_records = client(app)?.has_messages(&directory, session_id).ok();
     let store = store(app)?;
     store.register_directory(&directory)?;
     let identity = CatalogIdentity::Native { sidecar_id: SIDECAR_ID.into(), directory, session_id: session_id.into() };
@@ -134,6 +135,7 @@ pub(crate) fn register_native(app: &tauri::AppHandle, session_id: &str, source: 
         if let Some(row) = rows.iter().find(|row| row.key() == identity.key()) { return Ok(row.clone()); }
         let mut row = catalog_import::new_entry(identity, native.title, source, native.time.created, native.time.updated);
         row.availability = Availability::Available;
+        row.has_records = has_records;
         row.runtime = RuntimeState::Unknown;
         rows.push(row.clone()); Ok(row)
     })?;
@@ -185,9 +187,10 @@ pub(crate) async fn history_catalog_load(window: tauri::WebviewWindow, app: taur
 fn refresh_history(app: &tauri::AppHandle) -> Result<Vec<String>, String> {
     let runs = app.state::<crate::agent::AgentRunState>();
     let _operation = runs.lock_operation()?;
-    let errors = super::reconcile::reconcile(&store(app)?, &client(app)?, &runs.all_records()?)?;
+    let mut errors = super::reconcile::reconcile(&store(app)?, &client(app)?, &runs.all_records()?)?;
     super::catalog_preview::invalidate_all();
     initialize(app)?;
+    errors.extend(super::catalog_content::refresh(&store(app)?, &client(app)?)?);
     Ok(errors)
 }
 

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "../testing/chatAgentHistoryCases";
-import { agentRun, ChatApp, deferAgentStart, finishAgentStart, invoke, promptRequests, selectWorkspace, setAgentProjection, removeAlternativeModel, addSyntheticModels, registerChatAttachmentHarness } from "./chatAttachmentSendHarness.test";
+import { setAttachmentPicker, agentRun, ChatApp, deferAgentStart, finishAgentStart, invoke, promptRequests, selectWorkspace, setAgentProjection, removeAlternativeModel, addSyntheticModels, registerChatAttachmentHarness } from "./chatAttachmentSendHarness.test";
 
 function dropMarkdownFile(): void {
   const root = document.querySelector(".chat-root");
@@ -266,5 +266,74 @@ describe("dropped attachment sending", () => {
     await screen.findByRole("article", { name: "生成的音频 song.mp3" });
     expect(screen.getByText("在的,说吧")).toBeTruthy();
     expect(promptRequests).toHaveLength(0);
+  });
+});
+
+
+describe("native attachment picker", () => {
+  test("plus picks multiple native files and stages their bytes before sending", async () => {
+    setAttachmentPicker(async () => [
+      { fileName: "notes.md", base64: btoa("# selected") },
+      { fileName: "second.txt", base64: btoa("second") },
+    ]);
+    render(<ChatApp />);
+    const input = await screen.findByPlaceholderText("输入消息,Enter 发送");
+    const plus = await screen.findByRole("button", { name: "附件" });
+    await waitFor(() => expect((plus as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(plus);
+    await screen.findByText("notes.md");
+    await screen.findByText("second.txt");
+    const staged = invoke.mock.calls.filter(([name]) => name === "stage_chat_attachment");
+    expect(staged.map(([, args]) => (args as { request: { fileName: string } }).request.fileName)).toEqual(["notes.md", "second.txt"]);
+    expect(staged[0]?.[1]).toMatchObject({ request: { bytes: Array.from(new TextEncoder().encode("# selected")) } });
+    fireEvent.change(input, { target: { value: "读取附件" } });
+    await waitFor(() => expect((screen.getByRole("button", { name: "发送" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await expectAttachmentPrompt("读取附件");
+  });
+
+  test("cancel preserves existing attachments and draft, and re-enables plus", async () => {
+    render(<ChatApp />);
+    const input = await screen.findByPlaceholderText("输入消息,Enter 发送");
+    dropMarkdownFile();
+    await screen.findByText("notes.md");
+    fireEvent.change(input, { target: { value: "保留草稿" } });
+    const plus = screen.getByRole("button", { name: "附件" }) as HTMLButtonElement;
+    await waitFor(() => expect(plus.disabled).toBe(false));
+    fireEvent.click(plus);
+    await waitFor(() => expect(plus.disabled).toBe(false));
+    expect((input as HTMLTextAreaElement).value).toBe("保留草稿");
+    expect(screen.getByText("notes.md")).toBeDefined();
+    expect(invoke.mock.calls.filter(([name]) => name === "stage_chat_attachment")).toHaveLength(1);
+  });
+
+  test("picker failure is visible and can be retried", async () => {
+    setAttachmentPicker(async () => { throw new Error("read failed"); });
+    render(<ChatApp />);
+    await screen.findByPlaceholderText("输入消息,Enter 发送");
+    const plus = screen.getByRole("button", { name: "附件" }) as HTMLButtonElement;
+    await waitFor(() => expect(plus.disabled).toBe(false));
+    fireEvent.click(plus);
+    await screen.findByText("文件读取失败，请确认文件完整后重试");
+    expect(plus.disabled).toBe(false);
+    expect(invoke.mock.calls.filter(([name]) => name === "stage_chat_attachment")).toHaveLength(0);
+  });
+
+  test("a pending picker opens once and cannot add files to a switched folder", async () => {
+    let resolve!: (files: unknown[]) => void;
+    setAttachmentPicker(() => new Promise(done => { resolve = done; }));
+    selectWorkspace("C:\\workspace");
+    render(<ChatApp />);
+    await screen.findByPlaceholderText("输入消息,Enter 发送");
+    const plus = screen.getByRole("button", { name: "附件" }) as HTMLButtonElement;
+    await waitFor(() => expect(plus.disabled).toBe(false));
+    fireEvent.click(plus);
+    fireEvent.click(plus);
+    expect(invoke.mock.calls.filter(([name]) => name === "pick_chat_attachment_files")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "文件夹" }));
+    await screen.findByText("workspace");
+    await act(async () => resolve([{ fileName: "late.txt", base64: btoa("late") }]));
+    expect(invoke.mock.calls.filter(([name]) => name === "stage_chat_attachment")).toHaveLength(0);
+    expect(screen.queryByText("late.txt")).toBeNull();
   });
 });

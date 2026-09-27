@@ -43,6 +43,7 @@ pub(crate) struct CatalogLoaded {
 }
 
 pub(crate) fn page(mut rows: Vec<CatalogEntry>, query: CatalogQuery, directories: Vec<String>, errors: Vec<String>) -> CatalogPage {
+    rows.retain(CatalogEntry::visible_in_history);
     let offline = rows.iter().any(|row| row.tombstone.is_none() && matches!(row.identity, CatalogIdentity::Native { .. }) && row.availability != Availability::Available);
     let search = query.search.unwrap_or_default().trim().to_lowercase();
     rows.retain(|row| {

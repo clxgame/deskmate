@@ -561,27 +561,9 @@ pub async fn workbench_pick_files(
     extensions: Option<Vec<String>>,
 ) -> Result<Vec<PickedFile>, String> {
     require_workbench(&window)?;
-    use tauri_plugin_dialog::DialogExt;
-    let mut dialog = window.dialog().file();
-    if let Some(title) = title {
-        dialog = dialog.set_title(&title);
-    }
-    let filter_ext: Vec<String> = extensions
-        .unwrap_or_default()
-        .into_iter()
-        .map(|ext| ext.trim_start_matches('.').to_lowercase())
-        .filter(|ext| !ext.is_empty() && ext.chars().all(|c| c.is_ascii_alphanumeric()))
-        .collect();
-    if !filter_ext.is_empty() {
-        let ext_refs: Vec<&str> = filter_ext.iter().map(String::as_str).collect();
-        dialog = dialog.add_filter("files", &ext_refs);
-    }
-    let picked = dialog.blocking_pick_files().unwrap_or_default();
+    let picked = crate::file_picker::pick_files(&window, title, extensions)?;
     let mut out = Vec::new();
-    for path in picked {
-        let path_buf = path
-            .into_path()
-            .map_err(|_| "picked path unavailable".to_string())?;
+    for path_buf in picked {
         let meta = std::fs::metadata(&path_buf).map_err(|_| "picked file missing".to_string())?;
         if !meta.is_file() {
             continue;

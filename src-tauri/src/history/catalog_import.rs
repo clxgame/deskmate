@@ -77,6 +77,7 @@ pub(crate) fn register_sources(store: &CatalogStore, sessions: &[HistorySession]
             }
             rows.retain(|row| !matches!(&row.identity, CatalogIdentity::Legacy { history_id } if history_id == &id));
         }
+        super::catalog_content::apply_local_evidence(rows, sessions, workspace);
         Ok(())
     })
 }
@@ -88,6 +89,6 @@ pub(crate) fn canonical_directory(directory: &str) -> String {
 }
 
 pub(crate) fn new_entry(identity: CatalogIdentity, title: String, source: ConversationSource, created: u64, updated: u64) -> CatalogEntry {
-    CatalogEntry { identity, title, user_title: None, source, created, updated, pinned: false, archived: false, availability: Availability::Stale, ownership: Ownership::Unowned, runtime: RuntimeState::Unknown, tombstone: None }
+    CatalogEntry { identity, title, user_title: None, source, created, updated, pinned: false, archived: false, availability: Availability::Stale, ownership: Ownership::Unowned, runtime: RuntimeState::Unknown, has_records: None, tombstone: None }
 }
 

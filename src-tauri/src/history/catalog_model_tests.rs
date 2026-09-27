@@ -22,7 +22,7 @@ pub(super) fn fixture(index: u64) -> CatalogEntry {
         availability: Availability::Available,
         ownership: Ownership::Unowned,
         runtime: RuntimeState::Idle,
-        tombstone: None,
+        has_records: None, tombstone: None,
     }
 }
 

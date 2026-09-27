@@ -29,6 +29,7 @@ fn entry(identity: CatalogIdentity) -> CatalogEntry {
         source: ConversationSource::LightChat, created: 1, updated: 1,
         pinned: false, archived: false, availability: Availability::Available,
         ownership: Ownership::Unowned, runtime: RuntimeState::Idle,
+        has_records: None,
         tombstone: Some(DeletionTombstone { requested_at: 2, remote_deleted: true }),
     }
 }

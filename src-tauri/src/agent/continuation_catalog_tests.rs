@@ -35,7 +35,7 @@ impl Fixture {
                 session_id: "ses_same".into() },
             title: "Selected".into(), user_title: None, source: ConversationSource::Workbench,
             created: 1, updated: 2, pinned: false, archived: false, availability: Availability::Available,
-            ownership: Ownership::Agent, runtime: RuntimeState::Idle, tombstone: None,
+            ownership: Ownership::Agent, runtime: RuntimeState::Idle, has_records: None, tombstone: None,
         };
         Self { root, selected, history, runs, entry }
     }

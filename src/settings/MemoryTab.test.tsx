@@ -85,7 +85,7 @@ describe("Memory Center states", () => {
     invoke.mockImplementation(() => Promise.resolve([]));
     renderTab();
     expect(
-      await screen.findByText(/还没有任何记忆/),
+      await screen.findByText(/还没有记忆/),
     ).toBeDefined();
   });
 
@@ -140,7 +140,7 @@ describe("filtering and search", () => {
     await waitFor(() => {
       expect(invoke.mock.calls.length).toBeGreaterThan(0);
     });
-    const [command, args] = invoke.mock.calls[0] as [
+    const [command, args] = invoke.mock.calls.find(([command]) => command === "memory_list")! as [
       string,
       { query: Record<string, unknown> },
     ];
@@ -185,6 +185,7 @@ describe("filtering and search", () => {
 
   test("a search term is forwarded and an empty result says no matches", async () => {
     invoke.mockImplementation((_command, args) => {
+      if (_command === "memory_automation_status") return Promise.resolve({ pending: 0, failed: 0 });
       const query = (args as { query: { search: string | null } }).query;
       return Promise.resolve(query.search ? [] : [record()]);
     });
@@ -364,7 +365,7 @@ describe("privacy controls", () => {
     });
 
     const user = userEvent.setup();
-    const extractToggle = screen.getByLabelText("自动记录候选记忆");
+    const extractToggle = screen.getByLabelText("自动记忆");
     const useToggle = screen.getByLabelText("允许 AI 使用记忆");
     expect((extractToggle as HTMLInputElement).checked).toBe(false);
     expect((useToggle as HTMLInputElement).checked).toBe(true);
@@ -379,6 +380,6 @@ describe("privacy controls", () => {
     invoke.mockImplementation(() => Promise.resolve([]));
     renderTab();
     expect(screen.getByText(/保存在这台电脑上/)).toBeDefined();
-    expect(screen.getByText(/不会把任何记忆发送给你配置的 AI 服务/)).toBeDefined();
+    expect(screen.getByText(/关闭后停止记忆提取和回复中的记忆使用/)).toBeDefined();
   });
 });

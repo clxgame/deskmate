@@ -154,9 +154,19 @@ export default function SettingsApp() {
       window.clearTimeout(saveTimer.current);
       saveTimer.current = null;
     }
+    const previous = settingsRef.current;
     settingsRef.current = next;
     setLocalSettings(next);
-    await setSettings(next);
+    try {
+      await setSettings(next);
+    } catch (error: unknown) {
+      // The backend may save the setting before a sidecar restart fails.
+      const actual = await getSettings().catch(() => null);
+      const reconciled = actual ?? previous;
+      settingsRef.current = reconciled;
+      setLocalSettings(reconciled);
+      throw error;
+    }
   }, []);
 
   /** Update one field locally, then persist the whole object debounced. */
@@ -213,7 +223,7 @@ export default function SettingsApp() {
                 t={t}
               />
             )}
-            {tab === "permissions" && <ToolPermissionsTab settings={settings} patch={patch} t={t} />}
+            {tab === "permissions" && <ToolPermissionsTab settings={settings} patch={patch} persist={persist} t={t} />}
             {tab === "widget" && (
               <WidgetTab settings={settings} patch={patch} t={t} activeWidget={activeWidget} onSelect={setActiveWidget} worklogRequest={worklogRequest} />
             )}

@@ -85,6 +85,18 @@ pub(super) fn decision_with_approvals(
     request: &PermissionRequest,
     approvals: &[AgentPermissionApproval],
 ) -> Result<PendingDecision, String> {
+    decision_with_resources(workspace, request, approvals, &[])
+}
+
+pub(super) fn decision_with_resources(
+    workspace: &WorkspaceRoot,
+    request: &PermissionRequest,
+    approvals: &[AgentPermissionApproval],
+    resources: &[crate::chat_attachments::resources::ReadScope],
+) -> Result<PendingDecision, String> {
+    if crate::chat_attachments::resources::allows_request(resources, workspace.path(), request) {
+        return Ok(PendingDecision::AllowOnce);
+    }
     let decision = match request.permission.as_str() {
         "read" | "glob" | "grep" | "list" => {
             if read_paths_allowed(workspace, request)? {

@@ -24,6 +24,8 @@ struct ContextFile {
     fingerprint: String,
     exclude_sessions: Vec<String>,
     skip_when_head_includes: Vec<String>,
+    automation_endpoint: Option<String>,
+    automation_token: Option<String>,
 }
 
 fn opencode_home(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -76,30 +78,8 @@ fn compose_block(app: &tauri::AppHandle) -> Result<String, String> {
         .clone();
     let persona_id = settings.persona_id.clone();
     let (persona, _, skills) = crate::packs::persona_files(app, &persona_id)?;
-    let memory = app
-        .state::<crate::memory::MemoryState>()
-        .0
-        .lock()
-        .map_err(|_| "memory unavailable".to_string())?
-        .as_ref()
-        .map(|repository| {
-            // No turn text exists on the workbench path at injection time, so
-            // this carries anchor memories only; per-turn keyword retrieval
-            // stays with the host's own send path.
-            crate::memory::retrieval::context_for_turn(
-                repository,
-                &persona_id,
-                "",
-                settings.memory_ai_use,
-            )
-        })
-        .transpose()
-        .map_err(|_| "memory unavailable".to_string())?
-        .map(|context| context.prompt_block)
-        .filter(|block| !block.is_empty());
     Ok(std::iter::once(persona)
         .chain(skills)
-        .chain(memory)
         .collect::<Vec<_>>()
         .join("\n\n"))
 }
@@ -127,6 +107,10 @@ fn read_exclude_sessions(path: &Path) -> Vec<String> {
         .unwrap_or_default()
 }
 
+pub(crate) fn excluded_session(app: &tauri::AppHandle, session: &str) -> bool {
+    context_file_path(app).ok().is_some_and(|path| read_exclude_sessions(&path).iter().any(|id| id == session))
+}
+
 /// Rewrite the context file from the current persona/memory state. The plugin
 /// reads it per request, so this propagates without a sidecar restart.
 pub(crate) fn write_context(app: &tauri::AppHandle) -> Result<(), String> {
@@ -136,13 +120,22 @@ pub(crate) fn write_context(app: &tauri::AppHandle) -> Result<(), String> {
     let block = compose_block(app)?;
     let context = ContextFile {
         version: 1,
+        automation_endpoint: app
+            .try_state::<crate::memory::automatic::AutomationBridge>()
+            .map(|b| b.endpoint.clone()),
+        automation_token: app
+            .try_state::<crate::memory::automatic::AutomationBridge>()
+            .map(|b| b.token.clone()),
         fingerprint: fingerprint(&block),
         block,
         exclude_sessions: read_exclude_sessions(&path),
-        skip_when_head_includes: vec![crate::worklog::reports::SYSTEM
-            .chars()
-            .take(SKIP_MARKER_CHARS)
-            .collect()],
+        skip_when_head_includes: vec![
+            crate::worklog::reports::SYSTEM
+                .chars()
+                .take(SKIP_MARKER_CHARS)
+                .collect(),
+            "YUME_INTERNAL_MEMORY_V1".into(),
+        ],
     };
     let tmp = dir.join(format!("{CONTEXT_FILE_NAME}.tmp"));
     let serialized =

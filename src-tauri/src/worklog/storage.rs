@@ -16,7 +16,7 @@ impl WorklogStore {
         let mut connection = Connection::open(path)?;
         configure(&connection)?;
         let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version > 1 {
+        if version > 2 {
             return Err(WorklogError::new(
                 "MIGRATION_FAILED",
                 "Journal schema is newer than this application",
@@ -50,6 +50,28 @@ impl WorklogStore {
             tx.pragma_update(None, "user_version", 1)?;
             tx.commit()?;
         }
+        if version == 1 {
+            let busy: i64 =
+                connection.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| r.get(0))?;
+            if busy != 0 {
+                return Err(WorklogError::new(
+                    "MIGRATION_FAILED",
+                    "Journal checkpoint is busy",
+                ));
+            }
+            std::fs::copy(path, path.with_extension("db.pre-migration")).map_err(|_| {
+                WorklogError::new(
+                    "MIGRATION_FAILED",
+                    "Journal backup failed; migration cancelled",
+                )
+            })?;
+        }
+        if version < 2 {
+            let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            tx.execute_batch(include_str!("migrations/002_auto_archive.sql"))?;
+            tx.pragma_update(None, "user_version", 2)?;
+            tx.commit()?;
+        }
         Ok(Self {
             connection: Mutex::new(connection),
         })
@@ -59,6 +81,7 @@ impl WorklogStore {
         let connection = Connection::open_in_memory()?;
         configure(&connection)?;
         connection.execute_batch(include_str!("migrations/001_initial.sql"))?;
+        connection.execute_batch(include_str!("migrations/002_auto_archive.sql"))?;
         Ok(Self {
             connection: Mutex::new(connection),
         })

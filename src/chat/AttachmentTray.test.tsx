@@ -133,7 +133,7 @@ describe("AttachmentTray", () => {
       />,
     );
 
-    expect(screen.getByRole("region", { name: labels.chatAttachmentTrayLabel })).toBeDefined();
+    expect(screen.getByRole("group", { name: labels.chatAttachmentTrayLabel })).toBeDefined();
     expect(screen.getByText(labels.chatAttachmentStaging)).toBeDefined();
     expect(screen.getAllByText(labels.chatAttachmentReady)).toHaveLength(2);
     expect(screen.getByText(labels.chatAttachmentFailed)).toBeDefined();
@@ -209,5 +209,21 @@ describe("AttachmentTray", () => {
     await user.click(screen.getByRole("button", { name: labels.chatAttachmentRetry("broken.ncm") }));
     expect(onRetry).toHaveBeenCalledWith("local-failed-ncm");
     expect(onRemove).toHaveBeenCalledTimes(0);
+  });
+
+  test("submission disables every legacy attachment action and allows them again afterward", async () => {
+    const user = userEvent.setup();
+    const action = mock(() => undefined);
+    const props = { t: labels, items: [ncmConfirmation(), failedConversion(), readyMarkdown()],
+      onCancel: action, onConfirm: action, onRemove: action, onRetry: action };
+    const view = render(<AttachmentTray {...props} disabled />);
+    const tray = screen.getByRole("group", { name: labels.chatAttachmentTrayLabel }) as HTMLFieldSetElement;
+    expect(tray.tagName).toBe("FIELDSET");
+    expect(tray.disabled).toBe(true);
+    for (const button of within(tray).getAllByRole("button")) await user.click(button);
+    expect(action).not.toHaveBeenCalled();
+    view.rerender(<AttachmentTray {...props} disabled={false} />);
+    await user.click(screen.getByRole("button", { name: `${labels.chatAttachmentRemove} notes.md` }));
+    expect(action).toHaveBeenCalledWith("local-md");
   });
 });

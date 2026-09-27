@@ -34,6 +34,7 @@ fn snapshot_recovery_deduplicates_native_references_and_never_replays() -> TestR
         error: None,
         parts: vec![
             NativePart {
+                synthetic: false,
                 kind: None,
                 text: None,
                 id: "part_one".into(),
@@ -42,6 +43,7 @@ fn snapshot_recovery_deduplicates_native_references_and_never_replays() -> TestR
                 state: None,
             },
             NativePart {
+                synthetic: false,
                 kind: None,
                 text: None,
                 id: "part_one".into(),
@@ -92,6 +94,7 @@ fn intermediate_tool_calls_keep_run_active_until_explicit_terminal_message() -> 
         finish: Some("tool-calls".into()),
         error: None,
         parts: vec![NativePart {
+            synthetic: false,
             kind: None,
             text: None,
             id: "part_read".into(),
@@ -114,6 +117,7 @@ fn intermediate_tool_calls_keep_run_active_until_explicit_terminal_message() -> 
         finish: None,
         error: None,
         parts: vec![NativePart {
+            synthetic: false,
             kind: None,
             text: None,
             id: "part_edit".into(),
@@ -172,6 +176,7 @@ fn intermediate_tool_calls_keep_run_active_until_explicit_terminal_message() -> 
         finish: Some("stop".into()),
         error: None,
         parts: vec![NativePart {
+            synthetic: false,
             kind: None,
             text: None,
             id: "part_text".into(),

@@ -69,6 +69,8 @@ impl NativeHistoryClient {
         #[derive(serde::Deserialize)]
         struct Part {
             id: String,
+            #[serde(default)]
+            synthetic: bool,
             #[serde(rename = "type")]
             kind: Option<String>,
             text: Option<String>,
@@ -112,7 +114,7 @@ impl NativeHistoryClient {
                 let text = message
                     .parts
                     .iter()
-                    .filter(|part| part.kind.as_deref() == Some("text"))
+                    .filter(|part| !part.synthetic && part.kind.as_deref() == Some("text"))
                     .filter_map(|part| part.text.as_deref())
                     .map(str::trim)
                     .filter(|text| !text.is_empty())
@@ -129,7 +131,7 @@ impl NativeHistoryClient {
                             part_id: message
                                 .parts
                                 .iter()
-                                .find(|part| part.kind.as_deref() == Some("text"))
+                                .find(|part| !part.synthetic && part.kind.as_deref() == Some("text"))
                                 .map(|part| part.id.clone()),
                         }),
                         exhausted: cursor.is_none(),

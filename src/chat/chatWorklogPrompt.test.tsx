@@ -96,6 +96,7 @@ test("ChatApp sends dynamic local-date worklog guidance with each prompt", async
   render(<ChatApp />);
   const input = await screen.findByPlaceholderText("输入消息,Enter 发送");
   fireEvent.change(input, { target: { value: "昨天我做了什么" } });
+  await waitFor(() => expect((screen.getByRole("button", { name: "发送" }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole("button", { name: "发送" }));
 
   await waitFor(() => expect(promptRequests).toHaveLength(1));

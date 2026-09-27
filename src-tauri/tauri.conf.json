@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "YUME",
-  "version": "0.4.13",
+  "version": "0.4.14",
   "identifier": "com.deskmate.desktop",
   "build": {
     "beforeDevCommand": "bun run prepare:sidecar && bun run dev",
@@ -32,7 +32,7 @@
         "url": "chat.html",
         "title": "YUME chat",
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection",
-        "dragDropEnabled": false,
+        "dragDropEnabled": true,
         "width": 420,
         "height": 560,
         "x": -10000,
@@ -74,8 +74,8 @@
         "connect-src": "'self' customprotocol: asset: ipc: http://ipc.localhost http://asset.localhost http://127.0.0.1:* ws://127.0.0.1:* blob: data:",
         "font-src": "'self' data:",
         "worker-src": "'self' blob:",
-        "img-src": "'self' asset: http://asset.localhost blob: data:",
-        "media-src": "'self' asset: http://asset.localhost blob: data:",
+        "img-src": "'self' asset: http://asset.localhost chat-resource: http://chat-resource.localhost blob: data: https://chat-resource.localhost",
+        "media-src": "'self' asset: http://asset.localhost chat-resource: http://chat-resource.localhost blob: data: https://chat-resource.localhost",
         "style-src": "'self' 'unsafe-inline'",
         "script-src": "'self' 'wasm-unsafe-eval'",
         "object-src": "'none'",

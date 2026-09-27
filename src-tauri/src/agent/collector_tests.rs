@@ -46,6 +46,7 @@ fn terminal(run_id: &str) -> Vec<NativeMessage> {
         finish: Some("stop".into()),
         error: None,
         parts: vec![NativePart {
+            synthetic: false,
             id: "prt_reply".into(),
             kind: Some("text".into()),
             text: Some("finished without renderer polling".into()),
@@ -83,6 +84,7 @@ fn permission_snapshot() -> Vec<NativeMessage> {
         finish: None,
         error: None,
         parts: vec![NativePart {
+            synthetic: false,
             id: "part_tool".into(),
             kind: Some("tool".into()),
             text: None,

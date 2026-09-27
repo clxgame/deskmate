@@ -291,6 +291,15 @@ pub struct MemoryRecord {
     pub memory: Memory,
     pub sources: Vec<MemorySource>,
     pub linked_task_ids: Vec<String>,
+    pub context: Option<MemoryContext>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryContext {
+    pub workspace: Option<String>,
+    pub topic: Option<String>,
+    pub state: String,
 }
 
 /// Bounded, per-persona relationship state. No score is shown to the user.

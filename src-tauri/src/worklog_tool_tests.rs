@@ -1,5 +1,9 @@
-fn owned_worklog_resources() -> [(&'static str, &'static [u8]); 6] {
+fn owned_worklog_resources() -> [(&'static str, &'static [u8]); 7] {
     [
+        (
+            "memory_manage.ts",
+            include_bytes!("../resources/opencode-tools/memory_manage.ts").as_slice(),
+        ),
         (
             "worklog_record.ts",
             include_bytes!("../resources/opencode-tools/worklog_record.ts").as_slice(),

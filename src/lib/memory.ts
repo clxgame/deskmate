@@ -67,6 +67,7 @@ export interface MemorySource {
 
 /** A memory with its provenance, as shown in the Memory Center. */
 export interface MemoryRecord extends Memory {
+  context?: { workspace: string | null; topic: string | null; state: "active" | "paused" | "completed" } | null;
   sources: MemorySource[];
   linkedTaskIds: string[];
 }
@@ -248,6 +249,7 @@ export function memoryContext(options: {
   personaId: string;
   userText: string;
   enabled: boolean;
+  directory?: string;
 }): Promise<RetrievalContext> {
   return invoke<RetrievalContext>("memory_context", options);
 }
@@ -333,3 +335,7 @@ export function onMemoryChanged(
   });
 }
 
+
+export interface AutomationStatus { pending: number; failed: number }
+export const memoryAutomationStatus = () => invoke<AutomationStatus>("memory_automation_status");
+export const retryMemoryAutomation = () => invoke<void>("memory_automation_retry");

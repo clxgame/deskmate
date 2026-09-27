@@ -6,8 +6,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 /**
- * Component tests for the chat memory surface: explicit save, inline receipt,
- * undo, forget, sensitive confirmation, and secret rejection.
+ * Component tests for background registration, a clean chat surface and retrieval.
  *
  * The OpenCode transport and Tauri IPC are both mocked so the test drives the
  * real component without a sidecar or a database.
@@ -104,29 +103,6 @@ const SETTINGS = {
 
 const PERSONA = { persona: "你是爱弥斯。", skills: undefined, placeholders: null };
 
-function storedMemory(overrides: Record<string, unknown> = {}) {
-  return {
-    id: "m1",
-    scope: "global",
-    personaId: null,
-    type: "identity",
-    memoryKey: "identity.preferred_name",
-    content: "以后叫我小林",
-    status: "active",
-    confidence: 1,
-    importance: 3,
-    sensitivity: "normal",
-    sourceKind: "explicit",
-    validFrom: "2026-01-01T00:00:00Z",
-    expiresAt: null,
-    createdAt: "2026-01-01T00:00:00Z",
-    updatedAt: "2026-01-01T00:00:00Z",
-    revision: 1,
-    supersedesId: null,
-    ...overrides,
-  };
-}
-
 /** Route each command to its handler, defaulting to the real-ish response. */
 function handleInvoke(handlers: Record<string, () => Promise<unknown>>) {
   invoke.mockImplementation((command: string, args?: unknown) => {
@@ -194,7 +170,7 @@ afterEach(() => {
   globalThis.EventSource = OriginalEventSource;
 });
 
-describe("explicit memory controls in chat", () => {
+describe("automatic memory in chat", () => {
   test("uses a saved nickname over the persona's default form of address", async () => {
     handleInvoke({
       get_settings: () => Promise.resolve({ ...SETTINGS, userName: "指挥官" }),
@@ -210,175 +186,25 @@ describe("explicit memory controls in chat", () => {
     expect(system).toContain("覆盖角色设定中的默认称呼");
   });
 
-  test("saving a message shows an inline receipt with undo", async () => {
-    handleInvoke({ memory_create: () => Promise.resolve(storedMemory()) });
+  test("ordinary messages register in the background without per-message actions", async () => {
     render(<ChatApp />);
-    const user = await sendMessage("以后叫我小林");
-
-    await user.click(await screen.findByRole("button", { name: "记住这件事" }));
-
-    const receipt = await screen.findByText("已记住：以后叫我小林");
-    expect(receipt).toBeDefined();
-    expect(screen.getByRole("button", { name: "撤销" })).toBeDefined();
-
-    const createCall = invoke.mock.calls.find(([command]) => command === "memory_create");
-    expect(createCall).toBeDefined();
-    const { memory } = createCall![1] as { memory: Record<string, unknown> };
-    expect(memory.content).toBe("以后叫我小林");
-    expect(memory.scope).toBe("global");
-    expect(memory.type).toBe("identity");
-    expect(memory.conversationId).toBe("ses_1");
+    await sendMessage("以后请用简短中文回答");
+    await waitFor(() => expect(promptRequests).toHaveLength(1));
+    expect(screen.queryByRole("button", { name: "记住这件事" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "保存到工作日志" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /安排周五/ })).toBeNull();
+    const call = invoke.mock.calls.find(([name]) => name === "memory_register_turn");
+    expect(call).toBeDefined();
+    expect((call![1] as { registration: { sessionId: string } }).registration.sessionId).toBe("ses_1");
+    expect(invoke.mock.calls.some(([name]) => name === "memory_create")).toBe(false);
   });
 
-  test("undo removes the memory and the receipt", async () => {
-    handleInvoke({
-      memory_create: () => Promise.resolve(storedMemory()),
-      memory_forget: () => Promise.resolve(undefined),
-    });
+  test("background registration failure leaves normal chat usable", async () => {
+    handleInvoke({ memory_register_turn: () => Promise.reject(new Error("unavailable")) });
     render(<ChatApp />);
-    const user = await sendMessage("以后叫我小林");
-    await user.click(await screen.findByRole("button", { name: "记住这件事" }));
-    await screen.findByText("已记住：以后叫我小林");
-
-    await user.click(screen.getByRole("button", { name: "撤销" }));
-
-    await waitFor(() => {
-      expect(screen.queryByText("已记住：以后叫我小林")).toBeNull();
-    });
-    expect(await screen.findByText("已撤销，这条记忆没有保存")).toBeDefined();
-    expect(
-      invoke.mock.calls.some(([command]) => command === "memory_forget"),
-    ).toBe(true);
-  });
-
-  test("forgetting a saved memory reports it and clears the receipt", async () => {
-    handleInvoke({
-      memory_create: () => Promise.resolve(storedMemory()),
-      memory_forget: () => Promise.resolve(undefined),
-    });
-    render(<ChatApp />);
-    const user = await sendMessage("以后叫我小林");
-    await user.click(await screen.findByRole("button", { name: "记住这件事" }));
-    await screen.findByText("已记住：以后叫我小林");
-
-    await user.click(screen.getByRole("button", { name: "忘掉相关记忆" }));
-
-    expect(await screen.findByText("已忘掉这条记忆")).toBeDefined();
-    await waitFor(() => {
-      expect(screen.queryByText("已记住：以后叫我小林")).toBeNull();
-    });
-  });
-
-  test("sensitive content is stored only after the disclosure is accepted", async () => {
-    let attempts = 0;
-    handleInvoke({
-      memory_create: () => {
-        attempts += 1;
-        if (attempts === 1) {
-          return Promise.reject({
-            code: "SENSITIVE_CONFIRMATION_REQUIRED",
-            message: "sensitive content needs explicit confirmation",
-          });
-        }
-        return Promise.resolve(
-          storedMemory({ content: "我讨厌被问月薪", sensitivity: "sensitive" }),
-        );
-      },
-    });
-    render(<ChatApp />);
-    const user = await sendMessage("我讨厌被问月薪");
-    await user.click(await screen.findByRole("button", { name: "记住这件事" }));
-
-    // Nothing is saved yet: the user sees the local-storage disclosure first.
-    expect(await screen.findByText("这条信息比较私密")).toBeDefined();
-    expect(screen.queryByText(/^已记住：/)).toBeNull();
-
-    await user.click(screen.getByRole("button", { name: "确认记住" }));
-
-    expect(await screen.findByText("已记住：我讨厌被问月薪")).toBeDefined();
-    const confirmed = invoke.mock.calls
-      .filter(([command]) => command === "memory_create")
-      .at(-1)![1] as { memory: Record<string, unknown> };
-    expect(confirmed.memory.sensitiveConfirmed).toBe(true);
-  });
-
-  test("declining the disclosure stores nothing", async () => {
-    handleInvoke({
-      memory_create: () =>
-        Promise.reject({
-          code: "SENSITIVE_CONFIRMATION_REQUIRED",
-          message: "sensitive content needs explicit confirmation",
-        }),
-    });
-    render(<ChatApp />);
-    const user = await sendMessage("我讨厌被问月薪");
-    await user.click(await screen.findByRole("button", { name: "记住这件事" }));
-    await screen.findByText("这条信息比较私密");
-
-    await user.click(screen.getByRole("button", { name: "不记了" }));
-
-    await waitFor(() => {
-      expect(screen.queryByText("这条信息比较私密")).toBeNull();
-    });
-    expect(screen.queryByText(/^已记住：/)).toBeNull();
-  });
-
-  test("a secret is refused and never rendered back to the user", async () => {
-    handleInvoke({
-      memory_create: () =>
-        Promise.reject({
-          code: "SECRET_REJECTED",
-          message: "credential-like content is never stored",
-        }),
-    });
-    render(<ChatApp />);
-    const user = await sendMessage("记住我的密码是 hunter2");
-    await user.click(await screen.findByRole("button", { name: "记住这件事" }));
-
-    expect(
-      await screen.findByText("这看起来像密码或密钥，不会被保存"),
-    ).toBeDefined();
-    expect(screen.queryByText(/^已记住：/)).toBeNull();
-    // The notice must not echo the credential.
-    const notice = screen.getByText("这看起来像密码或密钥，不会被保存");
-    expect(notice.textContent).not.toContain("hunter2");
-  });
-
-  test("a disabled memory store leaves chat usable and says so", async () => {
-    handleInvoke({
-      memory_create: () =>
-        Promise.reject({
-          code: "MEMORY_DISABLED",
-          message: "memory storage is unavailable",
-        }),
-    });
-    render(<ChatApp />);
-    const user = await sendMessage("以后叫我小林");
-    await user.click(await screen.findByRole("button", { name: "记住这件事" }));
-
-    expect(
-      await screen.findByText("记忆功能当前不可用，聊天不受影响"),
-    ).toBeDefined();
-    // The message itself is still in the conversation.
-    expect(screen.getByText("以后叫我小林")).toBeDefined();
-  });
-
-  test("a stale revision surfaces the refresh notice instead of overwriting", async () => {
-    handleInvoke({
-      memory_create: () => Promise.resolve(storedMemory()),
-      memory_forget: () =>
-        Promise.reject({ code: "CONFLICT", message: "memory changed in another window" }),
-    });
-    render(<ChatApp />);
-    const user = await sendMessage("以后叫我小林");
-    await user.click(await screen.findByRole("button", { name: "记住这件事" }));
-    await screen.findByText("已记住：以后叫我小林");
-
-    await user.click(screen.getByRole("button", { name: "撤销" }));
-
-    expect(
-      await screen.findByText("这条记忆刚在别处被改过，已刷新为最新内容"),
-    ).toBeDefined();
+    await sendMessage("继续聊吧");
+    await waitFor(() => expect(promptRequests).toHaveLength(1));
+    expect(screen.getByText("继续聊吧")).toBeDefined();
   });
 });
 

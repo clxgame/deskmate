@@ -17,8 +17,8 @@ mod agent;
 mod ai_usage;
 pub mod ccswitch;
 mod chat_attachments;
-mod file_picker;
 mod chat_links;
+mod file_picker;
 mod history;
 mod history_entry;
 mod local_ai_deploy;
@@ -234,11 +234,10 @@ mod worklog_tool_tests;
 #[cfg(test)]
 mod tests {
     use super::{
-        can_access_sidecar_credentials,
-        configure_sidecar_command, configure_sidecar_environment, migrate_legacy_xiaozhu_intro,
-        overwrite_builtin_xiaozhu_persona, overwrite_yume_opencode_tool, resource_error_event,
-        should_follow_chat_on_window_event, should_hide_chat, should_restore_settings_focus,
-        RESOURCE_ERROR_EVENT,
+        can_access_sidecar_credentials, configure_sidecar_command, configure_sidecar_environment,
+        migrate_legacy_xiaozhu_intro, overwrite_builtin_xiaozhu_persona,
+        overwrite_yume_opencode_tool, resource_error_event, should_follow_chat_on_window_event,
+        should_hide_chat, should_restore_settings_focus, RESOURCE_ERROR_EVENT,
     };
     use crate::settings::{self, ApiModel, ModelCatalog, VerifiedSidecarProvider};
     use std::ffi::OsStr;
@@ -948,6 +947,10 @@ fn overwrite_worklog_tools(shipped_tools_dir: &Path, data_dir: &Path) -> std::io
             include_bytes!("../resources/opencode-tools/worklog_record.ts"),
         ),
         (
+            "memory_manage.ts",
+            include_bytes!("../resources/opencode-tools/memory_manage.ts"),
+        ),
+        (
             "worklog_query.ts",
             include_bytes!("../resources/opencode-tools/worklog_query.ts"),
         ),
@@ -969,7 +972,11 @@ fn overwrite_worklog_tools(shipped_tools_dir: &Path, data_dir: &Path) -> std::io
         ),
     ];
     let config_dir = data_dir.join("workspace").join(".opencode");
-    let target_dir = config_dir.join("tools");
+    let global_config = data_dir
+        .join("opencode-home")
+        .join("xdg-config")
+        .join("opencode");
+    let config_dirs = [&config_dir, &global_config];
     let validated = FILES
         .iter()
         .map(|(name, expected)| {
@@ -986,27 +993,32 @@ fn overwrite_worklog_tools(shipped_tools_dir: &Path, data_dir: &Path) -> std::io
     let validated = match validated {
         Ok(files) => files,
         Err(error) => {
-            for (name, _) in FILES {
-                let target = if *name == "../worklog-bridge.ts" {
-                    config_dir.join("worklog-bridge.ts")
-                } else {
-                    target_dir.join(name)
-                };
-                if target.is_file() {
-                    std::fs::remove_file(target)?;
+            for config in config_dirs {
+                for (name, _) in FILES {
+                    let target = if *name == "../worklog-bridge.ts" {
+                        config.join("worklog-bridge.ts")
+                    } else {
+                        config.join("tools").join(name)
+                    };
+                    if target.is_file() {
+                        std::fs::remove_file(target)?;
+                    }
                 }
             }
             return Err(error);
         }
     };
-    std::fs::create_dir_all(&target_dir)?;
-    for (name, source) in validated {
-        let target = if name == "../worklog-bridge.ts" {
-            config_dir.join("worklog-bridge.ts")
-        } else {
-            target_dir.join(name)
-        };
-        std::fs::write(target, source)?;
+    for config in config_dirs {
+        let target_dir = config.join("tools");
+        std::fs::create_dir_all(&target_dir)?;
+        for (name, source) in &validated {
+            let target = if *name == "../worklog-bridge.ts" {
+                config.join("worklog-bridge.ts")
+            } else {
+                target_dir.join(name)
+            };
+            std::fs::write(target, source)?;
+        }
     }
     Ok(())
 }
@@ -1500,6 +1512,27 @@ pub fn run() {
     });
 
     builder
+        .register_asynchronous_uri_scheme_protocol("chat-resource", |context, request, responder| {
+            let app = context.app_handle().clone();
+            let is_chat = context.webview_label() == "chat";
+            tauri::async_runtime::spawn_blocking(move || {
+                let response = if is_chat {
+                    app.try_state::<chat_attachments::resources::ResourceStore>()
+                        .map(|store| chat_attachments::resources::respond_preview(&store, request))
+                        .unwrap_or_else(|| tauri::http::Response::builder().status(503).body(Vec::new()).expect("static response"))
+                } else {
+                    tauri::http::Response::builder().status(403).body(Vec::new()).expect("static response")
+                };
+                responder.respond(response);
+            });
+        })
+        .on_webview_event(|webview, event| {
+            if webview.label() == "chat" {
+                if let tauri::WebviewEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
+                    chat_attachments::resources::native_drop(webview.app_handle(), paths.clone());
+                }
+            }
+        })
         .plugin(startup_settings::plugin(|app| {
             #[cfg(feature = "worklog-qa")]
             validate_worklog_qa_identity(app)?;
@@ -1596,6 +1629,13 @@ pub fn run() {
             workbench::workbench_reveal_path,
             load_persona,
             chat_attachments::picker::pick_chat_attachment_files,
+            chat_attachments::resources::pick_chat_resources,
+            chat_attachments::resources::read_chat_resource_attachment,
+            chat_attachments::resources::stage_chat_resource_upload,
+            chat_attachments::resources::discard_chat_resources,
+            chat_attachments::resources::list_chat_resource_directory,
+            chat_attachments::resources::prepare_chat_resources,
+            chat_attachments::resources::get_chat_message_resources,
             chat_attachments::stage_chat_attachment,
             chat_attachments::read_chat_attachment,
             chat_attachments::discard_chat_attachment,
@@ -1658,6 +1698,9 @@ pub fn run() {
             packs::import_pack,
             packs::uninstall_pack,
             memory::commands::memory_available,
+            memory::automatic::bridge::memory_register_turn,
+            memory::automatic::bridge::memory_automation_status,
+            memory::automatic::bridge::memory_automation_retry,
             memory::commands::memory_create,
             memory::commands::memory_update,
             memory::commands::memory_list,
@@ -1681,6 +1724,7 @@ pub fn run() {
             #[cfg(feature = "worklog-qa")]
             validate_worklog_qa_identity(&handle)?;
             chat_attachments::start_stale_sweep(&handle);
+            chat_attachments::resources::initialize(&handle).map_err(std::io::Error::other)?;
 
             // Settings are hydrated by the startup plugin before any window exists.
             // SAFE-UNWRAP: a poisoned settings mutex means an earlier setup command panicked.
@@ -1747,6 +1791,12 @@ pub fn run() {
             app.manage(agent_runs);
             history::commands::initialize(&handle)?;
             app.manage(worklog::commands::WorklogState::initialize(&handle));
+            match memory::automatic::start(&handle) {
+                Ok(bridge) => {
+                    app.manage(bridge);
+                }
+                Err(code) => eprintln!("automatic memory unavailable: {code}"),
+            }
             app.manage(worklog::bridge::WorklogBridge::initialize(&handle));
             worklog::bridge::start_worker(handle.clone());
             settings::start_scheduler(handle.clone());
@@ -1800,6 +1850,3 @@ pub fn run() {
             }
         });
 }
-
-
-

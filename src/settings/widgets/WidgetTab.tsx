@@ -46,7 +46,7 @@ export function WidgetTab({ settings, patch, t, activeWidget, onSelect, worklogR
         aria-labelledby={`${panelId}-${activeWidget}`}>
         {activeWidget !== "worklog" && panels[activeWidget]}
         {worklogVisited && <Activity mode={activeWidget === "worklog" ? "visible" : "hidden"}>
-          <WorklogTab language={settings.language} t={t} target={worklogRequest?.target} targetRequestId={worklogRequest?.id} />
+          <WorklogTab autoArchive={settings.worklogAutoArchive ?? true} onAutoArchiveChange={(value) => patch("worklogAutoArchive", value)} language={settings.language} t={t} target={worklogRequest?.target} targetRequestId={worklogRequest?.id} />
         </Activity>}
       </section>
     </div>

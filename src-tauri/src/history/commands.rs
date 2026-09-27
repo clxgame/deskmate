@@ -164,7 +164,7 @@ pub(crate) async fn history_catalog_load(window: tauri::WebviewWindow, app: taur
                 super::reconcile::apply_discovery(&store, directory, &[native], statuses.as_ref().ok(), &app.state::<crate::agent::AgentRunState>().all_records()?, false)?;
                 let messages = crate::agent::read_session_snapshot(&app, std::path::Path::new(directory), session_id)?.into_iter().flat_map(|message| {
                     let role = message.role.unwrap_or_default(); let time = message.created.unwrap_or(0);
-                    message.parts.into_iter().filter(|part| part.kind.as_deref() == Some("text")).filter_map(move |part| Some(super::HistoryMessage { local_only: false, role: role.clone(), text: part.text?, time, message_id: Some(message.id.clone()), part_id: Some(part.id) }))
+                    message.parts.into_iter().filter(|part| !part.synthetic && part.kind.as_deref() == Some("text")).filter_map(move |part| Some(super::HistoryMessage { local_only: false, role: role.clone(), text: part.text?, time, message_id: Some(message.id.clone()), part_id: Some(part.id) }))
                 }).collect();
                 let mut rows = vec![store.get(&key)?]; apply_ownership(&app, &mut rows)?;
                 let entry = rows.remove(0);

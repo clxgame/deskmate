@@ -67,6 +67,7 @@ export interface Settings {
   userName: string;
   // 记忆
   memoryAutoExtract: boolean;
+  worklogAutoArchive?: boolean;
   memoryAiUse: boolean;
   // 更新
   updateRepo: string;

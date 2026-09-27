@@ -1,28 +1,41 @@
 import { describe, expect, test } from "bun:test";
 import tauriConfig from "../../src-tauri/tauri.conf.json";
+import devConfig from "../../scripts/tauri.dev.conf.json";
+import worklogQaConfig from "../../scripts/worklog-qa/tauri.qa.conf.json";
+import historyQaConfig from "../../scripts/workbench-qa/unified-history.qa.conf.json";
 
 /**
- * Regression guard for the real-runtime drag & drop failure.
- *
- * Tauri's `dragDropEnabled` defaults to true. When it is true on Windows, wry
- * installs a native IDropTarget and calls `SetAllowExternalDrop(false)` on the
- * WebView2 controller, so the OS file drop is consumed by the native layer and
- * the DOM never receives `dragenter` / `dragover` / `drop` for real files.
- *
- * The chat composer implements attachment drops in the WebView with HTML5
- * drag & drop, so the chat window must opt out of the native handler.
- * A mock browser cannot catch this regression, only the real app can.
+ * Native drops preserve the local paths needed to distinguish directories from
+ * zero-byte browser Files and preview media without loading entire files into
+ * JavaScript. Windows consumes external drops at this native boundary, so the
+ * Rust handler must forward registered metadata through chat-resources-dropped.
+ * DOM drops remain a fallback for clipboard/browser sources only.
  */
-describe("chat window drag & drop config", () => {
-  const chatWindow = tauriConfig.app.windows.find(
-    (window) => window.label === "chat",
-  );
+for (const [name, config] of [
+  ["main", tauriConfig],
+  ["development overlay", devConfig],
+  ["worklog QA overlay", worklogQaConfig],
+  ["unified history QA overlay", historyQaConfig],
+] as const) {
+  describe(`chat window drag & drop config: ${name}`, () => {
+    const chatWindow = config.app.windows.find((window) => window.label === "chat");
 
-  test("declares the chat window", () => {
-    expect(chatWindow).toBeDefined();
-  });
+    test("declares the chat window", () => {
+      expect(chatWindow).toBeDefined();
+    });
 
-  test("disables the native drag & drop handler so HTML5 drop reaches the WebView", () => {
-    expect(chatWindow?.dragDropEnabled).toBe(false);
+    test("enables the native handler needed for directory and streaming media references", () => {
+      expect(chatWindow?.dragDropEnabled).toBe(true);
+    });
+
+    test("allows image and media previews through each platform's local resource protocol", () => {
+      const csp = "security" in config.app ? config.app.security.csp : tauriConfig.app.security.csp;
+      for (const directive of ["img-src", "media-src"] as const) {
+        const sources = csp[directive].split(/\s+/);
+        for (const source of ["chat-resource:", "http://chat-resource.localhost", "https://chat-resource.localhost"]) {
+          expect(sources).toContain(source);
+        }
+      }
+    });
   });
-});
+}

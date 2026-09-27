@@ -41,12 +41,7 @@ import {
 } from "./chatPersona";
 import {
   composeSystemPrompt,
-  draftFromMessage,
-  forgetMemory,
   memoryBlockForTurn,
-  saveMemory,
-  type MemoryFailure,
-  type MemoryReceipt,
 } from "./memoryActions";
 import {
   getSettings,
@@ -56,7 +51,7 @@ import {
 } from "../lib/settings";
 import { memoryForgetConversation } from "../lib/memory";
 import type { ThemeId } from "../settings/theme";
-import { dict } from "../lib/i18n";
+import { dict, type Lang } from "../lib/i18n";
 import { AppIcon } from "../ui/AppIcon";
 import {
   type HistorySession,
@@ -67,6 +62,11 @@ import {
 } from "./attachments";
 import { ArtifactCard } from "./ArtifactCard";
 import { AttachmentTray } from "./AttachmentTray";
+import { LocalResourceTray } from "./LocalResourceTray";
+import { MessageLocalResources } from "./MessageLocalResources";
+import { useLocalResources } from "./useLocalResources";
+import { isMediaFile, prepareChatResources, stripLocalResourceContext, type LocalResource } from "./localResources";
+import { localResourceError } from "./localResourceCopy";
 import { ChatText } from "./ChatText";
 import { ChatNavigation } from "./ChatNavigation";
 import { useWorklogChat } from "./useWorklogChat";
@@ -103,6 +103,8 @@ interface TextChatMessage {
   text: string;
   activity?: ToolActivity;
   attachments?: ModelReadyAttachment[];
+  resources?: readonly LocalResource[];
+  readonly nativeMessageId?: string;
   readonly localOnly?: boolean;
   readonly time?: number;
 }
@@ -137,12 +139,6 @@ export function containsCcSwitchApiKey(text: string): boolean {
       text,
     )
   );
-}
-
-/** A pending sensitive-storage confirmation, awaiting the user's decision. */
-interface SensitivePrompt {
-  messageId: string;
-  draft: ReturnType<typeof draftFromMessage>;
 }
 
 interface PersonaData {
@@ -199,6 +195,7 @@ function preserveWebSearchActivity(activity: ToolActivity | undefined): ToolActi
 function historyChatMessages(session: HistorySession): ChatMessage[] {
   return session.messages.map((message, index) => ({
     id: message.partId ?? message.messageId ?? `history-${index}`,
+    nativeMessageId: message.messageId,
     role: message.role,
     text: message.text,
   }));
@@ -219,6 +216,7 @@ export default function ChatApp() {
   const [status, setStatus] = useState<Status>("booting");
   const [isPersonaTyping, setIsPersonaTyping] = useState(false);
   const [lang, setLang] = useState("zh-CN");
+  const resourceLanguage: Lang = lang === "en-US" || lang === "ja-JP" || lang === "ko-KR" ? lang : "zh-CN";
   const [theme, setTheme] = useState<ThemeId>("dark");
   const [activePersonaId, setActivePersonaId] = useState(DEFAULT_PERSONA_ID);
   const [view, setView] = useState<View>("chat");
@@ -243,6 +241,8 @@ export default function ChatApp() {
   const sessionDirectory = () => catalogEntryRef.current?.identity.kind === "native" ? catalogEntryRef.current.identity.directory : undefined;
 
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [isDragActive, setIsDragActive] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [workbenchOpenError, setWorkbenchOpenError] = useState<{
@@ -337,14 +337,7 @@ export default function ChatApp() {
     };
   }, [currentSessionId, currentDirectory]);
   const worklog = useWorklogChat(currentSessionId);
-  /** Inline memory receipts, keyed by the message they belong to. */
-  const [memoryReceipts, setMemoryReceipts] = useState<
-    Record<string, MemoryReceipt>
-  >({});
   const [memoryNotice, setMemoryNotice] = useState<string | null>(null);
-  const [sensitivePrompt, setSensitivePrompt] = useState<SensitivePrompt | null>(
-    null,
-  );
   const [ccSwitchDraft, setCcSwitchDraft] = useState<CcSwitchProviderDraft | null>(
     null,
   );
@@ -426,13 +419,6 @@ export default function ChatApp() {
   const listRef = useRef<HTMLDivElement>(null);
   const followLatestRef = useRef(true);
   const lastScrollUserRef = useRef<string | undefined>(undefined);
-  const filePickerPendingRef = useRef(false);
-  const filePickerContextRef = useRef(0);
-  useLayoutEffect(() => {
-    filePickerContextRef.current += 1;
-    return () => { filePickerContextRef.current += 1; };
-  }, [currentSessionId, agent.workspace, agentHistoryId]);
-  const [filePickerPending, setFilePickerPending] = useState(false);
   const dragDepthRef = useRef(0);
   /** mirror of `messages` for persisting history outside render. */
   const messagesRef = useRef<ChatMessage[]>([]);
@@ -468,7 +454,14 @@ export default function ChatApp() {
   const cleanupAttachmentSession = chatAttachments.cleanupSession;
   const discardSentAttachmentSources = chatAttachments.discardSentSources;
   const resetAttachmentSession = chatAttachments.resetSession;
-  const attachmentBusy = filePickerPending || chatAttachments.items.some((item) => item.kind === "staging");
+  const localResources = useLocalResources({
+    scopeKey: `${currentSessionId ?? ""}:${agent.workspace ?? ""}:${agentHistoryId ?? ""}`,
+    active: view === "chat" && status === "ready" && !!currentSessionId && !isSubmitting && !agent.busy && !historyLoading && !readOnlyHistory && !sessionOwnedByWorkbench,
+    useLegacyFiles: !agent.workspace && !agentHistoryId,
+    onLegacyFiles: files => stageAttachmentFiles(files),
+    onError: message => reportAttachmentBackgroundError(localResourceError(resourceLanguage, message)),
+  });
+  const attachmentBusy = localResources.pending || chatAttachments.items.some((item) => item.kind === "staging");
   const attachmentBlocked = chatAttachments.items.some(
     (item) => item.kind === "failed" && item.phase === "staging",
   );
@@ -1058,12 +1051,14 @@ export default function ChatApp() {
     if (agentHistoryArchive) setMessages(historyChatMessages(agentHistoryArchive));
   }, [agentHistoryArchive]);
 
-  const send = async () => {
+  const sendCurrentDraft = async () => {
     const generation = viewGenerationRef.current;
     const roundSelection = modelSelectionRef.current;
     const text = input.trim();
-    if (!text && chatAttachments.items.length === 0) return;
+    const roundResources = localResources.resources;
+    if (!text && chatAttachments.items.length === 0 && roundResources.length === 0) return;
     if (historyLoading || readOnlyHistory || sessionOwnedByWorkbench || status !== "ready" || !sessionRef.current) return;
+    if (attachmentBusy) { setAttachmentError(t.chatAttachmentStillReading); return; }
     if (containsCcSwitchApiKey(text)) {
       setInput("");
       setAttachmentError(null);
@@ -1073,7 +1068,7 @@ export default function ChatApp() {
       return;
     }
     if (agent.workspace || agentHistoryId || agent.busy) {
-      if (!text || agent.busy) return;
+      if ((!text && roundResources.length === 0) || agent.busy) return;
       if (chatAttachments.items.length > 0) {
         setAttachmentError(t.agentAttachmentsUnsupported);
         return;
@@ -1105,11 +1100,12 @@ export default function ChatApp() {
         }
       }
       if (generation !== viewGenerationRef.current || roundSelection !== modelSelectionRef.current) return;
-      const run = await agent.start(text, agentHistoryId ?? undefined,
+      const run = await agent.start(text || `附件：${roundResources.map(resource => resource.name).join(", ")}`, agentHistoryId ?? undefined,
         agentHistoryId && catalogEntryRef.current?.identity.kind === "native" ? catalogEntryRef.current.key : undefined,
-        roundSelection, roundModel);
+        roundSelection, roundModel, roundResources.map(resource => resource.id));
       if (generation !== viewGenerationRef.current) return;
       if (run) {
+        localResources.clearSent(roundResources.map(resource => resource.id));
         setInput("");
         setAttachmentError(null);
         if (run.sessionId) {
@@ -1150,29 +1146,41 @@ export default function ChatApp() {
       setAttachmentError(error instanceof Error ? error.message : t.chatAttachmentReadFailed);
       return;
     }
-    if (!prepared.shouldSendToModel || generation !== viewGenerationRef.current) return;
+    if ((!prepared.shouldSendToModel && roundResources.length === 0) || generation !== viewGenerationRef.current) return;
     const sentReadyLocalIds = chatAttachments.items
       .filter((item) => item.kind === "ready")
       .map((item) => item.localId);
     setInput("");
     setAttachmentError(null);
-    const sent = await sendText(text, prepared, roundSelection);
+    const sent = await sendText(text, prepared, roundSelection, roundResources);
     if (!sent && generation === viewGenerationRef.current) setInput(text);
     if (sent) {
       discardSentAttachmentSources(sentReadyLocalIds);
+      if (generation === viewGenerationRef.current) localResources.clearSent(roundResources.map(resource => resource.id));
     }
+  };
+
+  const send = async () => {
+    // Resource preparation crosses IPC before status becomes busy. Lock synchronously
+    // so repeated Enter/click events cannot submit or discard the same draft twice.
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setIsSubmitting(true);
+    try { await sendCurrentDraft(); }
+    finally { submittingRef.current = false; setIsSubmitting(false); }
   };
 
   const sendText = async (
     text: string,
     prepared: PreparedModelAttachments = EMPTY_PREPARED_ATTACHMENTS,
     roundSelection: ConversationModelSelection = modelSelectionRef.current,
+    resources: readonly LocalResource[] = [],
   ): Promise<boolean> => {
     const sessionID = sessionRef.current;
     const generation = viewGenerationRef.current;
     const displayed = catalogEntryRef.current;
     if (!displayed || historyLoading || sessionOwnedByWorkbench || !displayed.capabilities.send) return false;
-    if ((!text && !prepared.shouldSendToModel) || !sessionID) return false;
+    if ((!text && !prepared.shouldSendToModel && resources.length === 0) || !sessionID) return false;
     await personaLoadRef.current;
     if (sessionRef.current !== sessionID || generation !== viewGenerationRef.current) return false;
     let fresh: UnifiedHistoryRow;
@@ -1199,11 +1207,23 @@ export default function ChatApp() {
     setResolvedModel(roundModel);
     setModelNotice(null);
     const messageAttachments = prepared.fileParts.map(attachmentPreviewFromPart);
-    const attachmentNames = messageAttachments.map((item) => item.name).join(", ");
-    const promptText = text || prepared.fallbackPrompt;
-    const localOnly = activePersonaIdRef.current === DEFAULT_PERSONA_ID && prepared.fileParts.length === 0
+    const attachmentNames = [...messageAttachments, ...resources].map((item) => item.name).join(", ");
+    let promptText = text || prepared.fallbackPrompt || (resources.length ? `附件：${attachmentNames}` : null);
+    let resourceParts: readonly OpenCodeFilePart[] = [];
+    const localOnly = activePersonaIdRef.current === DEFAULT_PERSONA_ID && prepared.fileParts.length === 0 && resources.length === 0
       && (isXiaozhuNameOriginQuestion(text) || isXiaozhuIdentityQuestion(text));
     const userMessageId = localOnly ? `local_${newUserMessageId()}` : newUserMessageId();
+    if (resources.length) {
+      try {
+        const references = await prepareChatResources(identity.directory, sessionID, userMessageId, resources.map(resource => resource.id));
+        if (generation !== viewGenerationRef.current || sessionRef.current !== sessionID) return false;
+        resourceParts = references.parts;
+        promptText = [promptText, references.text].filter(Boolean).join("\n\n");
+      } catch (cause) {
+        if (generation === viewGenerationRef.current) setAttachmentError(localResourceError(resourceLanguage, cause));
+        return false;
+      }
+    }
     rolesRef.current.set(userMessageId, "user");
     setMessages((prev) => [
       ...prev,
@@ -1212,6 +1232,7 @@ export default function ChatApp() {
         role: "user",
         text: text || `附件：${attachmentNames}`,
         attachments: messageAttachments,
+        resources,
         localOnly, time: Date.now(),
       },
     ]);
@@ -1225,7 +1246,7 @@ export default function ChatApp() {
     fixedReplySequenceRef.current = fixedReplySequence;
     if (
       activePersonaIdRef.current === DEFAULT_PERSONA_ID &&
-      prepared.fileParts.length === 0
+      prepared.fileParts.length === 0 && resources.length === 0
     ) {
       if (isXiaozhuNameOriginQuestion(text)) {
         localReplySnapshotRef.current = true;
@@ -1300,6 +1321,7 @@ export default function ChatApp() {
         personaId: activePersonaIdRef.current,
         userText: promptText,
         enabled: s?.memoryAiUse ?? true,
+        directory: identity.directory,
       });
       const system = composeSystemPrompt({
         personaPrompt,
@@ -1322,13 +1344,18 @@ export default function ChatApp() {
         }
         return false;
       }
+      // Persist identity before submission; the host validates native completion.
+      await invoke("memory_register_turn", { registration: {
+        directory: identity.directory, sessionId: sessionID, messageId: userMessageId,
+        providerId: roundModel.sidecarId, modelId: roundModel.modelId,
+      } }).catch(() => { /* The managed plugin also registers the native turn. */ });
       promptStarted = true;
       nativePersistedRef.current = true;
       await promptAsync(sessionID, promptText, {
         directory: identity.directory,
         messageID: userMessageId,
         system: [system, buildCurrentInformationInstruction(), buildWorklogSystemInstruction()].filter(Boolean).join("\n\n"),
-        attachments: [...prepared.fileParts],
+        attachments: [...prepared.fileParts, ...resourceParts],
         model: { providerID: roundModel.sidecarId, modelID: roundModel.modelId },
       });
       nativePersistedRef.current = true;
@@ -1353,7 +1380,7 @@ export default function ChatApp() {
       setIsPersonaTyping(false);
       setStatus("ready");
       broadcastMood("error");
-      if (prepared.fileParts.length > 0) {
+      if (prepared.fileParts.length > 0 || resources.length > 0) {
         setAttachmentError(tRef.current.chatAttachmentSendFailed);
       }
       return false;
@@ -1386,108 +1413,25 @@ export default function ChatApp() {
     });
   }, [agent.workspace, agentHistoryId, chatAttachments, resetAttachmentSession, resetSession]);
 
-  /** Turn a memory failure into a user-facing notice. */
-  const noticeForMemoryFailure = useCallback(
-    (failure: MemoryFailure): string => {
-      const dict = tRef.current;
-      switch (failure.kind) {
-        case "secret-rejected":
-          return dict.memorySecretRejected;
-        case "conflict":
-          return dict.memoryConflictNotice;
-        case "disabled":
-          return dict.memoryDisabledNotice;
-        default:
-          return dict.memorySaveFailed;
-      }
-    },
-    [],
-  );
-
-  /** "记住这件事" on one message. */
-  const rememberMessage = useCallback(
-    async (message: TextChatMessage, sensitiveConfirmed = false) => {
-      const draft = draftFromMessage({
-        text: message.text,
-        personaId: activePersonaIdRef.current,
-        conversationId: sessionRef.current,
-        // History-loaded messages have synthetic ids, so only live server
-        // message ids are recorded as provenance.
-        messageId: message.id.startsWith("hist-") ? null : message.id,
-      });
-      const result = await saveMemory(draft, { sensitiveConfirmed });
-      if (result.ok) {
-        setSensitivePrompt(null);
-        setMemoryNotice(null);
-        setMemoryReceipts((current) => ({
-          ...current,
-          [message.id]: result.value,
-        }));
-        return;
-      }
-      if (result.failure.kind === "sensitive-confirmation") {
-        // Storing this needs the disclosure dialog first.
-        setSensitivePrompt({ messageId: message.id, draft: result.failure.draft });
-        return;
-      }
-      setSensitivePrompt(null);
-      setMemoryNotice(noticeForMemoryFailure(result.failure));
-    },
-    [noticeForMemoryFailure],
-  );
-
-  /** Undo a just-saved memory, or forget it outright. */
-  const dropMemory = useCallback(
-    async (messageId: string, memoryId: string, undo: boolean) => {
-      const result = await forgetMemory(memoryId);
-      if (!result.ok) {
-        setMemoryNotice(noticeForMemoryFailure(result.failure));
-        return;
-      }
-      setMemoryReceipts((current) => {
-        const next = { ...current };
-        delete next[messageId];
-        return next;
-      });
-      setMemoryNotice(
-        undo ? tRef.current.memoryUndone : tRef.current.memoryForgotten,
-      );
-    },
-    [noticeForMemoryFailure],
-  );
-
   const pickAttachmentFiles = async () => {
-    if (filePickerPendingRef.current || attachmentBusy || status === "busy" ||
-        !currentSessionId || agent.workspace || agentHistoryId) return;
-    const generation = viewGenerationRef.current;
-    const sessionId = sessionRef.current;
-    const pickerContext = filePickerContextRef.current;
-    filePickerPendingRef.current = true;
-    setFilePickerPending(true);
+    if (submittingRef.current || attachmentBusy || status !== "ready" || !currentSessionId || agent.busy) return;
     setOpenPicker(null);
-    try {
-      const picked = await invoke<Array<{ fileName: string; base64: string }>>("pick_chat_attachment_files", { title: t.chatAttachHint });
-      if (generation !== viewGenerationRef.current || sessionId !== sessionRef.current || pickerContext !== filePickerContextRef.current) return;
-      if (picked.length === 0) return;
-      const files = picked.map(item => new File([
-        Uint8Array.from(atob(item.base64), char => char.charCodeAt(0)),
-      ], item.fileName));
-      setAttachmentError(null);
-      stageAttachmentFiles(files);
-    } catch {
-      if (generation === viewGenerationRef.current && sessionId === sessionRef.current && pickerContext === filePickerContextRef.current) {
-        setAttachmentError(tRef.current.chatAttachmentReadFailed);
-      }
-    } finally {
-      filePickerPendingRef.current = false;
-      setFilePickerPending(false);
-    }
+    setAttachmentError(null);
+    await localResources.pick(t.chatAttach);
+  };
+
+  const stageInputFiles = (files: ArrayLike<File>) => {
+    const selected = Array.from(files);
+    const media = selected.filter(isMediaFile);
+    const legacy = selected.filter(file => !isMediaFile(file));
+    if (media.length) void localResources.addMediaFiles(media);
+    if (legacy.length) stageAttachmentFiles(legacy);
   };
 
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     if (event.clipboardData.files.length === 0) return;
     event.preventDefault();
-    stageAttachmentFiles(event.clipboardData.files);
+    stageInputFiles(event.clipboardData.files);
   };
 
   const hasFiles = (event: DragEvent<HTMLDivElement>): boolean =>
@@ -1519,15 +1463,11 @@ export default function ChatApp() {
     event.preventDefault();
     dragDepthRef.current = 0;
     setIsDragActive(false);
-    if (agent.workspace || agentHistoryId) {
-      setAttachmentError(t.agentAttachmentsUnsupported);
-      return;
-    }
     if (event.dataTransfer.files.length === 0) {
       setAttachmentError(t.chatAttachmentDropFailed);
       return;
     }
-    stageAttachmentFiles(event.dataTransfer.files);
+    stageInputFiles(event.dataTransfer.files);
   };
 
   // Bundled personas/skills failed to unpack: tell the user why instead of
@@ -1666,7 +1606,7 @@ export default function ChatApp() {
     if (expectedGeneration !== viewGenerationRef.current || folderLockedRef.current) throw new Error(composerCopy(lang).folderLocked);
     const current = agent.workspace ?? agentHistoryArchive?.agentDetails?.workspacePath ?? null;
     if (current === canonical) { setPendingWorkspace(null); return; }
-    if (messagesRef.current.length > 0 || agentHistoryId || chatAttachments.items.length > 0) {
+    if (messagesRef.current.length > 0 || agentHistoryId || chatAttachments.items.length > 0 || localResources.resources.length > 0) {
       if (!(await resetSession(true))) return;
       leaveAgentHistory();
       for (const item of chatAttachments.items) chatAttachments.remove(item.localId);
@@ -1685,7 +1625,7 @@ export default function ChatApp() {
     const selected = path ?? await openDirectory({ directory: true, multiple: false, title: t.agentPickerTitle });
     if (typeof selected !== "string") return;
     if (generation !== viewGenerationRef.current) return;
-    if (chatAttachments.items.length > 0) {
+    if (chatAttachments.items.length > 0 || localResources.resources.length > 0) {
       setPendingWorkspace({ path: selected, generation });
       return;
     }
@@ -1903,87 +1843,19 @@ export default function ChatApp() {
                       ))}
                     </div>
                   )}
+                  {m.role === "user" && (m.resources?.length || m.text.includes("<yume-local-resources>")) ? (
+                    <MessageLocalResources directory={currentDirectory ?? ""} sessionId={currentSessionId ?? ""}
+                      messageId={m.nativeMessageId ?? m.id} resources={m.resources} lang={resourceLanguage} />
+                  ) : null}
                   {m.localOnly && m.role === "assistant" && <div className="chat-activity">{lang === "zh-CN" ? "本地回复" : "Local reply"}</div>}
                   {(m.text.trim().length > 0 || m.role === "user") && (
                     <div className="chat-bubble">
-                      <ChatText text={m.text} format={m.role === "assistant" ? "markdown" : "plain"}
+                      <ChatText text={m.role === "user" ? stripLocalResourceContext(m.text) : m.text} format={m.role === "assistant" ? "markdown" : "plain"}
                         streaming={status === "busy" && m.role === "assistant" && m.id === messages.at(-1)?.id}
                         lang={lang} />
                     </div>
                   )}
-                  {m.text.trim().length > 0 && (
-                    <div className="chat-msg-actions chat-worklog-actions">
-                      {m.role === "user" && <>
-                        <button type="button" className="chat-memory-action" disabled={worklog.operations.some((operation) => operation.messageId === m.id && !operation.receipt && !operation.error)} onClick={() => void worklog.save(m.id, m.text)}>{worklogChatCopy(lang).save}</button>
-                        <button type="button" className="chat-memory-action" disabled={worklog.operations.some((operation) => operation.messageId === m.id && !operation.receipt && !operation.error)} onClick={() => void worklog.schedule(m.id)}>{worklogChatCopy(lang).schedule}</button>
-                      </>}
-                      <button
-                        type="button"
-                        className="chat-memory-action"
-                        onClick={() => void rememberMessage(m)}
-                        title={t.memoryRemember}
-                      >
-                        {t.memoryRemember}
-                      </button>
-                      {memoryReceipts[m.id] && (
-                        <button
-                          type="button"
-                          className="chat-memory-action chat-memory-action-danger"
-                          onClick={() =>
-                            void dropMemory(m.id, memoryReceipts[m.id].memoryId, false)
-                          }
-                          title={t.memoryForget}
-                        >
-                          {t.memoryForget}
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  {memoryReceipts[m.id] && (
-                    <div className="chat-memory-receipt" role="status" aria-live="polite">
-                      <span className="chat-memory-receipt-text">
-                        {t.memorySaved(memoryReceipts[m.id].content)}
-                      </span>
-                      {memoryReceipts[m.id].undoable && (
-                        <button
-                          type="button"
-                          className="chat-memory-undo"
-                          onClick={() =>
-                            void dropMemory(m.id, memoryReceipts[m.id].memoryId, true)
-                          }
-                        >
-                          {t.memoryUndo}
-                        </button>
-                      )}
-                    </div>
-                  )}
                   {worklog.operations.filter((operation) => operation.messageId === m.id).map((operation) => <WorklogReceipt key={operation.requestId} operation={operation} language={lang} onUndo={worklog.undo} onRefresh={worklog.refresh} />)}
-                  {sensitivePrompt?.messageId === m.id && (
-                    <div className="chat-memory-confirm" role="alertdialog">
-                      <div className="chat-memory-confirm-title">
-                        {t.memorySensitiveTitle}
-                      </div>
-                      <p className="chat-memory-confirm-body">
-                        {t.memorySensitiveBody}
-                      </p>
-                      <div className="chat-memory-confirm-actions">
-                        <button
-                          type="button"
-                          className="chat-memory-action"
-                          onClick={() => void rememberMessage(m, true)}
-                        >
-                          {t.memorySensitiveConfirm}
-                        </button>
-                        <button
-                          type="button"
-                          className="chat-memory-action"
-                          onClick={() => setSensitivePrompt(null)}
-                        >
-                          {t.memorySensitiveCancel}
-                        </button>
-                      </div>
-                    </div>
-                  )}
                 </div>
               );
             })}
@@ -2035,8 +1907,11 @@ export default function ChatApp() {
             <>
               <ToolApprovalCards requests={permissions.requests} error={permissions.error} onReply={permissions.reply} t={t} />
               <footer className="chat-input-row">
+              <LocalResourceTray resources={localResources.resources} lang={resourceLanguage} onRemove={localResources.remove}
+                disabled={isSubmitting || status === "busy" || agent.busy} />
               <AttachmentTray
                 t={t}
+                disabled={isSubmitting}
                 items={chatAttachments.items}
                 error={attachmentError}
                 onConfirm={chatAttachments.confirm}
@@ -2049,6 +1924,7 @@ export default function ChatApp() {
                 <textarea
                   className="chat-input"
                   value={input}
+                  disabled={isSubmitting}
                   placeholder={t.chatInputPlaceholder}
                   rows={2}
                   onChange={(e) => {
@@ -2069,18 +1945,18 @@ export default function ChatApp() {
                   className="chat-attach"
                   type="button"
                   onClick={() => void pickAttachmentFiles()}
-                  disabled={status === "busy" || !currentSessionId || attachmentBusy || !!agent.workspace || !!agentHistoryId}
+                  disabled={isSubmitting || status !== "ready" || !currentSessionId || attachmentBusy || agent.busy}
                   aria-label={t.chatAttach}
-                  title={agent.workspace || agentHistoryId ? t.agentAttachmentsUnsupported : t.chatAttachHint}
+                  title={t.chatAttach}
                 >
                   <AppIcon name="add" size={16} />
                 </button>
                 <WorkspacePicker language={lang} workspace={agent.workspace ?? agentHistoryArchive?.agentDetails?.workspacePath ?? null}
-                  locked={folderLocked} onSelect={chooseFolder} onLeave={leaveFolder}
+                  locked={isSubmitting || folderLocked} onSelect={chooseFolder} onLeave={leaveFolder}
                   open={openPicker === "folder"} onOpenChange={open => setOpenPicker(open ? "folder" : null)} />
                 <div className="chat-composer-spacer" />
                 <ModelPicker language={lang} selection={modelSelection} resolved={resolvedModel}
-                  locked={status === "busy" || agent.busy || historyLoading || readOnlyHistory || sessionOwnedByWorkbench}
+                  locked={isSubmitting || status === "busy" || agent.busy || historyLoading || readOnlyHistory || sessionOwnedByWorkbench}
                   onSelect={selectModel} onManage={() => void invoke("open_ai_model_settings")}
                   open={openPicker === "model"} onOpenChange={open => setOpenPicker(open ? "model" : null)} />
                 {status === "busy" || runMatchesConversation(agent.projection.active, catalogEntry) ? (
@@ -2091,8 +1967,8 @@ export default function ChatApp() {
                   </button>
                 ) : (
                   <button className="chat-send" type="button" onClick={() => void send()}
-                    disabled={agent.busy || status !== "ready" || attachmentBusy || !resolvedModel ||
-                      (agent.workspace || agentHistoryId ? !input.trim() : !input.trim() && chatAttachments.items.length === 0)}>
+                    disabled={isSubmitting || agent.busy || status !== "ready" || attachmentBusy || !resolvedModel ||
+                      (!input.trim() && localResources.resources.length === 0 && (agent.workspace || agentHistoryId ? true : chatAttachments.items.length === 0))}>
                     {t.chatSend}
                   </button>
                 )}
@@ -2189,14 +2065,6 @@ function upsertAssistant(
     update({ id: messageID, role: "assistant", text: "" }),
   ];
 }
-
-
-
-
-
-
-
-
 
 
 

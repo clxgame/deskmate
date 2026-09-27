@@ -160,12 +160,17 @@ fn forget_catalog_conversation(
         }
     }
     if !matched {
-        return Err(MemoryError::validation_failed("memory_conversation_identity_invalid"));
+        return Err(MemoryError::validation_failed(
+            "memory_conversation_identity_invalid",
+        ));
     }
     if identities > 1 {
-        return Err(MemoryError::conflict("memory_conversation_identity_ambiguous"));
+        return Err(MemoryError::conflict(
+            "memory_conversation_identity_ambiguous",
+        ));
     }
-    repository.forget_conversation(conversation_id)
+    let scoped = repository.forget_conversation(catalog_key)?;
+    Ok(scoped + repository.forget_conversation(conversation_id)?)
 }
 
 #[tauri::command]
@@ -179,15 +184,19 @@ pub fn memory_forget_conversation(
     let entries = if catalog_key.is_some() {
         crate::history::native_api::authorize_history_window(window.label())
             .map_err(|_| MemoryError::validation_failed("memory_conversation_window_denied"))?;
-        Some(crate::history::commands::store(&app)
-            .and_then(|store| store.all())
-            .map_err(MemoryError::storage_unavailable)?)
+        Some(
+            crate::history::commands::store(&app)
+                .and_then(|store| store.all())
+                .map_err(MemoryError::storage_unavailable)?,
+        )
     } else {
         None
     };
     let removed = with_repository(&state, |repository| {
         match (catalog_key.as_deref(), entries.as_deref()) {
-            (Some(key), Some(entries)) => forget_catalog_conversation(repository, entries, &conversation_id, key),
+            (Some(key), Some(entries)) => {
+                forget_catalog_conversation(repository, entries, &conversation_id, key)
+            }
             _ => repository.forget_conversation(&conversation_id),
         }
     })?;
@@ -204,17 +213,41 @@ mod forget_tests;
 /// Assemble the memory block for one outgoing chat turn.
 #[tauri::command]
 pub fn memory_context(
+    app: tauri::AppHandle,
     state: tauri::State<MemoryState>,
     persona_id: String,
     user_text: String,
     enabled: bool,
+    directory: Option<String>,
 ) -> Result<RetrievalContext, MemoryError> {
+    super::automatic::synchronize_work_links(&app);
     // Retrieval must never break a chat turn: a disabled or broken store simply
     // contributes no context.
     match with_repository(&state, |repository| {
-        retrieval::context_for_turn(repository, &persona_id, &user_text, enabled)
+        retrieval::context_for_turn_scoped(
+            repository,
+            &persona_id,
+            &user_text,
+            enabled,
+            directory.as_deref(),
+        )
     }) {
-        Ok(context) => Ok(context),
+        Ok(mut context) => {
+            if enabled {
+                let workspace = directory.as_deref().filter(|d| {
+                    crate::history::commands::workspace(&app).ok().as_deref() != Some(*d)
+                });
+                context
+                    .prompt_block
+                    .push_str(&super::automatic::pending_context(
+                        &app,
+                        &persona_id,
+                        &user_text,
+                        workspace,
+                    ));
+            }
+            Ok(context)
+        }
         Err(error) => {
             eprintln!("memory context skipped: {error}");
             Ok(RetrievalContext::empty())

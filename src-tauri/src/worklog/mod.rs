@@ -1,3 +1,4 @@
+pub(crate) mod auto_archive;
 pub mod bridge;
 pub mod calendar;
 pub mod commands;

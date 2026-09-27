@@ -218,6 +218,7 @@ fn permission_reply_requires_current_exact_scoped_request() -> TestResult<()> {
             finish: None,
             error: None,
             parts: vec![crate::agent::record_store::NativePart {
+                synthetic: false,
                 id: "part_bash".into(),
                 kind: Some("tool".into()),
                 text: None,

@@ -1673,39 +1673,233 @@ body,
   }
 }
 
-.set-permission-heading {
-  margin: var(--s-5) 0 var(--s-2);
-  color: var(--text);
+/* Tool permissions: one compact list, with detail available on demand. */
+.set-permissions {
+  max-width: 760px;
+}
+
+.set-permissions-head,
+.set-permissions-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-4);
+}
+
+.set-permissions-head h2 {
+  margin: 0;
   font-size: var(--t-head);
   font-weight: 600;
 }
 
-.set-permission-rules {
-  display: grid;
-  gap: var(--s-2);
+.set-permissions-intro {
+  margin: var(--s-2) 0 var(--s-4);
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.set-permissions-link {
+  flex-shrink: 0;
+  padding: var(--s-1) var(--s-0-5);
+  border: 0;
+  background: transparent;
+  color: var(--accent-ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.set-permissions-link:hover {
+  text-decoration: underline;
+}
+
+.set-permissions-link:focus-visible,
+.set-permissions-select:focus-visible,
+.set-permissions-switch input:focus-visible,
+.set-permissions-apply:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 2px;
+}
+
+.set-permissions-help {
+  padding: var(--s-1) 0 var(--s-3);
+  color: var(--text-dim);
+  font-size: var(--t-small);
+  line-height: 1.5;
+}
+
+.set-permissions-help[hidden],
+#set-permissions-approvals[hidden] {
+  display: none;
+}
+
+.set-permissions-help p {
+  margin: 0 0 var(--s-2);
+}
+
+.set-permissions-help strong {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.set-permissions-row {
+  min-height: 44px;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.set-permissions-row > label,
+.set-permissions-row > span:first-child {
+  min-width: 0;
+  font-weight: 500;
+}
+
+.set-permissions-select {
+  width: 128px;
+  flex-shrink: 0;
+  padding: var(--s-1) var(--s-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken-glass);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.set-permissions-select option {
+  background: var(--surface-raised);
+}
+
+.set-permissions-select:disabled {
+  cursor: default;
+  opacity: var(--opacity-muted);
+}
+
+.set-permissions-tools {
+  margin-top: var(--s-4);
+}
+
+.set-permissions-switch {
+  cursor: pointer;
+}
+
+.set-permissions-switch input {
+  appearance: none;
+  position: relative;
+  width: 34px;
+  height: 20px;
+  margin: 0;
+  flex-shrink: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: var(--surface-sunken-glass);
+  cursor: pointer;
+  transition: background var(--ease), border-color var(--ease);
+}
+
+.set-permissions-switch input::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: transform var(--ease), background var(--ease);
+}
+
+.set-permissions-switch input:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.set-permissions-switch input:checked::after {
+  transform: translateX(14px);
+  background: var(--text-on-accent);
+}
+
+.set-permissions-switch input:disabled {
+  cursor: default;
+  opacity: var(--opacity-muted);
+}
+
+.set-permissions-confirm {
+  padding: var(--s-3) 0;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.set-permissions-confirm > strong {
+  font-weight: 600;
+}
+
+.set-permissions-confirm p {
+  margin: var(--s-2) 0;
+  color: var(--text-dim);
+  font-size: var(--t-small);
+}
+
+.set-permissions-confirm-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+.set-permissions-apply {
+  padding: var(--s-1) var(--s-3);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.set-permissions-apply:disabled {
+  cursor: default;
+  opacity: var(--opacity-muted);
+}
+
+.set-permissions-feedback {
+  margin: var(--s-2) 0;
+  color: var(--danger);
+  font-size: var(--t-small);
+}
+
+.set-permissions-approvals-head {
+  margin-top: var(--s-4);
+}
+
+.set-permissions-empty {
+  margin: var(--s-3) 0;
+  color: var(--text-dim);
+  font-size: var(--t-small);
+}
+
+.set-permissions-rules {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.set-permission-rule {
+.set-permissions-rules li {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--s-3);
-  padding: var(--s-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  background: var(--surface-sunken);
+  padding: var(--s-2) 0;
+  border-bottom: 1px solid var(--line-subtle);
 }
 
-.set-permission-rule span {
+.set-permissions-rules li span {
   display: grid;
   min-width: 0;
   gap: var(--s-1);
   overflow-wrap: anywhere;
 }
 
-.set-permission-rule small {
+.set-permissions-rules li strong {
+  font-weight: 500;
+}
+
+.set-permissions-rules li small {
   color: var(--text-dim);
 }

@@ -1,3 +1,4 @@
+import { AutomaticProcessingStatus } from "./AutomaticProcessingStatus";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   asMemoryError,
@@ -229,6 +230,7 @@ export function MemoryTab({
         </div>
       </div>
       <p className="set-note">{t.memoryAutoExtractHint}</p>
+      <AutomaticProcessingStatus t={t} />
 
       <div className="set-row">
         <span className="set-row-label">{t.memoryAiUse}</span>
@@ -347,7 +349,9 @@ export function MemoryTab({
                         : (personaNames.get(record.personaId ?? "") ??
                           record.personaId)}
                     </span>
-                    <span>{record.createdAt.slice(0, 10)}</span>
+                    {record.context?.workspace && <span title={record.context.workspace}>{record.context.workspace.split(/[\\/]/).filter(Boolean).at(-1)}</span>}
+                    {record.context?.topic && <span>{record.context.topic}</span>}
+                    <span>{record.updatedAt.slice(0, 10)}</span>
                     <span>{sourceLabel(t, record)}</span>
                     {record.status !== "active" && (
                       <span className="set-memory-status">

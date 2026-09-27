@@ -5,6 +5,7 @@ import { cancelAgentRun, locateAgentArtifact, pendingAgentPermissions, readAgent
 import type { PermissionReply, PermissionRequest } from "../lib/toolPermissions";
 import { dict } from "../lib/i18n";
 import type { ChatModelChoice, ConversationModelSelection } from "../lib/conversationModel";
+import { localResourceError } from "./localResourceCopy";
 
 const empty: AgentProjection = { active: null, recent: [], artifacts: [] };
 function isBusy(error: unknown): boolean { return error instanceof Error && /(?:^|\b)busy(?:\b|$)/i.test(error.message); }
@@ -76,12 +77,12 @@ export function useAgentRun(language: string) {
       return typeof selected === "string" ? selected : null;
     } catch { setError(t.agentPickerFailed); return null; }
   }, [projection.active, t.agentPickerFailed, t.agentPickerTitle]);
-  const start = useCallback(async (input: string, historyId?: string, catalogKey?: string, modelSelection?: ConversationModelSelection, expectedModel?: ChatModelChoice) => {
+  const start = useCallback(async (input: string, historyId?: string, catalogKey?: string, modelSelection?: ConversationModelSelection, expectedModel?: ChatModelChoice, resourceIds?: readonly string[]) => {
     if ((!workspace && !historyId) || projection.active || starting.current || !input.trim()) return null;
     starting.current = true;
     setIsStarting(true);
     try {
-      const run = await startAgentRun(historyId ? null : workspace, input.trim(), historyId, catalogKey, modelSelection, expectedModel);
+      const run = await startAgentRun(historyId ? null : workspace, input.trim(), historyId, catalogKey, modelSelection, expectedModel, resourceIds);
       ownedRun.current = run.runId;
       setProjection((current) => ({ ...current, active: run }));
       if (run.sessionId) broadcastPetActivity({ sessionId: run.sessionId, requestId: run.runId, eventId: crypto.randomUUID(), type: "start" });
@@ -89,8 +90,9 @@ export function useAgentRun(language: string) {
       return run;
     } catch (caught) {
       await refresh();
-      const message = caught instanceof Error ? caught.message : "";
-      if (/agent_history_workspace_missing/.test(message)) setError(t.agentHistoryWorkspaceMissing);
+      const message = caught instanceof Error ? caught.message : String(caught);
+      if (message.startsWith("resource_")) setError(localResourceError(language === "en-US" || language === "ja-JP" || language === "ko-KR" ? language : "zh-CN", message));
+      else if (/agent_history_workspace_missing/.test(message)) setError(t.agentHistoryWorkspaceMissing);
       else if (/agent_history_session_missing/.test(message)) setError(t.agentHistorySessionMissing);
       else setError(caught instanceof Error && isBusy(caught) ? t.agentBusy : t.agentStartFailed);
       return null;
@@ -98,7 +100,7 @@ export function useAgentRun(language: string) {
       starting.current = false;
       setIsStarting(false);
     }
-  }, [projection.active, refresh, t.agentBusy, t.agentHistorySessionMissing, t.agentHistoryWorkspaceMissing, t.agentStartFailed, workspace]);
+  }, [language, projection.active, refresh, t.agentBusy, t.agentHistorySessionMissing, t.agentHistoryWorkspaceMissing, t.agentStartFailed, workspace]);
   const stop = useCallback(async () => {
     const run = projection.active;
     if (!run || isStopping) return;

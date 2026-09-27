@@ -4,7 +4,7 @@ use super::{
     repository::*,
 };
 use chrono::{Local, Utc};
-use rusqlite::{params, Row};
+use rusqlite::{params, OptionalExtension, Row};
 
 pub(crate) fn entry_from_row(r: &Row<'_>) -> rusqlite::Result<Entry> {
     Ok(Entry {
@@ -42,6 +42,14 @@ impl Repository {
             let business_date = date(&request.business_date)?;
             if business_date > Local::now().date_naive() && request.status != EntryStatus::Planned {
                 return Err(WorklogError::validation("Future entries must be planned"));
+            }
+            // Explicit retries and automatic archival share an existing identical dated fact.
+            let existing:Option<(String,i64)>=db.query_row(
+                "SELECT id,revision FROM work_entries WHERE business_date=?1 AND text=?2 AND COALESCE(project,'')=?3 AND status=?4 ORDER BY updated_at DESC LIMIT 1",
+                params![request.business_date,request.text.trim(),project(&request.project)?.unwrap_or_default(),enum_text(&request.status)?],
+                |row|Ok((row.get(0)?,row.get(1)?))).optional()?;
+            if let Some((id,revision))=existing {
+                return receipt(db,OperationReceipt{operation_id:request.request_id.clone(),entity_kind:"entry".into(),entity_id:id,revision,business_date:Some(request.business_date.clone()),status:"committed".into()},request);
             }
             let id = uuid::Uuid::new_v4().to_string();
             let now = Utc::now().to_rfc3339();

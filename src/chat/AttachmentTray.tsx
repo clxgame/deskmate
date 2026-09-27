@@ -6,6 +6,7 @@ export type AttachmentTrayProps = {
   readonly t: Dict;
   readonly items: readonly AttachmentLifecycleState[];
   readonly error?: string | null;
+  readonly disabled?: boolean;
   readonly onConfirm: (localId: string) => void;
   readonly onCancel: (localId: string) => void;
   readonly onRemove: (localId: string) => void;
@@ -16,6 +17,7 @@ export function AttachmentTray({
   t,
   items,
   error = null,
+  disabled = false,
   onCancel,
   onConfirm,
   onRemove,
@@ -25,8 +27,9 @@ export function AttachmentTray({
   if (visibleItems.length === 0 && !error) return null;
 
   return (
-    <section
+    <fieldset
       className="chat-attachment-tray"
+      disabled={disabled}
       aria-label={t.chatAttachmentTrayLabel}
       aria-live="polite"
     >
@@ -46,6 +49,6 @@ export function AttachmentTray({
           {error}
         </div>
       )}
-    </section>
+    </fieldset>
   );
 }

@@ -214,6 +214,9 @@ pub(crate) fn collect_active_run_once(
                         .session_id
                         .as_deref()
                         .ok_or_else(|| "agent_session_unknown".to_owned())?;
+                    if let Some(resources) = app.try_state::<crate::chat_attachments::resources::ResourceStore>() {
+                        permissions.set_resource_scopes(&record.run_id, resources.scopes(&crate::agent::opencode_wire_directory(&record.workspace_path), session)?)?;
+                    }
                     crate::tool_permissions::runtime::pending_scoped_live(
                         app,
                         &record.workspace_path,

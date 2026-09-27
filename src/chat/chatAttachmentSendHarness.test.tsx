@@ -4,6 +4,7 @@ import type { UnifiedHistoryRow } from "../lib/unifiedHistory";
 import { afterEach, beforeEach, expect, mock } from "bun:test";
 import * as tauriCore from "@tauri-apps/api/core";
 import { cleanup } from "@testing-library/react";
+import type { LocalResource } from "./localResources";
 
 export const invoke = mock<(command: string, args?: unknown) => Promise<unknown>>(
   () => Promise.resolve(undefined),
@@ -20,6 +21,29 @@ type PromptRequest = Readonly<{
 export const promptRequests: PromptRequest[] = [];
 let attachmentPicker: () => Promise<unknown> = async () => [];
 export function setAttachmentPicker(pick: () => Promise<unknown>): void { attachmentPicker = pick; }
+const resourceMetadata = new Map<string, LocalResource>();
+const resourceBytes = new Map<string, { fileName: string; base64: string }>();
+const messageResources = new Map<string, readonly LocalResource[]>();
+const nativeListeners = new Map<string, Set<(event: { payload: unknown }) => void>>();
+let resourcePreparationError: string | null = null;
+let resourcePreparationPending: Promise<void> | null = null;
+let releaseResourcePreparation: (() => void) | null = null;
+export function setResourcePreparationError(error: string | null): void { resourcePreparationError = error; }
+export function deferResourcePreparation(): void { resourcePreparationPending = new Promise(resolve => { releaseResourcePreparation = resolve; }); }
+export function finishResourcePreparation(): void { releaseResourcePreparation?.(); resourcePreparationPending = null; }
+export function registerResource(resource: LocalResource, contents?: string): LocalResource {
+  resourceMetadata.set(resource.id, resource);
+  if (contents !== undefined) resourceBytes.set(resource.id, { fileName: resource.name, base64: btoa(contents) });
+  return resource;
+}
+export function dropNativeResources(resources: readonly LocalResource[]): void {
+  resources.forEach(resource => registerResource(resource));
+  for (const callback of nativeListeners.get("chat-resources-dropped") ?? []) callback({ payload: resources });
+}
+export function setMessageResources(messageId: string, resources: readonly LocalResource[]): void {
+  resources.forEach(resource => registerResource(resource));
+  messageResources.set(messageId, resources);
+}
 
 const defaultModel = { configuredProviderId: "test-entry", sidecarId: "yume-2", modelId: "claude-sonnet-4.5", modelName: "Claude Sonnet 4.5" };
 const alternativeModel = { configuredProviderId: "test-entry", sidecarId: "yume-2", modelId: "selected-model-b", modelName: "Selected Model B" };
@@ -65,7 +89,12 @@ function installNativeMocks(): void {
   mock.module("@tauri-apps/api/core", () => ({ ...tauriCore, invoke }));
   mock.module("@tauri-apps/api/event", () => ({
     emit: () => Promise.resolve(),
-    listen: () => Promise.resolve(() => {}),
+    listen: (name: string, callback: (event: { payload: unknown }) => void) => {
+      const callbacks = nativeListeners.get(name) ?? new Set();
+      callbacks.add(callback);
+      nativeListeners.set(name, callbacks);
+      return Promise.resolve(() => callbacks.delete(callback));
+    },
   }));
   mock.module("@tauri-apps/plugin-dialog", () => ({
     open: () => Promise.resolve(selectedWorkspace),
@@ -154,6 +183,13 @@ export function registerChatAttachmentHarness(): void {
   invoke.mockReset();
   promptRequests.length = 0;
   attachmentPicker = async () => [];
+  resourceMetadata.clear();
+  resourceBytes.clear();
+  messageResources.clear();
+  nativeListeners.clear();
+  resourcePreparationError = null;
+  resourcePreparationPending = null;
+  releaseResourcePreparation = null;
   verifiedModels = [defaultModel, alternativeModel];
   modelSelections.clear();
   agentProjection = { active: null, recent: [], artifacts: [] };
@@ -204,6 +240,32 @@ export function registerChatAttachmentHarness(): void {
         return Promise.resolve({ persona: "你是小著。", placeholders: null });
       case "pick_chat_attachment_files":
         return attachmentPicker();
+      case "pick_chat_resources":
+        return attachmentPicker();
+      case "read_chat_resource_attachment":
+        return Promise.resolve(resourceBytes.get((args as { resourceId: string }).resourceId));
+      case "stage_chat_resource_upload": {
+        const request = args as { fileName: string; mime: string; bytes: number[] };
+        const id = `uploaded_${resourceMetadata.size + 1}`;
+        const kind = request.mime.startsWith("video/") || /\.(mp4|mov|webm|mkv|avi)$/i.test(request.fileName) ? "video" : "audio";
+        return Promise.resolve(registerResource({ id, name: request.fileName, mime: request.mime || (kind === "audio" ? "audio/mpeg" : "video/mp4"), kind, size: request.bytes.length, previewUrl: `chat-resource://localhost/${id}` }));
+      }
+      case "prepare_chat_resources": {
+        if (resourcePreparationError) return Promise.reject(new Error(resourcePreparationError));
+        const request = args as { messageId: string; resourceIds: readonly string[] };
+        const resources = request.resourceIds.map(id => resourceMetadata.get(id)).filter((resource): resource is LocalResource => resource !== undefined);
+        messageResources.set(request.messageId, resources);
+        return (resourcePreparationPending ?? Promise.resolve()).then(() => ({
+          parts: resources.filter(resource => resource.kind === "directory").map(resource => ({ type: "file", mime: "application/x-directory", filename: resource.name, url: `file:///fixture/${resource.name}` })),
+          text: resources.length ? `\n\n<yume-local-resources>\n${resources.map(resource => `/fixture/${resource.name}`).join("\n")}\n</yume-local-resources>` : "",
+        }));
+      }
+      case "get_chat_message_resources":
+        return Promise.resolve(messageResources.get((args as { messageId: string }).messageId) ?? []);
+      case "list_chat_resource_directory":
+        return Promise.resolve({ relativePath: "", entries: [{ name: "voice.wav", kind: "audio", size: 12 }], truncated: false });
+      case "discard_chat_resources":
+        return Promise.resolve();
       case "stage_chat_attachment":
         return Promise.resolve(stageResponse(args));
       case "read_chat_attachment":

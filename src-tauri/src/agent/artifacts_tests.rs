@@ -38,6 +38,7 @@ fn message(tool: &str, status: &str, input: serde_json::Value) -> NativeMessage 
         finish: Some("stop".into()),
         error: None,
         parts: vec![NativePart {
+            synthetic: false,
             kind: None,
             text: None,
             id: "part_one".into(),

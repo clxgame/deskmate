@@ -63,6 +63,8 @@ struct WireError {
 #[derive(Deserialize)]
 struct WirePart {
     id: String,
+    #[serde(default)]
+    synthetic: bool,
     #[serde(rename = "type")]
     kind: Option<String>,
     text: Option<String>,
@@ -145,9 +147,21 @@ impl OpenCodeClient {
         system: &str,
         input: &str,
     ) -> Result<(), String> {
+        self.prompt_with_parts(session, message_id, system, input, &[])
+    }
+    pub(crate) fn prompt_with_parts(
+        &self,
+        session: &str,
+        message_id: &str,
+        system: &str,
+        input: &str,
+        resource_parts: &[serde_json::Value],
+    ) -> Result<(), String> {
+        let mut parts = vec![serde_json::json!({"type":"text","text":input})];
+        parts.extend_from_slice(resource_parts);
         self.agent.post(&self.workspace_url(&format!("/session/{session}/prompt_async"))?)
             .set("Authorization", &self.endpoint.auth_header)
-            .send_json(serde_json::json!({"messageID":message_id,"model":Model { provider_id:&self.endpoint.provider_id, model_id:&self.endpoint.model_id },"system":system,"parts":[{"type":"text","text":input}]}))
+            .send_json(serde_json::json!({"messageID":message_id,"model":Model { provider_id:&self.endpoint.provider_id, model_id:&self.endpoint.model_id },"system":system,"parts":parts}))
             .map_err(http_error)?;
         Ok(())
     }
@@ -184,6 +198,7 @@ impl OpenCodeClient {
                     .into_iter()
                     .map(|part| NativePart {
                         id: part.id,
+                        synthetic: part.synthetic,
                         kind: part.kind,
                         text: part.text,
                         call_id: part.call_id,

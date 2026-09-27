@@ -236,9 +236,10 @@ pub struct Settings {
     pub mouse_follow: bool,
     pub user_name: String,
     // 记忆
-    /// Let the companion propose memories from the conversation. Off by
-    /// default: automatic memory is opt-in.
+    /// Incremental automatic memory. Existing saved choices are preserved.
+    #[serde(default)]
     pub memory_auto_extract: bool,
+    pub worklog_auto_archive: bool,
     /// Allow relevant confirmed memories to be sent to the configured AI
     /// gateway. Off disables injection but keeps local memory management.
     pub memory_ai_use: bool,
@@ -282,9 +283,9 @@ impl Default for Settings {
             persona_id: "xiaozhu".into(),
             mouse_follow: true,
             user_name: String::new(),
-            // Automatic extraction is opt-in; using stored memories in replies
-            // is on so an explicitly remembered fact is actually useful.
-            memory_auto_extract: false,
+            // New installs learn automatically. Existing explicit settings are preserved.
+            memory_auto_extract: true,
+            worklog_auto_archive: true,
             memory_ai_use: true,
             update_repo: DEFAULT_UPDATE_REPO.into(),
         }
@@ -1345,10 +1346,30 @@ pub fn set_settings(
     settings.pet_position = old.pet_position;
     persist_settings_update(&AppSettingsTransactionOps { app: &app }, &old, &settings)?;
     let current = apply_and_publish_settings(&state, &settings, || apply(&app, &old, &settings))?;
+    if old.memory_auto_extract != settings.memory_auto_extract
+        || old.memory_ai_use != settings.memory_ai_use
+        || old.worklog_auto_archive != settings.worklog_auto_archive
+    {
+        if let Some(memory) = app.try_state::<crate::memory::MemoryState>() {
+            if let Ok(guard) = memory.0.lock() {
+                if let Some(repo) = guard.as_ref() {
+                    repo.invalidate_automation(
+                        old.memory_auto_extract != settings.memory_auto_extract
+                            || old.memory_ai_use != settings.memory_ai_use,
+                        old.worklog_auto_archive != settings.worklog_auto_archive,
+                    )
+                    .map_err(|_| "memory_settings_unavailable")?;
+                }
+            }
+        }
+    }
+
+
     // Keep the native workbench's default model on the same effective value as
     // the YUME settings selection, so both UIs read one sidecar config field
     // instead of maintaining two divergent model values (§3.4).
     sync_workbench_default_model(&app, &settings);
+    let _ = crate::yume_context::write_context(&app);
     crate::pomodoro::apply_preferences(&app, settings.pomodoro)?;
     // Notify every window (pet scale, persona, model...) of the change.
     let _ = app.emit("deskmate://settings-changed", &current);
@@ -3844,12 +3865,13 @@ mod tests {
     }
 
     #[test]
-    fn memory_defaults_are_opt_in_for_extraction_and_on_for_use() {
+    fn new_install_defaults_enable_automatic_memory_and_worklog() {
         let settings = Settings::default();
         assert!(
-            !settings.memory_auto_extract,
-            "automatic extraction must be opt-in"
+            settings.memory_auto_extract,
+            "new installs enable automatic memory"
         );
+        assert!(settings.worklog_auto_archive);
         assert!(settings.memory_ai_use);
     }
 

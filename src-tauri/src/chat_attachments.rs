@@ -11,6 +11,7 @@ pub(crate) mod export_io;
 mod export_io;
 mod ncm;
 pub(crate) mod picker;
+pub(crate) mod resources;
 mod store;
 mod types;
 mod validation;

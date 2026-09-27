@@ -15,11 +15,16 @@ pub(crate) struct AgentStartInput {
     pub(super) input: String,
     pub(super) model_selection: Option<crate::settings::ConversationModelSelection>,
     pub(super) expected_model: Option<ExpectedModel>,
+    #[serde(default)]
+    pub(super) resource_ids: Vec<String>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct ExpectedModel { provider_id: String, model_id: String }
+pub(super) struct ExpectedModel {
+    provider_id: String,
+    model_id: String,
+}
 
 pub(super) use super::start_context::{current_start_settings, lifecycle_client, StartSettings};
 
@@ -41,15 +46,30 @@ pub(crate) async fn agent_run_start(
         let target = match request.catalog_key.as_deref() {
             Some(key) => {
                 let entry = crate::history::commands::store(&app)?.get(key)?;
-                let target = super::continuation::catalog_start_target(&request, &entry, &history, &state)?;
-                if let crate::history::catalog_model::CatalogIdentity::Native { directory, session_id, .. } = &entry.identity {
+                let target =
+                    super::continuation::catalog_start_target(&request, &entry, &history, &state)?;
+                if let crate::history::catalog_model::CatalogIdentity::Native {
+                    directory,
+                    session_id,
+                    ..
+                } = &entry.identity
+                {
                     let client = crate::history::commands::client(&app)?;
-                    client.get(directory, session_id).map_err(|error| error.to_string())?;
-                    let statuses = client.statuses(directory).map_err(|error| error.to_string())?;
-                    if statuses.get(session_id).is_some_and(|status| !matches!(status, crate::history::native_api::NativeStatus::Idle)) {
+                    client
+                        .get(directory, session_id)
+                        .map_err(|error| error.to_string())?;
+                    let statuses = client
+                        .statuses(directory)
+                        .map_err(|error| error.to_string())?;
+                    if statuses.get(session_id).is_some_and(|status| {
+                        !matches!(status, crate::history::native_api::NativeStatus::Idle)
+                    }) {
                         return Err("agent_history_busy".into());
                     }
-                    if app.state::<crate::workbench::WorkbenchOwnership>().is_owned(directory, session_id)? {
+                    if app
+                        .state::<crate::workbench::WorkbenchOwnership>()
+                        .is_owned(directory, session_id)?
+                    {
                         return Err("session_owned_by_workbench".into());
                     }
                 }
@@ -57,8 +77,12 @@ pub(crate) async fn agent_run_start(
             }
             None => super::continuation::start_target(&request, &history, &state)?,
         };
-        let app_settings = app.state::<crate::settings::SettingsState>().0.lock()
-            .map_err(|_| "agent_settings_unavailable")?.clone();
+        let app_settings = app
+            .state::<crate::settings::SettingsState>()
+            .0
+            .lock()
+            .map_err(|_| "agent_settings_unavailable")?
+            .clone();
         let selection = match &request.model_selection {
             Some(selection) => selection.clone(),
             None => match request.catalog_key.as_deref() {
@@ -67,9 +91,10 @@ pub(crate) async fn agent_run_start(
             },
         };
         let selected_model = crate::settings::resolve_chat_model(&app, &app_settings, &selection)?;
-        if request.expected_model.as_ref().is_some_and(|expected|
-            expected.provider_id != selected_model.sidecar_id || expected.model_id != selected_model.model_id
-        ) {
+        if request.expected_model.as_ref().is_some_and(|expected| {
+            expected.provider_id != selected_model.sidecar_id
+                || expected.model_id != selected_model.model_id
+        }) {
             return Err("chat_model_changed_before_send".into());
         }
         let mut snapshot = StartSettings::from(&app_settings);
@@ -83,25 +108,38 @@ pub(crate) async fn agent_run_start(
             .ok_or_else(|| "agent_run_unknown".to_owned())?
             .workspace_path;
         let prepared = (|| {
+            crate::memory::automatic::synchronize_work_links(&app);
             let (persona, _, skills) = crate::packs::persona_files(&app, &snapshot.persona_id)?;
-            let memory = app
+            let mut memory = app
                 .state::<crate::memory::MemoryState>()
                 .0
                 .lock()
-                .map_err(|_| "agent_memory_unavailable")?
-                .as_ref()
-                .map(|repository| {
-                    crate::memory::retrieval::context_for_turn(
-                        repository,
-                        &snapshot.persona_id,
-                        &request.input,
-                        snapshot.memory_ai_use,
-                    )
+                .ok()
+                .and_then(|guard| {
+                    guard.as_ref().and_then(|repository| {
+                        crate::memory::retrieval::context_for_turn_scoped(
+                            repository,
+                            &snapshot.persona_id,
+                            &request.input,
+                            snapshot.memory_ai_use,
+                            workspace.to_str(),
+                        )
+                        .ok()
+                    })
                 })
-                .transpose()
-                .map_err(|_| "agent_memory_unavailable")?
                 .map(|context| context.prompt_block)
                 .filter(|block| !block.is_empty());
+            if snapshot.memory_ai_use {
+                let pending = crate::memory::automatic::pending_context(
+                    &app,
+                    &snapshot.persona_id,
+                    &request.input,
+                    workspace.to_str(),
+                );
+                if !pending.is_empty() {
+                    memory.get_or_insert_with(String::new).push_str(&pending);
+                }
+            }
             Ok::<_, String>((
                 std::iter::once(persona)
                     .chain(skills)
@@ -172,12 +210,16 @@ pub(crate) async fn agent_run_start(
         if request.model_selection.is_some() {
             let identity = crate::history::catalog_model::CatalogIdentity::Native {
                 sidecar_id: crate::history::catalog_model::SIDECAR_ID.into(),
-                directory: crate::history::catalog_model::canonical_directory(&workspace.to_string_lossy()).map_err(|_| "history_identity_invalid")?,
+                directory: crate::history::catalog_model::canonical_directory(
+                    &workspace.to_string_lossy(),
+                )
+                .map_err(|_| "history_identity_invalid")?,
                 session_id: session.clone(),
             };
             let persistence = (|| {
                 crate::history::commands::initialize(&app)?;
-                crate::history::commands::store(&app)?.set_model_selection(&identity.key(), &selection)
+                crate::history::commands::store(&app)?
+                    .set_model_selection(&identity.key(), &selection)
             })();
             if persistence.is_err() {
                 return fail_history_start(&state, &app.state::<AgentPermissionState>(), &run_id);
@@ -185,7 +227,18 @@ pub(crate) async fn agent_run_start(
         }
         let _operation = state.lock_operation()?;
         state.active_record(&run_id)?;
-        if let Err(error) = client.prompt(&session, &run_id, &system, &request.input) {
+        let resources = match crate::chat_attachments::resources::prepare_for_session(
+            &app, &workspace.to_string_lossy(), &session, &request.resource_ids, Some(&run_id),
+        ) {
+            Ok(resources) => resources,
+            Err(error) => {
+                let _ = app.state::<AgentPermissionState>().cancel_run(&run_id);
+                let _ = state.fail_active(&run_id, &error);
+                return Err(error);
+            }
+        };
+        let input = format!("{}{}", request.input, resources.text);
+        if let Err(error) = client.prompt_with_parts(&session, &run_id, &system, &input, &resources.parts) {
             super::supervision::submission_failed(&app, &state.active_record(&run_id)?, &error)?;
             return Err(error);
         }

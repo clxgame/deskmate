@@ -3,6 +3,7 @@
 //! Rust owns every decision. The frontend proposes; this module validates,
 //! classifies, stores, retrieves, and hard-deletes.
 
+pub(crate) mod automatic;
 pub mod commands;
 #[cfg(test)]
 mod cross_process_tests;

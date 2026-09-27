@@ -15,6 +15,7 @@ fn text_message(id: &str, role: &str, created: Option<u64>) -> NativeMessage {
         finish: Some("stop".to_owned()),
         error: None,
         parts: vec![NativePart {
+            synthetic: false,
             id: format!("prt-{id}"),
             kind: Some("text".to_owned()),
             text: Some(format!("text-{id}")),
@@ -56,6 +57,24 @@ fn native_snapshots_upsert_by_ids_in_stable_time_order() -> Result<(), String> {
     assert_eq!(list[0].updated, 20);
     fs::remove_dir_all(path.parent().ok_or_else(|| "missing parent".to_owned())?)
         .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[test]
+fn synthetic_attachment_context_is_not_displayed_as_user_input() -> Result<(), String> {
+    let path = temp_file("synthetic-resource-context");
+    let mut list = vec![agent("ses-agent")];
+    let mut message = text_message("msg-user", "user", Some(10));
+    let mut synthetic = message.parts[0].clone();
+    synthetic.id = "prt-generated-directory".into();
+    synthetic.text = Some("Called the Read tool with path /selected/folder".into());
+    synthetic.synthetic = true;
+    message.parts.push(synthetic);
+    upsert_agent_snapshot(&path, &mut list, AgentHistorySnapshot { session_id: "ses-agent", messages: &[message.clone()] })?;
+    assert_eq!(list[0].messages.len(), 1);
+    assert_eq!(list[0].messages[0].text, "text-msg-user");
+    assert_eq!(message.parts.len(), 2); // Projection leaves the native model context intact.
+    fs::remove_dir_all(path.parent().ok_or("missing parent")?).map_err(|error| error.to_string())?;
     Ok(())
 }
 

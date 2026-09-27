@@ -13,7 +13,7 @@ use super::error::{MemoryError, MemoryResult};
 
 /// Current logical schema version. Bump together with a new entry in
 /// [`MIGRATIONS`].
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// Database file name inside the Tauri app-data directory.
 pub const DB_FILE_NAME: &str = "deskmate-memory.db";
@@ -25,10 +25,16 @@ struct Migration {
     sql: &'static str,
 }
 
-const MIGRATIONS: &[Migration] = &[Migration {
-    to_version: 1,
-    sql: include_str!("migrations/001_initial.sql"),
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        to_version: 1,
+        sql: include_str!("migrations/001_initial.sql"),
+    },
+    Migration {
+        to_version: 2,
+        sql: include_str!("migrations/002_automatic.sql"),
+    },
+];
 
 /// A connection owner. All memory writes serialize through this mutex so the
 /// pet, chat, and settings windows cannot interleave partial updates.

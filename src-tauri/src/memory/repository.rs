@@ -57,8 +57,8 @@ impl Clock for SystemClock {
 
 /// Everything a caller can do to memory, with policy already enforced.
 pub struct MemoryRepository<C: Clock> {
-    store: MemoryStore,
-    clock: C,
+    pub(super) store: MemoryStore,
+    pub(super) clock: C,
 }
 
 impl<C: Clock> MemoryRepository<C> {
@@ -148,6 +148,11 @@ impl<C: Clock> MemoryRepository<C> {
             if stored.revision != request.expected_revision {
                 return Err(MemoryError::conflict("memory changed in another window"));
             }
+            super::automatic::invalidate(tx, true, false)?;
+            tx.execute(
+                "UPDATE memory_applicability SET source_time=?2 WHERE memory_id=?1",
+                params![request.id, chrono::Utc::now().timestamp_millis()],
+            )?;
             let importance = request.importance.unwrap_or(stored.importance);
             tx.execute(
                 "UPDATE memories \
@@ -202,12 +207,19 @@ impl<C: Clock> MemoryRepository<C> {
             let ids: Vec<String> = memories.iter().map(|memory| memory.id.clone()).collect();
             let mut sources = select_sources_for(tx, &ids)?;
             let mut task_links = select_task_links_for(tx, &ids)?;
+            let mut contexts = HashMap::new();
+            if !ids.is_empty() {
+                let sql=format!("SELECT memory_id,workspace,topic,state FROM memory_applicability WHERE memory_id IN ({})",vec!["?";ids.len()].join(","));
+                let mut stmt=tx.prepare(&sql)?;
+                for row in stmt.query_map(rusqlite::params_from_iter(&ids),|r| Ok((r.get::<_,String>(0)?,super::domain::MemoryContext{workspace:r.get(1)?,topic:r.get(2)?,state:r.get(3)?})))? { let (id,context)=row?; contexts.insert(id,context); }
+            }
             let records = memories
                 .into_iter()
                 .map(|memory| {
                     let sources = sources.remove(&memory.id).unwrap_or_default();
                     let linked_task_ids = task_links.remove(&memory.id).unwrap_or_default();
                     MemoryRecord {
+                        context: contexts.remove(&memory.id),
                         memory,
                         sources,
                         linked_task_ids,
@@ -239,6 +251,7 @@ impl<C: Clock> MemoryRepository<C> {
     pub fn clear(&self, scope: Option<MemoryScope>, persona_id: Option<&str>) -> MemoryResult<u64> {
         let now = self.clock.now();
         let removed = self.store.with_transaction(|tx| {
+            super::automatic::invalidate(tx, true, false)?;
             let removed = match (scope, persona_id) {
                 (Some(MemoryScope::Persona), Some(persona)) => tx
                     .execute(
@@ -396,13 +409,26 @@ impl<C: Clock> MemoryRepository<C> {
         anchor_types: &[MemoryType],
         limit: i64,
     ) -> MemoryResult<Vec<Memory>> {
+        self.retrieve_scoped(persona_id, keywords, anchor_types, limit, None, false)
+    }
+
+    pub fn retrieve_scoped(
+        &self,
+        persona_id: &str,
+        keywords: &[String],
+        anchor_types: &[MemoryType],
+        limit: i64,
+        workspace: Option<&str>,
+        continuing: bool,
+    ) -> MemoryResult<Vec<Memory>> {
         let now = self.clock.now();
         self.store.with_transaction(|tx| {
             expire_due(tx, &now)?;
 
             // Build the relevance clause first, then assemble bind values in
             // statement order: persona, relevance values, limit.
-            let mut relevance: Vec<String> = Vec::new();
+            let mut relevance: Vec<String> = vec!["a.aliases LIKE '@communication %'".into()];
+            if continuing { relevance.push("a.topic IS NOT NULL AND a.state='active'".into()); }
             let mut relevance_values: Vec<rusqlite::types::Value> = Vec::new();
 
             if !anchor_types.is_empty() {
@@ -413,7 +439,7 @@ impl<C: Clock> MemoryRepository<C> {
                 }
             }
             for keyword in keywords {
-                relevance.push("m.content LIKE ? ESCAPE '\\'".to_owned());
+                relevance.push("(m.content || ' ' || COALESCE(a.aliases,'') || ' ' || COALESCE(a.topic,'')) LIKE ? ESCAPE '\\'".to_owned());
                 relevance_values.push(format!("%{}%", escape_like(keyword)).into());
             }
             if relevance.is_empty() {
@@ -423,15 +449,17 @@ impl<C: Clock> MemoryRepository<C> {
             // Scope isolation: this persona's own memories plus the shared ones,
             // never another persona's.
             let sql = format!(
-                "SELECT m.* FROM memories m \
+                "SELECT m.* FROM memories m LEFT JOIN memory_applicability a ON a.memory_id=m.id \
                  WHERE m.status = 'active' \
                    AND (m.scope = 'global' OR (m.scope = 'persona' AND m.persona_id = ?)) \
+                   AND (a.workspace IS NULL OR a.workspace = ?) \
                    AND ({}) \
                  ORDER BY m.importance DESC, m.updated_at DESC, m.id LIMIT ?",
                 relevance.join(" OR ")
             );
 
             let mut values: Vec<rusqlite::types::Value> = vec![persona_id.to_owned().into()];
+            values.push(workspace.map(str::to_owned).into());
             values.extend(relevance_values);
             values.push(limit.clamp(1, MAX_LIMIT).into());
 
@@ -563,7 +591,7 @@ fn supersede_previous(
     Ok(previous)
 }
 
-fn insert_memory(
+pub(super) fn insert_memory(
     tx: &Transaction<'_>,
     accepted: &AcceptedMemory,
     source_kind: SourceKind,
@@ -601,7 +629,7 @@ fn insert_memory(
     load_memory(tx, &id)?.ok_or_else(|| MemoryError::storage_unavailable("insert vanished"))
 }
 
-fn insert_source(
+pub(super) fn insert_source(
     tx: &Transaction<'_>,
     memory_id: &str,
     conversation_id: Option<&str>,

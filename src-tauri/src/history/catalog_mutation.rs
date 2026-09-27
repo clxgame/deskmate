@@ -59,6 +59,9 @@ fn mutate(app: &tauri::AppHandle, key: &str, mutation: &CatalogMutation) -> Resu
     if matches!(mutation, CatalogMutation::Delete { .. }) { super::catalog_preview::invalidate(key); }
     let mut pending_error = None;
     if let (CatalogIdentity::Native { directory, session_id, .. }, CatalogMutation::Delete { .. }) = (&entry.identity, mutation) {
+        if let Some(resources) = app.try_state::<crate::chat_attachments::resources::ResourceStore>() {
+            resources.revoke_session(directory, session_id)?;
+        }
         match commands::client(app)?.delete(directory, session_id) {
             Ok(()) => store.update(|rows| { if let Some(row) = rows.iter_mut().find(|row| row.key() == key) { if let Some(tombstone) = &mut row.tombstone { tombstone.remote_deleted = true; } } Ok(()) })?,
             Err(error) => pending_error = Some(error.to_string()),

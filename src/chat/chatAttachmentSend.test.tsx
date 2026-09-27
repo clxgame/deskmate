@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "../testing/chatAgentHistoryCases";
-import { setAttachmentPicker, agentRun, ChatApp, deferAgentStart, finishAgentStart, invoke, promptRequests, selectWorkspace, setAgentProjection, removeAlternativeModel, addSyntheticModels, registerChatAttachmentHarness } from "./chatAttachmentSendHarness.test";
+import { registerResource, setAttachmentPicker, agentRun, ChatApp, deferAgentStart, finishAgentStart, invoke, promptRequests, selectWorkspace, setAgentProjection, removeAlternativeModel, addSyntheticModels, registerChatAttachmentHarness } from "./chatAttachmentSendHarness.test";
 
 function dropMarkdownFile(): void {
   const root = document.querySelector(".chat-root");
@@ -271,10 +271,10 @@ describe("dropped attachment sending", () => {
 
 
 describe("native attachment picker", () => {
-  test("plus picks multiple native files and stages their bytes before sending", async () => {
+  test("plus picks document metadata and separately stages document bytes before sending", async () => {
     setAttachmentPicker(async () => [
-      { fileName: "notes.md", base64: btoa("# selected") },
-      { fileName: "second.txt", base64: btoa("second") },
+      registerResource({ id: "picked_notes", name: "notes.md", kind: "file", mime: "text/markdown", size: 10, previewUrl: null }, "# selected"),
+      registerResource({ id: "picked_second", name: "second.txt", kind: "file", mime: "text/plain", size: 6, previewUrl: null }, "second"),
     ]);
     render(<ChatApp />);
     const input = await screen.findByPlaceholderText("输入消息,Enter 发送");
@@ -283,7 +283,7 @@ describe("native attachment picker", () => {
     fireEvent.click(plus);
     await screen.findByText("notes.md");
     await screen.findByText("second.txt");
-    const tray = screen.getByRole("region", { name: "附件" });
+    const tray = screen.getByRole("group", { name: "附件" });
     expect(tray.closest(".chat-input-wrap")).toBeNull();
     expect(tray.parentElement).toBe(input.closest(".chat-input-row"));
     expect(tray.nextElementSibling?.contains(input)).toBe(true);
@@ -312,15 +312,20 @@ describe("native attachment picker", () => {
   });
 
   test("picker failure is visible and can be retried", async () => {
-    setAttachmentPicker(async () => { throw new Error("read failed"); });
+    setAttachmentPicker(async () => { throw new Error("read failed /Users/private/media"); });
     render(<ChatApp />);
     await screen.findByPlaceholderText("输入消息,Enter 发送");
     const plus = screen.getByRole("button", { name: "附件" }) as HTMLButtonElement;
     await waitFor(() => expect(plus.disabled).toBe(false));
     fireEvent.click(plus);
-    await screen.findByText("文件读取失败，请确认文件完整后重试");
+    expect((await screen.findByRole("alert")).textContent).toContain("暂时无法读取附件");
+    expect(document.body.textContent).not.toContain("/Users/private");
     expect(plus.disabled).toBe(false);
     expect(invoke.mock.calls.filter(([name]) => name === "stage_chat_attachment")).toHaveLength(0);
+    setAttachmentPicker(async () => [registerResource({ id: "retry_audio", name: "retry.mp3", kind: "audio", mime: "audio/mpeg", size: 8, previewUrl: "chat-resource://localhost/retry_audio" })]);
+    fireEvent.click(plus);
+    await screen.findByLabelText("预览 retry.mp3");
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   test("a pending picker opens once and cannot add files to a switched folder", async () => {
@@ -333,10 +338,10 @@ describe("native attachment picker", () => {
     await waitFor(() => expect(plus.disabled).toBe(false));
     fireEvent.click(plus);
     fireEvent.click(plus);
-    expect(invoke.mock.calls.filter(([name]) => name === "pick_chat_attachment_files")).toHaveLength(1);
+    expect(invoke.mock.calls.filter(([name]) => name === "pick_chat_resources")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "文件夹" }));
     await screen.findByText("workspace");
-    await act(async () => resolve([{ fileName: "late.txt", base64: btoa("late") }]));
+    await act(async () => resolve([registerResource({ id: "late_resource", name: "late.txt", kind: "file", mime: "text/plain", size: 4, previewUrl: null }, "late")]));
     expect(invoke.mock.calls.filter(([name]) => name === "stage_chat_attachment")).toHaveLength(0);
     expect(screen.queryByText("late.txt")).toBeNull();
   });

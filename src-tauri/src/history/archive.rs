@@ -68,7 +68,7 @@ pub(super) fn merge_agent_messages(
         for part in message
             .parts
             .iter()
-            .filter(|part| part.kind.as_deref() == Some("text"))
+            .filter(|part| !part.synthetic && part.kind.as_deref() == Some("text"))
         {
             let text = part
                 .text

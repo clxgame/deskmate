@@ -227,6 +227,7 @@ function AttachmentFailure({ t, item, onRemove, onRetry }: AttachmentFailureProp
       <span className="chat-attachment-status chat-attachment-status-failed" title={item.message}>
         {t.chatAttachmentFailed}
       </span>
+      <span className="chat-attachment-failure-detail" role="alert">{item.message}</span>
       <button
         className="chat-attachment-action chat-attachment-retry"
         type="button"

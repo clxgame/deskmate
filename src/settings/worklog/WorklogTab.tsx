@@ -1,3 +1,4 @@
+import { AutomaticProcessingStatus } from "../AutomaticProcessingStatus";
 import { localWorklogDate as today } from "../../lib/worklogDate";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dict } from "../../lib/i18n";
@@ -16,12 +17,12 @@ import { weekForDate } from "./worklogWeek";
 import "./worklog.css";
 
 export interface WorklogTarget { readonly kind: "entry" | "report" | "schedule" | "run"; readonly id: string }
-export interface WorklogTabProps { readonly language: string; readonly t: Dict; readonly target?: WorklogTarget | null; readonly targetRequestId?: number }
+export interface WorklogTabProps { readonly autoArchive?: boolean; readonly onAutoArchiveChange?: (value: boolean) => void; readonly language: string; readonly t: Dict; readonly target?: WorklogTarget | null; readonly targetRequestId?: number }
 type View = "daily" | "weekly" | "schedules";
 type Detail = { readonly kind: "entry"; readonly entry: Entry | null } | { readonly kind: "report"; readonly detail: ReportDetail | null } | null;
 type Data = { readonly entries: readonly Entry[]; readonly reports: readonly Report[]; readonly schedules: readonly Schedule[]; readonly runs: readonly Run[] };
 
-export function WorklogTab({ language, t, target, targetRequestId }: WorklogTabProps) {
+export function WorklogTab({ language, t, target, targetRequestId, autoArchive, onAutoArchiveChange }: WorklogTabProps) {
   const labels = worklogLabels(language);
   const [view, setView] = useState<View>("daily");
   const [day, setDay] = useState(today);
@@ -126,6 +127,9 @@ export function WorklogTab({ language, t, target, targetRequestId }: WorklogTabP
   const taskDate = today() >= start && today() <= end ? today() : start;
   const reports = data.reports.filter((report) => report.kind === view);
   return <div className="worklog">
+    {onAutoArchiveChange && <label className="set-row"><span>{t.worklogAutoArchive}</span><input type="checkbox" checked={autoArchive ?? true} onChange={(event) => onAutoArchiveChange(event.target.checked)} /></label>}
+    {onAutoArchiveChange && <p className="set-note">{t.worklogAutoArchiveHint}</p>}
+      <AutomaticProcessingStatus t={t} />
     {!detail && <div className="worklog-toolbar"><div className="worklog-nav" role="group" aria-label={labels.featureTitle}>{(["daily", "weekly"] as const).map((item) => <button className="set-btn" type="button" key={item} aria-pressed={view === item} onClick={() => selectView(item)}>{labels[item]}</button>)}</div>
       <button className="set-btn worklog-schedule-link" type="button" aria-pressed={view === "schedules"} onClick={() => selectView("schedules")}>{labels.schedules}</button></div>}
     <p className="worklog-meta">{labels.dayBoundaryHint}</p>

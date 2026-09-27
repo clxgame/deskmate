@@ -55,8 +55,8 @@ export async function readAgentRuns(): Promise<AgentProjection> {
   if (!Array.isArray(value.artifacts)) throw new AgentWireError("recent");
   return { active: value.active === null ? null : parseRun(value.active), recent: value.recent.map(parseRun), artifacts: value.artifacts.map(parseArtifact) };
 }
-export async function startAgentRun(workspacePath: string | null, input: string, historyId?: string, catalogKey?: string, modelSelection?: ConversationModelSelection, expectedModel?: ChatModelChoice): Promise<AgentRun> {
-  const modelRequest = { ...(modelSelection ? { modelSelection } : {}), ...(expectedModel ? { expectedModel: { providerId: expectedModel.sidecarId, modelId: expectedModel.modelId } } : {}) };
+export async function startAgentRun(workspacePath: string | null, input: string, historyId?: string, catalogKey?: string, modelSelection?: ConversationModelSelection, expectedModel?: ChatModelChoice, resourceIds?: readonly string[]): Promise<AgentRun> {
+  const modelRequest = { ...(modelSelection ? { modelSelection } : {}), ...(expectedModel ? { expectedModel: { providerId: expectedModel.sidecarId, modelId: expectedModel.modelId } } : {}), ...(resourceIds?.length ? { resourceIds } : {}) };
   const request = historyId ? { historyId, input, ...(catalogKey ? { catalogKey } : {}), ...modelRequest } : { workspacePath, input, ...modelRequest };
   return parseRun(await invoke("agent_run_start", { request }));
 }

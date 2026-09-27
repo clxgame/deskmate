@@ -100,6 +100,12 @@ impl std::fmt::Display for MemoryError {
 
 impl std::error::Error for MemoryError {}
 
+impl From<rusqlite::Error> for MemoryError {
+    fn from(_: rusqlite::Error) -> Self {
+        Self::storage_unavailable("memory database operation failed")
+    }
+}
+
 pub type MemoryResult<T> = Result<T, MemoryError>;
 
 #[cfg(test)]

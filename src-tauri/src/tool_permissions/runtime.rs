@@ -152,6 +152,12 @@ pub(super) fn resolve_requests(
     Ok(waiting)
 }
 
+pub(crate) fn resource_request_mode(policy: &ToolPermissions, request: &PermissionRequest, scoped_read: bool) -> Mode {
+    if matches!(request.permission.as_str(), "read" | "glob" | "grep" | "list" | "external_directory") {
+        if scoped_read { Mode::Allow } else { Mode::Deny }
+    } else { policy.mode(&request.permission) }
+}
+
 #[tauri::command]
 pub async fn tool_permission_pending(
     app: tauri::AppHandle,
@@ -163,13 +169,30 @@ pub async fn tool_permission_pending(
         app.state::<AgentPermissions>()
             .reject_legacy_session(&session_id)?;
         let base = endpoint(&app);
-        let requests = pending_live(&app, &base)?;
+        let resource_directory = app.try_state::<crate::chat_attachments::resources::ResourceStore>()
+            .and_then(|store| store.session_directory(&session_id).ok().flatten());
+        let requests = match resource_directory.as_deref() {
+            Some(directory) => pending_scoped_live(&app, directory, &session_id)?,
+            None => pending_live(&app, &base)?,
+        };
         let state = app.state::<SettingsState>();
         let settings = state
             .0
             .lock()
             .map_err(|_| "settings_unavailable".to_owned())?;
-        resolve_requests(&base, &session_id, &settings.tool_permissions, requests)
+        if let Some(directory) = resource_directory {
+            let mut waiting = Vec::new();
+            for request in requests.into_iter().filter(|request| request.session_id == session_id) {
+                let mode = resource_request_mode(&settings.tool_permissions, &request,
+                    crate::chat_attachments::resources::resolve_registered_request(&app, &request));
+                match mode {
+                    Mode::Allow => respond_scoped(&base, &request, Reply::Once, &directory)?,
+                    Mode::Deny => respond_scoped(&base, &request, Reply::Reject, &directory)?,
+                    Mode::Ask => waiting.push(request),
+                }
+            }
+            Ok(waiting)
+        } else { resolve_requests(&base, &session_id, &settings.tool_permissions, requests) }
     })
     .await
     .map_err(|_| "permission_unavailable".to_owned())?
@@ -218,12 +241,23 @@ pub async fn tool_permission_reply(
         app.state::<AgentPermissions>()
             .reject_legacy_session(&session_id)?;
         let base = endpoint(&app);
-        let requests = pending_live(&app, &base)?;
+        let resource_directory = app.try_state::<crate::chat_attachments::resources::ResourceStore>()
+            .and_then(|store| store.session_directory(&session_id).ok().flatten());
+        let requests = match resource_directory.as_deref() {
+            Some(directory) => pending_scoped_live(&app, directory, &session_id)?,
+            None => pending_live(&app, &base)?,
+        };
         let state = app.state::<SettingsState>();
         let settings = state
             .0
             .lock()
             .map_err(|_| "settings_unavailable".to_owned())?;
+        if let Some(directory) = resource_directory {
+            let request = requests.into_iter().find(|request| request.id == request_id && request.session_id == session_id)
+                .ok_or_else(|| "permission_expired".to_owned())?;
+            let reply = if settings.tool_permissions.mode(&request.permission) == Mode::Deny { Reply::Reject } else { reply };
+            return respond_scoped(&base, &request, reply, &directory);
+        }
         reply_from_requests(
             &base,
             &session_id,
@@ -247,11 +281,20 @@ pub async fn tool_permission_cancel(
         app.state::<AgentPermissions>()
             .reject_legacy_session(&session_id)?;
         let base = endpoint(&app);
-        for request in pending_live(&app, &base)?
+        let resource_directory = app.try_state::<crate::chat_attachments::resources::ResourceStore>()
+            .and_then(|store| store.session_directory(&session_id).ok().flatten());
+        let requests = match resource_directory.as_deref() {
+            Some(directory) => pending_scoped_live(&app, directory, &session_id)?,
+            None => pending_live(&app, &base)?,
+        };
+        for request in requests
             .into_iter()
             .filter(|request| request.session_id == session_id)
         {
-            respond(&base, &request, Reply::Reject)?;
+            match resource_directory.as_deref() {
+                Some(directory) => respond_scoped(&base, &request, Reply::Reject, directory)?,
+                None => respond(&base, &request, Reply::Reject)?,
+            }
         }
         Ok(())
     })

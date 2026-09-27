@@ -32,6 +32,7 @@ fn text_message(id: &str, role: &str, text: &str, created: u64) -> NativeMessage
         finish: Some("stop".to_owned()),
         error: None,
         parts: vec![NativePart {
+            synthetic: false,
             id: format!("prt_{id}"),
             kind: Some("text".to_owned()),
             text: Some(text.to_owned()),

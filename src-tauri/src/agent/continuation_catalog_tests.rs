@@ -41,7 +41,7 @@ impl Fixture {
     }
 
     fn request(&self) -> AgentStartInput {
-        AgentStartInput { workspace_path: None, history_id: Some("ses_same".into()), catalog_key: Some(self.entry.key()), input: "Continue".into(), model_selection: None, expected_model: None }
+        AgentStartInput { workspace_path: None, history_id: Some("ses_same".into()), catalog_key: Some(self.entry.key()), input: "Continue".into(), model_selection: None, expected_model: None, resource_ids: Vec::new() }
     }
 }
 

@@ -49,6 +49,7 @@ pub(crate) struct RunListing {
 #[derive(Clone, Debug)]
 pub(crate) struct NativePart {
     pub(crate) id: String,
+    pub(crate) synthetic: bool,
     pub(crate) kind: Option<String>,
     pub(crate) text: Option<String>,
     pub(crate) call_id: Option<String>,

@@ -2,6 +2,8 @@
 
 Build success alone does not establish that a transparent pet window is visible.
 Run these checks against the packaged `YUME.app`, not only a browser preview.
+For this Mac's toolchain and execution permissions, first follow the
+[local release runbook](local-release-runbook.md).
 
 ## Automated regression checks
 
@@ -45,22 +47,49 @@ settings just to make a build appear to pass.
 
 ## Update checks
 
-Mac releases use manual DMG/ZIP installation. The settings footer checks the
-GitHub release API, compares versions and offers an installer for the running
-architecture; it does not attempt to install Windows updater artifacts.
+Current Mac builds use **一键更新** with the signed `darwin-aarch64` tarball in
+the shared `latest.json` feed. The client checks, downloads and verifies the
+update, waits for running tasks to finish, replaces the App with a recoverable
+backup, then requests restart. DMG/ZIP remain available for initial installation
+and migration from old clients without the automatic installer.
 
-Regression tests cover newer/equal/older versions, absent Mac assets, incomplete
-uploads, Intel vs Apple Silicon, universal/ZIP fallback, download URL validation,
-HTTP errors and retry behavior. With network access, run the opt-in API check:
+Run the actual Mac installation regression tests:
 
 ```sh
 cargo test --locked --manifest-path src-tauri/Cargo.toml --lib \
-  updater::macos::tests::live_public_mac_release_check -- --ignored --exact
+  updater::macos::tests
 ```
 
-For packaged-app verification, check from an older version, confirm the version
-and installer button, then open the download. The UI should retain the manual
-installation instructions and allow a retry if opening the browser fails.
-Check again from the latest version and confirm that no download is offered.
-This feature requires installing a build containing the fix; existing installed
-versions cannot acquire it through the previously broken Mac updater.
+There are currently five tests covering App path discovery, backup ownership,
+privileged path arguments, archive layout and restoring the backup. Require a
+nonzero test count. The old `live_public_mac_release_check` name does not exist;
+an exact filter that runs zero tests is not a successful API verification.
+
+For packaged-app verification:
+
+1. Use an older auto-update-capable, Developer-ID-signed and notarized App in an
+   isolated writable installation location and isolated data environment. Copying
+   the App alone does not isolate its user data. Preserve the user's daily install.
+2. Before publication, use a controlled QA update source. The nondefault
+   `updater-qa` feature accepts a compile-time `YUME_UPDATER_QA_ENDPOINT` pointing
+   to loopback HTTP. It is not a runtime environment override for a production
+   binary. Test builds must retain the same signing/identity requirements for
+   their A/B pair, and the update signature must match the test client's embedded
+   public key. See the [upgrade verification plan](macos-one-click-update-plan.md).
+   Keep the QA feature/configuration out of the public build. Production clients
+   cannot discover a draft through the public latest feed.
+3. Click **一键更新** once. Observe download, verification, installation and
+   restart without a second confirmation or browser/manual installer step.
+   Check the actual running version afterward, persisted data, pet/settings
+   windows and sidecars. Do not claim success merely because restart was requested.
+4. While a task is running, verify that installation waits, then proceeds after
+   the task ends; also verify cancel/retry behavior. Record permissions and
+   failure/restore scenarios actually exercised, keeping the previous App recoverable.
+5. Check from the target version: it reports up to date and does not install or
+   restart. After publication, verify the public manifest points to the verified
+   version; this network check does not replace the A→B runtime test.
+
+Record automated tests, payload checks, public-feed checks and observed A→B
+results separately. If an isolated signed/notarized A/B pair or test source is
+unavailable, report the runtime upgrade check as unverified. Never substitute
+mock tests or helper smoke tests for the real packaged-app result.

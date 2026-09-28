@@ -1,5 +1,11 @@
 # macOS release gate
 
+For releases on the maintainer's Mac, start with the
+[local release runbook](local-release-runbook.md). It records the existing
+signing identity, notary profile, keychain execution permissions, SDK flags and
+the complete commit/push/publish sequence. Use it before diagnosing missing
+credentials; a sandboxed keychain query can report a false negative.
+
 ## Why macOS said the app was damaged
 
 The old release workflow ran `tauri build --no-sign`, then uploaded DMG/ZIP
@@ -32,10 +38,13 @@ Actions artifacts or release attachments.
    `YUME.unsigned.app.zip` with `ditto -x -k` into a new directory. Do not run
    or distribute this unsigned candidate. Alternatively build the matching
    source locally with `bun run tauri build --no-sign --bundles app --ci`.
-3. Have a valid Developer ID Application identity with its private key in
-   Keychain, Xcode command-line tools with the license accepted, and a
-   `notarytool` keychain profile. Configure that profile interactively with
-   `xcrun notarytool store-credentials <profile>`; never send passwords in chat
+3. Verify the existing Developer ID Application identity with its private key in
+   Keychain, a working Apple command-line toolchain, and the existing
+   `notarytool` profile using the local runbook. On this Mac, use the process-local
+   `DEVELOPER_DIR=/Library/Developer/CommandLineTools`; accepting the full Xcode
+   license or creating a new profile is not part of routine release preparation.
+   Only on a new signing machine without a profile, configure one interactively
+   with `xcrun notarytool store-credentials <profile>`; never send passwords in chat
    or store them in scripts. The identity SHA-1 from
    `security find-identity -v -p codesigning` is an identifier, not a secret.
 4. Finalize with an output directory that does not exist. If the updater private
@@ -54,7 +63,7 @@ Actions artifacts or release attachments.
    Mach-O code inside-out with timestamps and hardened runtime (JIT only for
    OpenCode), notarizes/staples the App, smoke-tests both helpers, then builds,
    signs, notarizes and staples the DMG. The ZIP contains the stapled App.
-   Both downloads are re-opened to check their App signatures, dependencies,
+   The DMG, ZIP and updater tarball are re-opened to check App signatures, dependencies,
    notarization, versions and identical contents. Hashes cover final bytes.
    Public packaging rejects unsigned, ad-hoc, tampered or unnotarized Apps;
    there is no unsigned override. Only arm64 packages are currently supported.
@@ -70,7 +79,7 @@ Actions artifacts or release attachments.
    in `tauri.conf.json` and must never be copied into the repository or output.
 
    ```bash
-   bash scripts/publish-macos.sh /path/to/new-release-output/downloads 0.3.21
+   bash scripts/publish-macos.sh /path/to/new-release-output/downloads "$release_version"
    ```
 
    This rechecks all downloads, reuses only byte-identical assets already present
@@ -84,20 +93,23 @@ Actions artifacts or release attachments.
    `finalize macOS release` workflow for the same version:
 
    ```bash
-   bash scripts/upload-macos-payloads.sh /path/to/new-release-output/downloads 0.4.4
-   gh workflow run finalize-macos-release.yml -f version=0.4.4
+   bash scripts/upload-macos-payloads.sh /path/to/new-release-output/downloads "$release_version"
+   gh workflow run finalize-macos-release.yml --repo clxgame/deskmate -f version="$release_version"
    ```
 
    That workflow refuses published releases, checks out the matching tag, uses
    the existing repository updater secret to sign only the tarball, preserves
    the Windows entries while merging `darwin-aarch64`, and uploads the final
    signature and checksums. It never receives the Apple identity or notary
-   credentials. Download all five Mac assets afterward and run
+   credentials. This is the default path on the maintainer's Mac; no local updater
+   private key is needed. Download all five Mac assets and `latest.json` afterward and run
    `verify-macos-downloads.sh` locally before publishing.
 6. Check the Windows installer/signature and merged `latest.json`, then perform
    [runtime checks](macos-runtime-checks.md). Before publishing, prove an older
    auto-update-capable, signed and notarized Mac build completes one click from
-   check through download, installation and restart in an isolated location.
+   check through download, installation and restart in an isolated location and
+   data environment. A production client's public latest endpoint cannot discover
+   a draft; pre-publication upgrade checks require a controlled QA update source.
 
 ## Failures and recovery
 
@@ -112,7 +124,7 @@ Run regression checks on macOS with `bun test scripts/macos-release.test.ts`.
 For an existing download directory, independently run:
 
 ```bash
-bash scripts/verify-macos-downloads.sh /path/to/downloads 0.3.21
+bash scripts/verify-macos-downloads.sh /path/to/downloads "$release_version"
 ```
 
 The App in the output root is an installable copy of the verified App in the

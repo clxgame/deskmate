@@ -174,4 +174,4 @@ jobs:
         run: |
           echo '### macOS is NOT release-ready' >> "$GITHUB_STEP_SUMMARY"
           echo 'The Actions artifact is an unsigned build candidate, not a user download.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'Run scripts/release-macos.sh locally, then scripts/publish-macos.sh. See docs/macos-release.md. Do not publish the draft until those checks pass.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Run scripts/release-macos.sh locally to sign and notarize, upload verified payloads with scripts/upload-macos-payloads.sh, and dispatch finalize-macos-release.yml to sign the updater payload. Verify the downloaded assets and packaged-app upgrade before publishing. See docs/local-release-runbook.md.' >> "$GITHUB_STEP_SUMMARY"

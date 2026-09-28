@@ -213,16 +213,19 @@ and chat keep working normally.
 
 ## Releases and updater
 
-The public updater repository is `clxgame/deskmate`. The app checks GitHub Releases in that repository for signed Windows updater artifacts.
+The public updater repository is `clxgame/deskmate`. Windows and Apple Silicon
+Mac builds use its shared `latest.json` feed with separately signed updater
+payloads. On macOS, **一键更新** checks, downloads and verifies the tarball, waits
+for running tasks to finish, installs and restarts. DMG/ZIP downloads remain
+available for first installation and migration from older clients without the
+automatic installer.
 
-On macOS, **Check for updates** queries GitHub's latest stable release directly.
-It compares semantic versions and offers **Download installer** for a matching
-DMG (or app ZIP). After downloading, quit YUME and replace it in Applications.
-Mac checks do not require a macOS entry in the Windows-only `latest.json` feed.
-Missing Mac installers, network failures, and API rate limits have separate
-messages, and opening the download does not claim an update was installed.
+For the maintainer's Mac, follow the [local release runbook](docs/local-release-runbook.md).
+It includes the existing keychain configuration, execution permissions and the
+complete save/commit/push/release sequence. AI agents start from [AGENTS.md](AGENTS.md).
 
-Release prerequisites:
+Updater signing prerequisites (already configured in repository Actions secrets
+for the normal CI path; local Windows signing uses these environment variables):
 
 - `TAURI_SIGNING_PRIVATE_KEY`
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
@@ -258,9 +261,20 @@ powershell -ExecutionPolicy Bypass -File scripts\publish.ps1 -Tag v0.1.1
 
 The GitHub Actions release workflow runs on `v*` tags. It checks the tag against the app version and creates a draft GitHub Release first, then builds Windows and macOS in parallel. Windows uploads the signed NSIS updater installer, signatures, and `latest.json`. macOS runs regression tests and stores an explicitly **unsigned build candidate as an Actions artifact**, never as a Release download. A green CI run does not mean macOS is ready to publish.
 
-On the maintainer's Mac, `scripts/release-macos.sh` bundles portable dependencies, signs with Developer ID, notarizes/staples the App and DMG, and verifies both DMG and app ZIP before `scripts/publish-macos.sh` can attach them to the draft. Apple keys stay in the local keychain. Follow the [macOS release guide](docs/macos-release.md); unsigned or unnotarized Apps are rejected by the public packaging script. Both CI jobs **and the local macOS release gate** must pass before publishing the draft. Mac downloads are for manual installation on Apple Silicon and do not participate in the Windows updater feed; Intel packages are not provided.
+On the maintainer's Mac, `scripts/release-macos.sh` bundles portable dependencies,
+signs with Developer ID, notarizes/staples the App and DMG, and verifies the DMG,
+ZIP and updater tarball. The normal path uses `scripts/upload-macos-payloads.sh`
+to upload those payloads to the draft, then `finalize-macos-release.yml` signs the
+updater tarball using Actions secrets and merges `darwin-aarch64` into the feed
+while retaining Windows entries. Apple keys stay in the local keychain; no local
+updater private key is required. Follow the [macOS release gate](docs/macos-release.md).
+Unsigned or unnotarized Apps are rejected. Intel Mac packages are not provided.
 
-For a public release, bump the app version and push a matching tag. Complete the local macOS release gate before publishing the draft with the Windows installer, signature, `latest.json`, and verified Mac DMG/ZIP/checksums. Then verify a real installed older build can find the new release from `clxgame/deskmate`.
+For a public release, bump the app version and push a matching tag. Complete both
+CI jobs, local Apple signing and notarization, the macOS finalizer, local payload
+verification and runtime upgrade checks before publishing the draft with its
+cross-platform updater manifest and verified downloads. Then confirm the public
+latest feed serves the target version.
 
 ### GIF character packs
 

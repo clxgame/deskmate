@@ -1523,13 +1523,34 @@ pub fn run() {
                 } else {
                     tauri::http::Response::builder().status(403).body(Vec::new()).expect("static response")
                 };
-                responder.respond(response);
+                // WKURLSchemeTask cancellation runs on the UI thread. Wry checks
+                // whether the task is still alive while responding, so perform
+                // that check and delivery on the same thread as cancellation.
+                // File I/O stays above, on the blocking worker.
+                if let Err(error) = app.run_on_main_thread(move || responder.respond(response)) {
+                    eprintln!("local resource preview dispatch failed: {error}");
+                }
             });
         })
-        .on_webview_event(|webview, event| {
-            if webview.label() == "chat" {
-                if let tauri::WebviewEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
-                    chat_attachments::resources::native_drop(webview.app_handle(), paths.clone());
+        .on_window_event(|window, event| {
+            // Configured WebviewWindows dispatch native drops as WindowEvents.
+            if window.label() == "chat" {
+                // QA can distinguish native delivery from frontend-only event mocks,
+                // without putting file paths into the window title.
+                #[cfg(feature = "worklog-qa")]
+                if let tauri::WindowEvent::DragDrop(event) = event {
+                    let detail = match event {
+                        tauri::DragDropEvent::Enter { paths, .. } => format!("enter: {}", paths.len()),
+                        tauri::DragDropEvent::Drop { paths, .. } => format!("drop: {}", paths.len()),
+                        tauri::DragDropEvent::Leave => "leave".into(),
+                        _ => String::new(),
+                    };
+                    if !detail.is_empty() {
+                        let _ = window.set_title(&format!("YUME QA chat [{detail}]"));
+                    }
+                }
+                if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
+                    chat_attachments::resources::native_drop(window.app_handle(), paths.clone());
                 }
             }
         })

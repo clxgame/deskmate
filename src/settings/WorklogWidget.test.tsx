@@ -43,7 +43,7 @@ test("shows work journal as a lazy peer widget without a separate sidebar", asyn
   await openLog();
   // Then report views and secondary schedule settings belong to its peer panel.
   expect(within(screen.getByRole("navigation")).queryByRole("button", { name: /工作(日志|记录)/ })).toBeNull();
-  expect(within(screen.getByRole("group", { name: t.widgetSelector })).getAllByRole("button")).toHaveLength(3);
+  expect(within(screen.getByRole("group", { name: t.widgetSelector })).getAllByRole("button")).toHaveLength(4);
   for (const name of ["日报", "周报", "报告定时设置"]) expect(screen.getByRole("button", { name })).toBeTruthy();
 });
 test("retains the entry draft and filters while another peer is selected", async () => {

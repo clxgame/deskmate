@@ -4,6 +4,7 @@ import * as tauriEvent from "@tauri-apps/api/event";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { dict } from "../lib/i18n";
 import { legacySettingsFixture } from "../testing/settingsFixtures";
+import { horoscopeLabels } from "./widgets/horoscopeLabels";
 
 import { installTimePopoverFixture } from "../testing/timePopoverFixture";
 installTimePopoverFixture();
@@ -133,4 +134,20 @@ test("retains the scheduled-task draft when another widget is selected", async (
   expect(prompt instanceof HTMLInputElement && prompt.value).toBe("Finish my notes");
   expect(screen.getByRole("button", { name: t.scheduledTasks }).getAttribute("aria-pressed")).toBe("true");
   expect(screen.queryByRole("checkbox", { name: t.alwaysOnTop })).toBeNull();
+});
+
+test("opens the horoscope peer and saves a selected sign through settings", async () => {
+  const labels = horoscopeLabels("zh-CN");
+  invoke.mockClear();
+  await openWidgets();
+  fireEvent.click(screen.getByRole("button", { name: labels.featureTitle }));
+  expect(screen.getByRole("heading", { name: labels.allSigns })).toBeTruthy();
+  fireEvent.change(screen.getByRole("combobox", { name: labels.mySign }), { target: { value: "gemini" } });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 450)); });
+  expect(invoke.mock.calls.find((call) => call[0] === "set_settings")?.[1])
+    .toEqual({ settings: { ...settings, horoscopeSign: "gemini" } });
+  fireEvent.click(screen.getByRole("button", { name: t.scheduledTasks }));
+  fireEvent.click(screen.getByRole("button", { name: labels.featureTitle }));
+  expect((screen.getByRole("combobox", { name: labels.mySign }) as HTMLSelectElement).value).toBe("gemini");
+  expect(screen.getByRole("button", { name: `${labels.myFortune} · ${labels.zodiac.gemini}` })).toBeTruthy();
 });

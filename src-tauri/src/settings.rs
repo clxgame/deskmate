@@ -109,6 +109,33 @@ fn normalize_theme(theme: &str) -> String {
     }
 }
 
+fn deserialize_horoscope_sign<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value
+        .as_str()
+        .filter(|sign| {
+            matches!(
+                *sign,
+                "aries"
+                    | "taurus"
+                    | "gemini"
+                    | "cancer"
+                    | "leo"
+                    | "virgo"
+                    | "libra"
+                    | "scorpio"
+                    | "sagittarius"
+                    | "capricorn"
+                    | "aquarius"
+                    | "pisces"
+            )
+        })
+        .map(str::to_owned))
+}
+
 /// A configured AI gateway. Multiple providers are injected into the sidecar
 /// and each renders its own usage card. `id` is a stable uuid used to address
 /// the keystore entry and catalog file; `sidecar_id` is the key in the
@@ -228,6 +255,8 @@ pub struct Settings {
     pub scheduled_tasks: Vec<ScheduledTask>,
     #[serde(deserialize_with = "crate::pomodoro::deserialize_stored_preferences")]
     pub pomodoro: crate::pomodoro::Preferences,
+    #[serde(deserialize_with = "deserialize_horoscope_sign")]
+    pub horoscope_sign: Option<String>,
     // 快捷键
     pub shortcut_toggle_chat: String,
     pub shortcut_toggle_pet: String,
@@ -276,6 +305,7 @@ impl Default for Settings {
             pet_position: None,
             scheduled_tasks: Vec::new(),
             pomodoro: crate::pomodoro::Preferences::default(),
+            horoscope_sign: None,
             // NOTE: Alt+Space is the Windows system menu and Ctrl+Shift+Space
             // is commonly taken by IMEs; Ctrl+Alt+D is usually free.
             shortcut_toggle_chat: "Ctrl+Alt+D".into(),
@@ -1285,6 +1315,9 @@ mod geometry_tests;
 #[cfg(test)]
 #[path = "settings_mcp_permission_tests.rs"]
 mod mcp_permission_tests;
+#[cfg(test)]
+#[path = "settings_horoscope_tests.rs"]
+mod horoscope_tests;
 #[tauri::command]
 pub fn set_settings(
     app: tauri::AppHandle,

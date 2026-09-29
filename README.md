@@ -5,6 +5,15 @@ YUME is a desktop pet application built with Tauri, React, TypeScript, and Bun.
 OpenCode is pinned as a project dependency and bundled into release builds.
 Users of the packaged app do not need to install OpenCode separately.
 
+## Daily horoscope
+
+Settings → Widgets → Daily horoscope (设置 → 小组件 → 今日星运) shows today's
+brightest sign and details for all twelve signs. Choosing **My sign** adds a
+shortcut to that sign; the choice can be cleared. Fortunes are generated
+entirely on the device from the local calendar date and a fixed content version.
+They change at local midnight, recover after sleep or date changes, and need no
+network connection or AI provider.
+
 ## Work journal and reports
 
 Ask the pet to save a work entry, generate a daily report, or schedule a weekly

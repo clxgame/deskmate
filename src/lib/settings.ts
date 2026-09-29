@@ -4,6 +4,7 @@ import type { ThemeId } from "../settings/theme";
 import type { PomodoroPreferences } from "./pomodoro";
 import type { AgentPermissionApproval } from "./toolPermissions";
 import { sidecarAuthHeaders } from "./opencode";
+import type { ZodiacSign } from "./horoscope/zodiac";
 
 /** A scheduled task: at `time` (HH:MM, daily), auto-send `prompt` to the AI. */
 export interface ScheduledTask {
@@ -58,6 +59,7 @@ export interface Settings {
   petPosition?: PetPosition | null;
   scheduledTasks: ScheduledTask[];
   readonly pomodoro?: PomodoroPreferences;
+  horoscopeSign?: ZodiacSign | null;
   // 快捷键
   shortcutToggleChat: string;
   shortcutTogglePet: string;

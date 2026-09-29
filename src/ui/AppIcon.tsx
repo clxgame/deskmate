@@ -41,6 +41,7 @@ const ICONS = {
   delete: TrashIcon,
   clock: ClockIcon,
   timer: TimerIcon,
+  horoscope: SparkleIcon,
   play: PlayIcon,
   pause: PauseIcon,
   reset: ArrowCounterClockwiseIcon,

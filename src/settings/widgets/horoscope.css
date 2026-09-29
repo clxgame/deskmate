@@ -1,0 +1,211 @@
+.set-horoscope {
+  display: grid;
+  gap: var(--s-4);
+  min-width: 0;
+}
+
+.set-horoscope-header,
+.set-horoscope-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.set-horoscope-header h3,
+.set-horoscope-detail h4,
+.set-horoscope-all h4 {
+  margin: 0;
+  font-size: var(--t-head);
+}
+
+.set-horoscope-header time {
+  color: var(--text-dim);
+  font-size: var(--t-small);
+}
+
+.set-horoscope-preference {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-3);
+  min-width: 0;
+}
+
+.set-horoscope-preference .set-select {
+  max-width: 100%;
+}
+
+.set-horoscope-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.set-horoscope-shortcut,
+.set-horoscope-sign {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.set-horoscope-shortcut {
+  padding: var(--s-2) var(--s-3);
+}
+
+.set-horoscope-shortcut:hover,
+.set-horoscope-sign:hover {
+  background: var(--surface-hover);
+}
+
+.set-horoscope-shortcut[aria-pressed="true"],
+.set-horoscope-sign[aria-pressed="true"] {
+  border-color: var(--accent-ink);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.set-horoscope-shortcut:focus-visible,
+.set-horoscope-sign:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: var(--s-0-5);
+  box-shadow: var(--shadow-focus);
+}
+
+.set-horoscope-detail {
+  display: grid;
+  gap: var(--s-3);
+  min-width: 0;
+  padding: var(--s-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-raised);
+}
+
+.set-horoscope-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.set-horoscope-symbol {
+  color: var(--accent-ink);
+  font-size: var(--t-count);
+  line-height: 1;
+}
+
+.set-horoscope-badge {
+  color: var(--accent-ink);
+  font-size: var(--t-small);
+}
+
+.set-horoscope-ratings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-2) var(--s-4);
+}
+
+.set-horoscope-rating {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--s-1) var(--s-2);
+  min-width: 0;
+}
+
+.set-horoscope-rating:first-child {
+  grid-column: 1 / -1;
+  padding-bottom: var(--s-2);
+  border-bottom: 1px solid var(--line);
+  font-weight: 600;
+}
+
+.set-horoscope-rating-label {
+  color: var(--text-dim);
+}
+
+.set-horoscope-stars,
+.set-horoscope-sign-stars {
+  color: var(--accent-ink);
+  white-space: nowrap;
+  letter-spacing: 0.03em;
+}
+
+.set-horoscope-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-2) var(--s-4);
+  margin: 0;
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--line);
+}
+
+.set-horoscope-facts div {
+  display: flex;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.set-horoscope-facts dt {
+  flex: none;
+  color: var(--text-dim);
+}
+
+.set-horoscope-facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.set-horoscope-message {
+  margin: 0;
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--line);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.set-horoscope-message strong {
+  color: var(--accent-ink);
+}
+
+.set-horoscope-all {
+  display: grid;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.set-horoscope-signs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  gap: var(--s-2);
+}
+
+.set-horoscope-sign {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--s-1) var(--s-2);
+  min-width: 0;
+  padding: var(--s-2);
+  text-align: left;
+}
+
+.set-horoscope-top-mark {
+  color: var(--accent-ink);
+}
+
+.set-horoscope-sign-stars {
+  font-size: var(--t-small);
+}
+
+@media (max-width: 600px) {
+  .set-horoscope-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

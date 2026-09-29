@@ -5,9 +5,11 @@ import { PomodoroWidget } from "./PomodoroWidget";
 import { ScheduledTasksWidget, type ScheduledTaskDraft } from "./ScheduledTasksWidget";
 import { WorklogTab, type WorklogTarget } from "../worklog/WorklogTab";
 import { worklogLabels } from "../worklog/worklogLabels";
+import { HoroscopeWidget } from "./HoroscopeWidget";
+import { horoscopeLabels } from "./horoscopeLabels";
 import "./widgets.css";
 
-export type WidgetId = "tasks" | "pomodoro" | "worklog";
+export type WidgetId = "tasks" | "pomodoro" | "worklog" | "horoscope";
 interface WidgetTabProps extends TabProps {
   readonly activeWidget: WidgetId;
   readonly onSelect: (widget: WidgetId) => void;
@@ -22,6 +24,7 @@ export function WidgetTab({ settings, patch, t, activeWidget, onSelect, worklogR
     tasks: <ScheduledTasksWidget settings={settings} patch={patch} t={t}
       draft={draft} onDraftChange={setDraft} />,
     pomodoro: <PomodoroWidget settings={settings} patch={patch} t={t} />,
+    horoscope: <HoroscopeWidget settings={settings} patch={patch} />,
   };
   return (
     <div className="set-widgets">
@@ -40,6 +43,11 @@ export function WidgetTab({ settings, patch, t, activeWidget, onSelect, worklogR
           aria-pressed={activeWidget === "worklog"} aria-controls={panelId}
           onClick={() => onSelect("worklog")}>
           <AppIcon name="history" size={32} /><span>{worklogLabels(settings.language).featureTitle}</span>
+        </button>
+        <button type="button" className="set-widget-tile" id={`${panelId}-horoscope`}
+          aria-pressed={activeWidget === "horoscope"} aria-controls={panelId}
+          onClick={() => onSelect("horoscope")}>
+          <AppIcon name="horoscope" size={32} /><span>{horoscopeLabels(settings.language).featureTitle}</span>
         </button>
       </div>
       <section className="set-widget-panel" id={panelId}

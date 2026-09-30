@@ -44,8 +44,9 @@ test("the complete CLI returns failure even when another child passes", async ()
     await writeFile(join(root, "src/a.test.ts"), 'import {test,expect} from "bun:test";test("pass",()=>expect(1).toBe(1));');
     await writeFile(join(root, "src/b.test.ts"), 'import {test,expect} from "bun:test";test("fail",()=>expect(1).toBe(2));');
     const child = Bun.spawn([process.execPath, runner], { stdout: "pipe", stderr: "pipe" });
-    const [code] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    const [code, , stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
     expect(code).toBe(1);
+    expect(stderr).toContain("Expected: 2");
     const summary = JSON.parse(await readFile(join(root, "output/audit-remediation/frontend/summary.json"), "utf8"));
     expect(summary.results.map((result: { status: string }) => result.status)).toEqual(["passed", "failed"]);
     expect(summary.unfinished).toEqual([]);

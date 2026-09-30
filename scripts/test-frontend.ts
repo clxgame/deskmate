@@ -88,6 +88,7 @@ async function main() {
     results.push(result);
     await writeFile(resolve(outputDir, `${results.length}.log`), result.output);
     console.log(`${result.status}: ${relative(root, file)} (${result.pass} pass, ${result.fail} fail, ${result.skip} skip; exit ${result.code})`);
+    if (result.status !== "passed") console.error(result.output);
   }
   const unfinished = files.slice(results.length);
   const summary = { runtime: Bun.version, budget, results: results.map(({ output: _, ...result }) => result), unfinished };

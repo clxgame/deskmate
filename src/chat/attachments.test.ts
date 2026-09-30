@@ -50,6 +50,7 @@ describe("chat attachments", () => {
     expect(attachment.dataUrl).toBe("data:image/png;base64,iVBORw==");
   });
 
+  // The first PDF.js import/worker initialization takes over 5s on Windows CI.
   test("extracts semantic text from staged PDF bytes", async () => {
     const bytes = bytesFromBase64(PDF_FIXTURE_BASE64);
     const attachment = await prepareModelReadyAttachment({
@@ -58,7 +59,7 @@ describe("chat attachments", () => {
     });
 
     expect(attachment.dataUrl).toBe("data:text/plain;charset=utf-8;base64,UERGIHNlbWFudGljIHRleHQ=");
-  });
+  }, 30_000);
 
   test("extracts semantic text from staged DOCX bytes", async () => {
     const bytes = bytesFromBase64(DOCX_FIXTURE_BASE64);

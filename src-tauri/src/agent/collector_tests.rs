@@ -1,5 +1,5 @@
 use super::{
-    collector::{collect_once_with, CollectorActions, SnapshotRead},
+    collector::{cached_permissions, collect_once_with, CollectorActions, SnapshotRead},
     record_store::{NativeMessage, NativePart, RunOutcome, RunRecord},
     test_support::{Checked, TestResult},
     AgentPermissionState, AgentRunState, RunStore,
@@ -177,27 +177,13 @@ fn transient_read_and_archive_failures_retry_without_terminalizing() -> TestResu
             respond: |_: &RunRecord, _: &PermissionRequest, _: Reply| Ok(()),
         },
     );
-    assert_eq!(result, Err("history_storage_failed".into()));
-    assert_eq!(
-        runs.read()?
-            .active
-            .checked("active after archive failure")?
-            .error_summary
-            .as_deref(),
-        Some("history_storage_failed")
-    );
-
-    collect_once_with(
-        &runs,
-        &permissions,
-        CollectorActions {
-            snapshot: |_: &RunRecord| Ok(SnapshotRead::Messages(terminal("msg_run"))),
-            pending: |_: &RunRecord| Ok(Vec::new()),
-            archive: |_: &RunRecord, _: &[NativeMessage]| Ok(()),
-            respond: |_: &RunRecord, _: &PermissionRequest, _: Reply| Ok(()),
-        },
-    )?;
+    assert_eq!(result, Ok(()));
+    assert!(runs.read()?.active.is_none());
     assert_eq!(runs.read()?.recent[0].outcome, Some(RunOutcome::Completed));
+    assert_eq!(
+        permissions.cancel_run("msg_run"),
+        Err("agent_run_unknown".into())
+    );
     fs::remove_dir_all(root)?;
     Ok(())
 }
@@ -242,6 +228,100 @@ fn preparation_is_idle_and_confirmed_sidecar_loss_interrupts() -> TestResult<()>
     assert_eq!(
         runs.read()?.recent[0].error_summary.as_deref(),
         Some("sidecar_process_lost")
+    );
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
+fn persistent_archive_failure_does_not_gate_owned_ids_approval_or_terminal_commit() -> TestResult<()>
+{
+    for cancelled in [false, true] {
+        let (root, workspace) = fixture("archive-unavailable")?;
+        let (runs, permissions) = active(&root, &workspace)?;
+        for _ in 0..40 {
+            let request = request_for_tool("per_archive", "ses_run", "msg_native", "call_bash")?;
+            collect_once_with(
+                &runs,
+                &permissions,
+                CollectorActions {
+                    snapshot: |_: &RunRecord| Ok(SnapshotRead::Messages(permission_snapshot())),
+                    pending: |_: &RunRecord| Ok(vec![request]),
+                    archive: |_: &RunRecord, _: &[NativeMessage]| {
+                        Err("synthetic_disk_failure".into())
+                    },
+                    respond: |_: &RunRecord, _: &PermissionRequest, _: Reply| Ok(()),
+                },
+            )?;
+        }
+        let active = runs.active_record("msg_run")?;
+        assert_eq!(active.message_ids, ["msg_native"]);
+        assert_eq!(active.call_ids, ["call_bash"]);
+        assert_eq!(cached_permissions(&permissions, "msg_run")?.len(), 1);
+        assert!(super::process_reply(
+            &permissions,
+            "msg_run",
+            "per_archive",
+            super::AgentReply::Once
+        )
+        .is_ok());
+        if cancelled {
+            runs.request_finish("msg_run", RunOutcome::Cancelled, None)?;
+        }
+        collect_once_with(
+            &runs,
+            &permissions,
+            CollectorActions {
+                snapshot: |_: &RunRecord| Ok(SnapshotRead::Messages(terminal("msg_run"))),
+                pending: |_: &RunRecord| Ok(Vec::new()),
+                archive: |_: &RunRecord, _: &[NativeMessage]| Err("synthetic_disk_failure".into()),
+                respond: |_: &RunRecord, _: &PermissionRequest, _: Reply| Ok(()),
+            },
+        )?;
+        let listing = runs.read()?;
+        assert!(listing.active.is_none());
+        assert_eq!(
+            listing.recent[0].outcome,
+            Some(if cancelled {
+                RunOutcome::Cancelled
+            } else {
+                RunOutcome::Completed
+            })
+        );
+        assert_eq!(
+            permissions.waiting("msg_run").err().as_deref(),
+            Some("agent_run_unknown")
+        );
+        fs::remove_dir_all(root)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn uncertain_submission_settlement_releases_ownership_despite_archive_failure() -> TestResult<()> {
+    let (root, workspace) = fixture("submission-settle")?;
+    let (runs, permissions) = active(&root, &workspace)?;
+    let record = runs.active_record("msg_run")?;
+    let settled = Cell::new(0);
+    super::supervision::submission_failed_with(
+        &runs,
+        &permissions,
+        &record,
+        "agent_transport_failure",
+        || {
+            settled.set(settled.get() + 1);
+            Ok(terminal("msg_run"))
+        },
+        |_| Err("synthetic_archive_failure".into()),
+    )?;
+    assert_eq!(settled.get(), 1);
+    let listing = runs.read()?;
+    assert!(listing.active.is_none());
+    assert_eq!(listing.recent[0].outcome, Some(RunOutcome::Failed));
+    assert!(listing.recent[0].pending_outcome.is_none());
+    assert_eq!(
+        permissions.waiting("msg_run").err().as_deref(),
+        Some("agent_run_unknown")
     );
     fs::remove_dir_all(root)?;
     Ok(())

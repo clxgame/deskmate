@@ -51,6 +51,7 @@ function selectedSchemas(body: JsonObject, selected: readonly string[]): JsonObj
   }));
 }
 
+if (process.platform !== "win32") throw new Error("P5 MCP inventory requires Windows and the pinned Windows MCP executable");
 const npx = required("npx.cmd");
 const windowsMcp = resolve("src-tauri/resources/windows-mcp/1.3.24/Sbroenne.WindowsMcp.exe");
 await access(windowsMcp);
@@ -120,10 +121,12 @@ try {
   const schemas = selectedSchemas(providerRequest, expected);
   evidence = {observedProviderTools: names, expectedProviderTools: expected, selectedToolSchemas: schemas, statuses, sessionId};
   assert.ok(expected.every((name) => names.includes(name)));
-  assert.ok(!names.includes("yume_windows_process"));
-  assert.ok(!names.includes("yume_windows_clipboard"));
-  assert.ok(!names.includes("yume_windows_file_open"));
+  assert.ok(expected.every((name) => isJsonObject(schemas[name]) && Object.keys(schemas[name]).length > 0));
+  const dangerousWindowsToolsAbsent = ["process", "clipboard", "mouse_control", "file_open", "file_save"]
+    .every((tool) => !names.includes(`yume_windows_${tool}`));
+  assert.ok(dangerousWindowsToolsAbsent);
   evidence = {
+    windowsMcpSource: { repo: "sbroenne/mcp-windows", version: "1.3.24", commit: "b90485c3d1a228fc4f5341bc2bdfc7be7672c6d0", license: "MIT" },
     versions: {
       opencode: "1.18.21",
       playwrightMcp: "0.0.82",
@@ -138,7 +141,7 @@ try {
     providerToolCount: names.length,
     approvedToolsPresent: expected,
     selectedToolSchemas: schemas,
-    dangerousWindowsToolsAbsent: ["process", "clipboard", "mouse_control", "file_open", "file_save"].every((tool) => !names.includes(`yume_windows_${tool}`)),
+    dangerousWindowsToolsAbsent,
   };
 } finally {
   cleanup = await runtime.close();

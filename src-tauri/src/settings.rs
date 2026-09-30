@@ -1988,10 +1988,6 @@ pub(crate) fn sidecar_permission_policy() -> serde_json::Map<String, serde_json:
 /// Mirrors OpenCode's `McpCatalog.toolName` exactly: any character outside
 /// `[a-zA-Z0-9_-]` becomes `_`; hyphens are preserved, matching
 /// `packages/opencode/src/mcp/catalog.ts` `sanitize`.
-#[allow(
-    dead_code,
-    reason = "reserved for explicit QA and future MCP configuration"
-)]
 pub(crate) fn mcp_tool_permission_id(server: &str, tool: &str) -> String {
     let sanitize = |segment: &str| {
         segment
@@ -2029,12 +2025,8 @@ pub(crate) fn desktop_mcp_permission_ids() -> Vec<String> {
 
 /// Builds the baseline policy plus explicit MCP tool approvals.
 ///
-/// Production callers pass an empty slice (no behavior change); QA/future MCP
-/// configuration passes explicit `(server, tool)` pairs.
-#[allow(
-    dead_code,
-    reason = "reserved for explicit QA and future MCP configuration"
-)]
+/// Desktop MCP configuration passes the explicitly approved `(server, tool)` pairs;
+/// an empty slice preserves the baseline deny-by-default policy.
 pub(crate) fn sidecar_permission_policy_with_approved_mcp_tools(
     approved: &[(&str, &str)],
 ) -> serde_json::Map<String, serde_json::Value> {

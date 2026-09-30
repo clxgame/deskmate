@@ -89,7 +89,7 @@ pub(super) fn submit_with(
     if let Err(error) = submit(state, id) {
         if state
             .active_record(id)
-            .is_ok_and(|record| record.pending_outcome.is_none())
+            .is_ok_and(|record| record.pending_outcome.is_none() && record.session_id.is_none())
         {
             let _ = state.fail_active(id, "scheduled_submission_failed");
         }
@@ -126,7 +126,7 @@ pub(crate) fn execute(
             }
             let created = u64::try_from(chrono::Utc::now().timestamp_millis())
                 .map_err(|_| "history_time_invalid".to_owned())?;
-            if crate::history::save_agent_input(
+            if let Err(error) = crate::history::save_agent_input(
                 app,
                 &app.state::<crate::history::HistoryState>(),
                 crate::history::AgentHistoryInput {
@@ -135,14 +135,8 @@ pub(crate) fn execute(
                     text: &task.prompt,
                     created,
                 },
-            )
-            .is_err()
-            {
-                let _ = permissions.cancel_run(id);
-                return match state.fail_active_preserving_input(id, "history_storage_failed") {
-                    Ok(()) => Err("history_storage_failed".to_owned()),
-                    Err(error) => Err(error),
-                };
+            ) {
+                eprintln!("scheduled input archive {id}: {error}");
             }
             let _operation = state.lock_operation()?;
             state.active_record(id)?;

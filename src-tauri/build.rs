@@ -17,6 +17,8 @@ const WINDOWS_APP_MANIFEST: &str = r#"<assembly xmlns="urn:schemas-microsoft-com
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=icons/icon.ico");
+    // Regenerate ignored ACL/schema outputs when a warm checkout loses them.
+    println!("cargo:rerun-if-changed=gen/schemas");
 
     #[cfg(windows)]
     build_windows()?;

@@ -8,9 +8,10 @@ For this Mac's toolchain and execution permissions, first follow the
 ## Automated regression checks
 
 ```sh
+export DEVELOPER_DIR=/Library/Developer/CommandLineTools
 bun run typecheck
-bun test
-cargo test --manifest-path src-tauri/Cargo.toml --lib pet_
+bun run test:frontend
+cargo test --locked --manifest-path src-tauri/Cargo.toml --lib pet_
 cargo test --locked --manifest-path src-tauri/Cargo.toml --lib updater::
 ```
 
@@ -45,10 +46,25 @@ Keep separate records for automated checks, observed application behavior, and
 hardware scenarios that were not exercised. Do not change system display/security
 settings just to make a build appear to pass.
 
+## Update footer behavior
+
+Opening Settings starts a manifest check. Checks recur every 15 minutes while the
+window remains open, on return to the window after at least one minute, and after
+network recovery. A background check has a 30-second timeout and never downloads
+or installs. Its timeout does not limit a user-triggered download. Late responses
+for an old repository or an earlier check cannot replace current update progress.
+The active operation displays progress, errors and retry; a Mac task waiting for
+idle retains the cancel-wait action.
+
+The dated UI validation is retained in the [historical footer record](archive/updater/conditional-update-footer.md).
+
 ## Update checks
 
-Current Mac builds use **一键更新** with the signed `darwin-aarch64` tarball in
-the shared `latest.json` feed. The client checks, downloads and verifies the
+Settings checks the shared `latest.json` feed in the background and shows
+**下载更新** (Download update) only when a newer build is available for the current
+platform. No-update and failed-background-check states keep only the local version.
+A click starts the existing install-and-restart flow. Current Mac builds use the
+signed `darwin-aarch64` tarball; the client downloads and verifies the
 update, waits for running tasks to finish, replaces the App with a recoverable
 backup, then requests restart. DMG/ZIP remain available for initial installation
 and migration from old clients without the automatic installer.
@@ -75,18 +91,21 @@ For packaged-app verification:
    to loopback HTTP. It is not a runtime environment override for a production
    binary. Test builds must retain the same signing/identity requirements for
    their A/B pair, and the update signature must match the test client's embedded
-   public key. See the [upgrade verification plan](macos-one-click-update-plan.md).
+   public key. The following steps are the current acceptance gate; the
+   [historical upgrade plan](archive/updater/macos-one-click-update-plan.md) retains
+   earlier design and failure matrices.
    Keep the QA feature/configuration out of the public build. Production clients
    cannot discover a draft through the public latest feed.
-3. Click **一键更新** once. Observe download, verification, installation and
+3. Wait for **下载更新** to appear for the test update, then click it once.
+   Observe download, verification, installation and
    restart without a second confirmation or browser/manual installer step.
    Check the actual running version afterward, persisted data, pet/settings
    windows and sidecars. Do not claim success merely because restart was requested.
 4. While a task is running, verify that installation waits, then proceeds after
    the task ends; also verify cancel/retry behavior. Record permissions and
    failure/restore scenarios actually exercised, keeping the previous App recoverable.
-5. Check from the target version: it reports up to date and does not install or
-   restart. After publication, verify the public manifest points to the verified
+5. Check from the target version: the footer retains the local version without
+   an update button and does not download, install or restart. After publication, verify the public manifest points to the verified
    version; this network check does not replace the A→B runtime test.
 
 Record automated tests, payload checks, public-feed checks and observed A→B

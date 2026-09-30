@@ -15,6 +15,7 @@ pub(crate) struct AgentRunState {
     pub(super) data: Mutex<RunData>,
     pub(super) store: RunStore,
     operation: Mutex<()>,
+    archive_failure: Mutex<Option<(String, String)>>,
     pub(super) collection_failure: Mutex<Option<(String, std::time::Instant)>>,
 }
 
@@ -29,6 +30,7 @@ impl AgentRunState {
             }),
             store,
             operation: Mutex::new(()),
+            archive_failure: Mutex::new(None),
             collection_failure: Mutex::new(None),
         }
     }
@@ -51,8 +53,21 @@ impl AgentRunState {
             }),
             store,
             operation: Mutex::new(()),
+            archive_failure: Mutex::new(None),
             collection_failure: Mutex::new(None),
         })
+    }
+
+    pub(super) fn report_archive_error(&self, run_id: &str, error: Option<&str>) {
+        if let Ok(mut last) = self.archive_failure.lock() {
+            let next = error.map(|error| (run_id.to_owned(), error.to_owned()));
+            if *last != next {
+                if let Some((run_id, error)) = &next {
+                    eprintln!("agent archive {run_id}: {error}");
+                }
+                *last = next;
+            }
+        }
     }
 
     pub(crate) fn lock_operation(&self) -> Result<MutexGuard<'_, ()>, String> {
@@ -109,12 +124,15 @@ impl AgentRunState {
         let mut data = self.data.lock().map_err(|_| "agent_state_unavailable")?;
         let record = data
             .active
-            .as_mut()
+            .as_ref()
             .filter(|record| record.run_id == run_id)
             .ok_or_else(|| "agent_run_unknown".to_owned())?;
         register()?;
-        record.session_id = Some(session_id.into());
-        self.store.write(record)
+        let mut next = record.clone();
+        next.session_id = Some(session_id.into());
+        self.store.write(&next)?;
+        data.active = Some(next);
+        Ok(())
     }
 
     pub(crate) fn confirm_submission(&self, run_id: &str) -> Result<(), String> {
@@ -238,10 +256,13 @@ impl AgentRunState {
         let mut data = self.data.lock().map_err(|_| "agent_state_unavailable")?;
         let record = data
             .active
-            .as_mut()
+            .as_ref()
             .filter(|record| record.run_id == run_id)
             .ok_or_else(|| "agent_run_unknown".to_owned())?;
-        update(record);
-        self.store.write(record)
+        let mut next = record.clone();
+        update(&mut next);
+        self.store.write(&next)?;
+        data.active = Some(next);
+        Ok(())
     }
 }

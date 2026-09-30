@@ -6,7 +6,7 @@ import type { PetMood } from "../lib/petState";
 import { legacySettingsFixture } from "../testing/settingsFixtures";
 import { restoreTauriModuleFixture } from "../testing/tauriModuleFixture";
 import { PetRenderer } from "./PetRenderer";
-import { manualClock } from "./petSleepTestClock";
+import { manualClock } from "../testing/petSleepClock";
 import PetApp from "./PetApp";
 
 const originalRenderer = PetRenderer;

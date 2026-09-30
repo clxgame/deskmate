@@ -8,13 +8,14 @@ import {
   BUILTIN_PACKS,
   DEFAULT_PERSONA_ID,
   KNOWN_PACKS,
-  PERSONAS,
   packById,
   packLabel,
   personaById,
   personaCatalog,
   personaClipName,
   personaLabel,
+  personaModelUrl,
+  personaTextureRoot,
 } from "./personaCatalog";
 
 describe("persona packs", () => {
@@ -31,13 +32,16 @@ describe("persona packs", () => {
     expect(builtinPack.packId).toBe("ai-substitute");
     expect(builtinPack.builtin).toBe(true);
     // Bundling only 小著 keeps ~169 MB of aki assets out of the installer.
-    expect(PERSONAS.map((persona) => persona.id)).toEqual(["xiaozhu", "xiaozhu-nidaime", "xiaozhu-sandaime"]);
+    expect(personaCatalog().map((persona) => persona.id)).toEqual(["xiaozhu", "xiaozhu-nidaime", "xiaozhu-sandaime"]);
   });
 
   test("keeps the default persona inside a built-in pack", () => {
     // Otherwise a fresh install would have no pet to render.
     const fallback = personaById(DEFAULT_PERSONA_ID);
     expect(fallback.packId).toBe("ai-substitute");
+    expect(DEFAULT_PERSONA_ID).toBe("xiaozhu");
+    expect(personaModelUrl(DEFAULT_PERSONA_ID)).toBe("/personas/xiaozhu/figure.glb");
+    expect(personaTextureRoot(DEFAULT_PERSONA_ID)).toBe("/personas/xiaozhu/textures");
     expect(BUILTIN_PACKS.some((pack) => pack.packId === fallback.packId)).toBe(
       true,
     );
@@ -118,6 +122,7 @@ describe("persona packs", () => {
   test("maps standard and 小著 moods to playable clips", () => {
     expect(personaClipName("aimisi", "idle")).toBe("Idle");
     expect(personaClipName("aimisi", "thinking")).toBe("Thinking");
+    expect(personaClipName(DEFAULT_PERSONA_ID, "idle")).toBe("Idle");
     expect(personaClipName("xiaozhu", "thinking")).toBe("Think");
     expect(personaClipName("xiaozhu", "talking")).toBe("Wave");
     expect(personaClipName("xiaozhu", "working")).toBe("Dance");
@@ -155,6 +160,6 @@ test("offers the optional GIF persona only when its pack is installed", () => {
   const catalog = personaCatalog(installed);
   expect(catalog.map(persona => persona.id)).toEqual(["xiaoxiongchong", "xiaozhu", "xiaozhu-nidaime", "xiaozhu-sandaime"]);
   expect(catalog.find(persona => persona.id === "xiaoxiongchong")).toMatchObject({ renderType: "gif", packId: "xiaoxiongchong", name: { zh: "小熊虫" } });
-  expect(PERSONAS.some(persona => persona.id === "xiaoxiongchong")).toBe(false);
+  expect(personaCatalog().some(persona => persona.id === "xiaoxiongchong")).toBe(false);
   expect(XIAOXIONGCHONG_PACK.builtin).toBe(false);
 });

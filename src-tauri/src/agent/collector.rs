@@ -97,43 +97,38 @@ where
                 {
                     return Err("agent_tools_unsettled".into());
                 }
-                if let Err(error) = (actions.archive)(&current, &messages) {
-                    eprintln!("agent archive {}: {error}", candidate.run_id);
-                    state
-                        .set_collection_error(&candidate.run_id, Some("history_storage_failed"))?;
-                    reported_error = Some("history_storage_failed".to_owned());
+                let archive_error = (actions.archive)(&current, &messages).err();
+                state.report_archive_error(&candidate.run_id, archive_error.as_deref());
+                state.set_collection_error(&candidate.run_id, None)?;
+                if let Some(outcome) = current.pending_outcome.clone() {
+                    state.finish(
+                        &candidate.run_id,
+                        outcome,
+                        current.pending_error_summary.clone(),
+                    )?;
                 } else {
-                    state.set_collection_error(&candidate.run_id, None)?;
-                    if let Some(outcome) = current.pending_outcome.clone() {
-                        state.finish(
-                            &candidate.run_id,
-                            outcome,
-                            current.pending_error_summary.clone(),
-                        )?;
-                    } else {
-                        state.reconcile(&candidate.run_id, &messages)?;
+                    state.reconcile(&candidate.run_id, &messages)?;
+                }
+                if state.active_record(&candidate.run_id).is_err() {
+                    let _ = permissions.cancel_run(&candidate.run_id);
+                } else if let Some(pending) = pending {
+                    let current = state.active_record(&candidate.run_id)?;
+                    if current.pending_outcome != candidate.pending_outcome {
+                        return Ok(());
                     }
-                    if state.active_record(&candidate.run_id).is_err() {
-                        let _ = permissions.cancel_run(&candidate.run_id);
-                    } else if let Some(pending) = pending {
-                        let current = state.active_record(&candidate.run_id)?;
-                        if current.pending_outcome != candidate.pending_outcome {
-                            return Ok(());
-                        }
-                        match pending.and_then(|requests| {
-                            super::process_pending(
-                                permissions,
-                                &current.run_id,
-                                &current.message_ids,
-                                &current.call_ids,
-                                requests,
-                            )
-                        }) {
-                            Ok(replies) => automatic = replies,
-                            Err(error) => {
-                                state.set_collection_error(&candidate.run_id, Some(&error))?;
-                                reported_error = Some(error);
-                            }
+                    match pending.and_then(|requests| {
+                        super::process_pending(
+                            permissions,
+                            &current.run_id,
+                            &current.message_ids,
+                            &current.call_ids,
+                            requests,
+                        )
+                    }) {
+                        Ok(replies) => automatic = replies,
+                        Err(error) => {
+                            state.set_collection_error(&candidate.run_id, Some(&error))?;
+                            reported_error = Some(error);
                         }
                     }
                 }
@@ -169,6 +164,39 @@ pub(crate) fn collect_active_run_once(
     let permissions = app.state::<AgentPermissionState>();
     let base = crate::tool_permissions::runtime::endpoint(app);
     let candidate = state.read()?.active;
+    if let Some(record) = candidate
+        .as_ref()
+        .filter(|record| record.initial_input.is_some())
+    {
+        let Some(session) = record.session_id.as_deref() else {
+            return Ok(());
+        };
+        let settings = super::run_commands::current_start_settings(app)?;
+        let client = super::run_commands::lifecycle_client(app, &settings, &record.workspace_path);
+        // A failed confirmation remains a preparation barrier. Do not feed
+        // metadata failures to execution supervision or submit another prompt.
+        if !super::recovery::confirm_from_native_with(&state, record, || client.snapshot(session))?
+        {
+            return Ok(());
+        }
+    }
+    if let Some(record) = state
+        .read()?
+        .active
+        .filter(|record| record.initial_input.is_none())
+    {
+        let _operation = state.lock_operation()?;
+        if state.matches_active(&record)? {
+            let approvals = app
+                .state::<crate::settings::SettingsState>()
+                .0
+                .lock()
+                .map_err(|_| "agent_settings_unavailable")?
+                .agent_permission_approvals
+                .clone();
+            permissions.ensure_run_registered(&record, &approvals)?;
+        }
+    }
     let result = collect_once_with(
         &state,
         &permissions,
@@ -214,8 +242,16 @@ pub(crate) fn collect_active_run_once(
                         .session_id
                         .as_deref()
                         .ok_or_else(|| "agent_session_unknown".to_owned())?;
-                    if let Some(resources) = app.try_state::<crate::chat_attachments::resources::ResourceStore>() {
-                        permissions.set_resource_scopes(&record.run_id, resources.scopes(&crate::agent::opencode_wire_directory(&record.workspace_path), session)?)?;
+                    if let Some(resources) =
+                        app.try_state::<crate::chat_attachments::resources::ResourceStore>()
+                    {
+                        permissions.set_resource_scopes(
+                            &record.run_id,
+                            resources.scopes(
+                                &crate::agent::opencode_wire_directory(&record.workspace_path),
+                                session,
+                            )?,
+                        )?;
                     }
                     crate::tool_permissions::runtime::pending_scoped_live(
                         app,
@@ -229,14 +265,14 @@ pub(crate) fn collect_active_run_once(
                     .session_id
                     .as_deref()
                     .ok_or_else(|| "agent_session_unknown".to_owned())?;
-                crate::history::save_agent_snapshot(
+                let archived = crate::history::save_agent_snapshot(
                     app,
                     &record.workspace_path,
                     crate::history::AgentHistorySnapshot {
                         session_id: session,
                         messages,
                     },
-                )?;
+                );
                 if let Err(error) = crate::ai_usage::capture_agent_usage(
                     app,
                     &record.workspace_path,
@@ -245,7 +281,7 @@ pub(crate) fn collect_active_run_once(
                 ) {
                     eprintln!("agent usage capture {}: {error}", record.run_id);
                 }
-                Ok(())
+                archived
             },
             respond: |record: &RunRecord, request: &PermissionRequest, reply: Reply| {
                 crate::tool_permissions::runtime::respond_scoped(

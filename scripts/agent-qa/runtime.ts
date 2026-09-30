@@ -22,6 +22,7 @@ async function stopRuntimeChild(child: OwnedChild): Promise<void> {
   finally { clearTimeout(deadline); }
 }
 type RuntimeOptions = {
+  readonly binary?: string;
   readonly injectSpawnFailure?: boolean;
   readonly includeTrusted?: boolean;
   readonly flowTools?: boolean;
@@ -127,7 +128,7 @@ export async function startRuntime(options: RuntimeOptions = {}): Promise<Runtim
     provider = await (options.providerFactory ?? startProvider)();
     const fixture = await stageFixture(root, provider.baseUrl, options.includeTrusted ?? true, options.flowTools ?? false);
     port = await freePort();
-    const binary = await findSourceBinary();
+    const binary = options.binary ?? await findSourceBinary();
     if (options.injectSpawnFailure === true) throw new ContractError("INJECTED_SPAWN_FAILURE", "injected before child handle creation");
     const env = childEnv({ root, providerBaseUrl: provider.baseUrl, runtimeCanary: crypto.randomUUID() });
     if (options.processToolsDirectory !== undefined) {

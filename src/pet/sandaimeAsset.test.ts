@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { AnimationMixer, MeshStandardMaterial, SkinnedMesh, Texture } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { personaById } from "./personaCatalog";
+import provenance from "../../docs/assets/xiaozhu-sandaime.provenance.json";
 
 const file = Bun.file(resolve(import.meta.dir, "../../public/personas/xiaozhu-sandaime/figure.glb"));
 const expectedDurations = { 等待: 4.966667, 思考: 3.133333, 打招呼: 1.8, 跳舞: 2.266667, 哭: 1.633333, 开心: 1.4, 争辩: 7.833333 } as const;
@@ -16,6 +17,8 @@ test("preserves all seven authored rigs and binds each clip only to its own vari
   if (roots === undefined) throw new Error("Missing variant configuration");
   expect(gltf.scene.children).toHaveLength(7);
   expect(gltf.animations).toHaveLength(7);
+  expect(file.size).toBe(provenance.outputBytes);
+  expect(provenance.sourceFiles.map((source) => source.action).sort()).toEqual(Object.keys(roots).sort());
   expect(file.size).toBeLessThan(80 * 1024 * 1024);
   const nodeNames: string[] = [];
   gltf.scene.traverse((node) => nodeNames.push(node.name));

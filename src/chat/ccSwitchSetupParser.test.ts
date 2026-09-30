@@ -3,7 +3,6 @@ import ccSwitchProviderDraftTool from "../../src-tauri/resources/opencode-tools/
 import type { OpenCodeMessage, ToolPart } from "../lib/opencode";
 import {
   createCcSwitchToolResultTracker,
-  recoverCcSwitchDraftsFromMessages,
   recoverCcSwitchToolResultsFromMessages,
 } from "./ccSwitchSetup";
 import {
@@ -242,7 +241,7 @@ describe("CC Switch setup tool parser", () => {
       },
     ];
 
-    const results = recoverCcSwitchDraftsFromMessages(messages, tracker);
+    const results = recoverCcSwitchToolResultsFromMessages(messages, tracker);
 
     expect(results).toEqual([
       {

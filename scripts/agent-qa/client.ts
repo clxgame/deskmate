@@ -1,4 +1,4 @@
-import { ContractError, jsonObject, stringField, type JsonObject } from "./types";
+import { ContractError, isJsonObject, jsonObject, stringField, type JsonObject } from "./types";
 import { request as httpRequest } from "node:http";
 
 export type Client = {
@@ -198,7 +198,7 @@ export async function waitForTerminal(client: Client, sessionId: string, parentI
     const snapshot = await messages(client, sessionId);
     const match = snapshot.find((item) => {
       const info = item.info;
-      return typeof info === "object" && info !== null && !Array.isArray(info)
+      return isJsonObject(info)
         && info.parentID === parentId && typeof info.time === "object" && info.time !== null
         && "completed" in info.time;
     });

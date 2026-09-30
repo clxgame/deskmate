@@ -12,10 +12,6 @@ const {
   confirmPromptSubmission,
   getSessionMessages,
   getToolActivityLabel,
-  isCompletedToolPart,
-  isErrorToolPart,
-  isPendingToolPart,
-  isRunningToolPart,
   subscribeEvents,
 } = await import("./opencode");
 
@@ -124,7 +120,7 @@ describe("opencode transport helpers", () => {
     ).toBe("bash");
   });
 
-  test("represents every supported tool state as a typed union", () => {
+  test("parses every supported tool state from native message snapshots", async () => {
     const pending = {
       id: "part-pending",
       messageID: "msg-1",
@@ -162,10 +158,20 @@ describe("opencode transport helpers", () => {
       },
     };
 
-    expect(isPendingToolPart(pending)).toBe(true);
-    expect(isRunningToolPart(running)).toBe(true);
-    expect(isCompletedToolPart(completed)).toBe(true);
-    expect(isErrorToolPart(failed)).toBe(true);
+    const payload = [{
+      info: { id: "msg-1", sessionID: "ses-1", role: "assistant" },
+      parts: [pending, running, completed, failed],
+    }];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = Object.assign(mock(() => Promise.resolve(Response.json(payload))), {
+      preconnect: originalFetch.preconnect,
+    });
+    try {
+      const [message] = await getSessionMessages("ses-1");
+      expect(message?.parts).toEqual([pending, running, completed, failed]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   test("retrieves session messages for idle reconciliation", async () => {

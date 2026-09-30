@@ -1,13 +1,15 @@
 param(
-  [ValidateSet('preflight','build','launch','status','stop','purge','test-receipt-time')][string]$Action = 'preflight',
-  [string]$FixtureBaseUrl = ''
+  [ValidateSet('preflight','build','launch','status','stop','purge','capture','test-receipt-time')][string]$Action = 'preflight',
+  [string]$FixtureBaseUrl = '',
+  [long]$Hwnd = 0,
+  [string]$CaptureName = 'capture.png'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 Set-Location -LiteralPath $repoRoot
 $identity = 'com.deskmate.worklogqa'
-$evidence = Join-Path $repoRoot '.omo/evidence/worklog-natural-recall-qa'
+$evidence = if ($env:YUME_WORKLOG_QA_EVIDENCE_DIR) { [IO.Path]::GetFullPath($env:YUME_WORKLOG_QA_EVIDENCE_DIR) } else { Join-Path $repoRoot '.omo/evidence/worklog-natural-recall-qa' }
 $configPath = Join-Path $PSScriptRoot 'tauri.qa.conf.json'
 $buildReceipt = Join-Path $evidence 'build-receipt.json'
 $runReceipt = Join-Path $evidence 'run-receipt.json'
@@ -56,6 +58,11 @@ function Owned-Processes($receipt) {
 }
 New-Item -ItemType Directory -Path $evidence -Force | Out-Null
 switch ($Action) {
+  'capture' {
+    Assert-Guards
+    if ($Hwnd -le 0 -or $CaptureName -notmatch '^[A-Za-z0-9_-]+\.png$') { throw 'Supply an owned QA window handle and a plain PNG capture name.' }
+    & (Join-Path $PSScriptRoot 'capture-window.ps1') -Hwnd $Hwnd -Output (Join-Path $evidence $CaptureName) -ReceiptPath $runReceipt
+  }
   'test-receipt-time' {
     $base = [datetime]'2026-09-17T05:29:48.3304840+08:00'
     if (-not (Same-CreationTime $base $base.AddTicks(9))) { throw 'CIM precision tolerance rejected 9 ticks.' }

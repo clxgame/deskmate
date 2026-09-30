@@ -64,7 +64,11 @@ struct PermissionData {
 pub(crate) struct AgentPermissionState(Mutex<PermissionData>);
 
 impl AgentPermissionState {
-    pub(crate) fn set_resource_scopes(&self, run_id: &str, scopes: Vec<crate::chat_attachments::resources::ReadScope>) -> Result<(), String> {
+    pub(crate) fn set_resource_scopes(
+        &self,
+        run_id: &str,
+        scopes: Vec<crate::chat_attachments::resources::ReadScope>,
+    ) -> Result<(), String> {
         let mut data = self.0.lock().map_err(|_| "agent_permission_unavailable")?;
         let run = data.runs.get_mut(run_id).ok_or("agent_run_unknown")?;
         run.resources = scopes;
@@ -132,6 +136,31 @@ impl AgentPermissionState {
         Ok(())
     }
 
+    pub(super) fn ensure_run_registered(
+        &self,
+        record: &super::RunRecord,
+        approvals: &[AgentPermissionApproval],
+    ) -> Result<(), String> {
+        if self
+            .0
+            .lock()
+            .map_err(|_| "agent_permission_unavailable")?
+            .runs
+            .contains_key(&record.run_id)
+        {
+            return Ok(());
+        }
+        self.register_run_with_approvals(
+            &record.run_id,
+            record
+                .session_id
+                .as_deref()
+                .ok_or("agent_session_unknown")?,
+            &record.workspace_path,
+            approvals,
+        )
+    }
+
     #[cfg(test)]
     pub(super) fn accept(
         &self,
@@ -150,7 +179,8 @@ impl AgentPermissionState {
         if run.session_id != request.session_id {
             return Err("agent_session_mismatch".into());
         }
-        let result = decision_with_resources(&run.workspace, &request, &run.approvals, &run.resources)?;
+        let result =
+            decision_with_resources(&run.workspace, &request, &run.approvals, &run.resources)?;
         if let PendingDecision::Ask(detail) = &result {
             if let Some(existing) = data.pending.get(&request.id) {
                 return if existing.run_id == run_id {
@@ -224,7 +254,12 @@ impl AgentPermissionState {
                 );
                 PendingDecision::RejectWithReason(APPROVAL_EXPIRED)
             } else {
-                match decision_with_resources(&run.workspace, &request, &run.approvals, &run.resources) {
+                match decision_with_resources(
+                    &run.workspace,
+                    &request,
+                    &run.approvals,
+                    &run.resources,
+                ) {
                     Ok(result) => result,
                     Err(error) => {
                         eprintln!(

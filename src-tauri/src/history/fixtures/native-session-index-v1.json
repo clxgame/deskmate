@@ -1,0 +1,20 @@
+[
+  {
+    "stableId": "ses_native_complete",
+    "sessionId": "ses_native_complete",
+    "personaId": "changli",
+    "workspacePath": "C:/fixture/workspace",
+    "source": "light_chat",
+    "createdAt": 1,
+    "updatedAt": 2
+  },
+  {
+    "stableId": "ses_native_new",
+    "sessionId": "ses_native_new",
+    "personaId": "xiaozhu",
+    "workspacePath": "C:/fixture/workspace",
+    "source": "workbench",
+    "createdAt": 3,
+    "updatedAt": 3
+  }
+]

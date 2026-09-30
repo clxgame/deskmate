@@ -12,7 +12,6 @@ type Figure2dCommon = {
 
 export type Figure2dPoint = readonly [number, number];
 export type Figure2dAnimationV2 = Figure2dAnimationV1 & { readonly offsetX: number; readonly hitPolygon: readonly Figure2dPoint[] };
-export type Figure2dAnimation = Figure2dAnimationV1 | Figure2dAnimationV2;
 export type Figure2dConfigV1 = Figure2dCommon & { readonly schemaVersion: 1; readonly animations: Animations<Figure2dAnimationV1>; readonly thinkingEscalationMs: number };
 export type Figure2dConfigV2 = Figure2dCommon & { readonly schemaVersion: 2; readonly animations: Animations<Figure2dAnimationV2>; readonly thinkingSelection: "random" };
 export type Figure2dConfig = Figure2dConfigV1 | Figure2dConfigV2;

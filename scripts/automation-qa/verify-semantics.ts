@@ -2,9 +2,13 @@
  * OPENAI_BASE_URL, OPENAI_API_KEY, MEMORY_QA_MODEL must be explicitly supplied.
  * Outputs real responses for semantic review; hard negatives and evidence are checked automatically.
  */
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 const {OPENAI_BASE_URL:base,OPENAI_API_KEY:key,MEMORY_QA_MODEL:model}=process.env;
 if(!base||!key||!model)throw new Error("Set OPENAI_BASE_URL, OPENAI_API_KEY and MEMORY_QA_MODEL for a real-provider run.");
+const stamp = new Date().toISOString().replaceAll(":", "-");
+const output = resolve(process.env.YUME_MEMORY_QA_OUTPUT ?? `artifacts/automation-qa/semantic-${stamp}.json`);
+await mkdir(dirname(output), {recursive:true});
 const rust=await readFile("src-tauri/src/memory/automatic.rs","utf8");
 const system=rust.match(/pub const SYSTEM: &str = r#"([\s\S]*?)"#;/)?.[1];
 if(!system)throw new Error("Extraction prompt not found");
@@ -27,6 +31,7 @@ for(const item of cases){
  if(!error&&[...memories,...work].some((f:any)=>typeof f.evidence!=="string"||!item.text.includes(f.evidence)||f.evidence.trim().length<3))error="unsupported_evidence";
  results.push({...item,actual:actual??raw,error,review:!item.hardNegative?"manual_semantic_review_required":undefined});
  console.log(`${item.id}: ${error??(item.hardNegative?"passed":"review required")}`);
- await writeFile("/tmp/yume-memory-semantic-results.json",JSON.stringify({model,at:new Date().toISOString(),results},null,2));
+ await writeFile(output,JSON.stringify({model,at:new Date().toISOString(),results},null,2));
 }
 if(results.some(r=>r.error))process.exitCode=1;
+console.log(`evidence=${output}`);

@@ -73,7 +73,7 @@ export MACOS_RELEASE_CACHE="$PWD/output/macos-release-cache"
 1. `git status --short --branch`、`git diff --stat`、`git diff`；检查未跟踪文件和暂存区。保留用户改动，遵循“全部保存”的范围，排除凭据与生成物，不用 `git add -f` 绕过忽略规则。
 2. 查看 `gh release list --repo clxgame/deskmate --limit 10`、远端 tags、当前版本和未完成草稿。已有本次发布记录时续跑，不重复升版。否则按用户指定版本；未指定通常取下一 patch。不要覆盖/移动已发布 tag，也不要假定当前分支必然是 main。
 3. 同步 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` 中 **yume 自身**的版本、`src-tauri/tauri.conf.json`；写 `docs/release-v<version>.md`。不要替换依赖包恰巧相同的版本号。
-4. 运行改动所需测试、`bun run typecheck`、`bun run build`；应用发布运行 `bun test` 和 `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib`，按真实输出记录成功数、失败数和忽略项。端口监听/网络被沙箱阻止时，用适当权限重跑受影响检查；其他失败须调查并记录处理结论，不能沿用旧版的失败记录自动放行。
+4. 运行改动所需测试；应用发布运行 `bun run check`，顺序覆盖类型检查、当前源码逐文件前端测试、适用平台 Rust library suite 和自有前端 build。定向复验使用 `bun run typecheck`、`bun run test:frontend`、`bun run test:rust`、`bun run build`，不把裸 `bun test` 当全仓入口。按真实输出记录成功数、失败数和忽略项。端口监听/网络被沙箱阻止时，用适当权限重跑受影响检查；其他失败须调查并记录处理结论，不能沿用旧版的失败记录自动放行。
 
 本机无需为了版本检查先安装 PowerShell。Bun 可核对四处版本（CI 仍会执行 `scripts/check-version.ps1` 的生产配置检查）：
 

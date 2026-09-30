@@ -1,7 +1,8 @@
 import { frozenReport } from "./report-output.js";
+import { evidenceDirectory } from "./evidence.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-const evidence = resolve(import.meta.dir, "../../.omo/evidence/worklog-natural-recall-qa");
+const evidence = evidenceDirectory();
 await mkdir(evidence, { recursive: true });
 const state = { mode: "success", delayMs: 0, nextTool: null, report: "# 合成工作报告\n\n## 今日完成\n完成测试项目界面核对。\n\n## 进行中\n待补充\n\n## 问题与阻塞\n待补充\n\n## 下一步\n待补充", requests: [], modelRequests: [] };
 const permitted = new Set(["worklog_record", "worklog_query", "worklog_update", "worklog_generate_report", "worklog_schedule_report"]);

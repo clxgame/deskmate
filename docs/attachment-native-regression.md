@@ -1,5 +1,7 @@
 # 桌面附件拖拽与媒体预览回归
 
+当前附件规则见[附件契约](local-resource-attachments.md)，未完成原生矩阵见[当前验收与待办](verification-backlog.md)。下方 2026-09-28 记录保留当次真实证据；临时目录、QA 包和日志可能已按生成物政策清理，继续验收时先确认现有包的版本与路径，缺失则按当前构建/发布入口重建隔离 QA 包。
+
 ## 修复边界
 
 配置文件创建的聊天 `WebviewWindow` 在当前锁定的 Tauri runtime-wry 2.11.4 中，将原生拖拽转换为 `WindowEvent::DragDrop`。此前监听 `WebviewEvent` 收不到该事件；原生处理器又已接管拖拽，DOM `drop` 不能兜底。入口改为窗口事件后，仍沿用原有资源登记、会话隔离和预览流程。
@@ -9,8 +11,9 @@
 ## 自动化检查
 
 ```sh
-bun test src/chat/dragDropConfig.test.ts src/chat/localResources.test.ts src/chat/useLocalResources.test.tsx src/chat/LocalResourceTray.test.tsx src/chat/MediaPreview.test.tsx src/chat/nativeResourceFlow.test.tsx
-DEVELOPER_DIR=/Library/Developer/CommandLineTools cargo test --locked --manifest-path src-tauri/Cargo.toml --lib chat_attachments::resources
+export DEVELOPER_DIR=/Library/Developer/CommandLineTools
+bun run test:frontend
+cargo test --locked --manifest-path src-tauri/Cargo.toml --lib chat_attachments::resources
 bun run typecheck
 bun run build
 ```

@@ -1,10 +1,30 @@
 import { spawn } from "node:child_process";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-const child = spawn(process.execPath, [resolve(import.meta.dir, "provider.js")], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+import { evidenceDirectory } from "./evidence.js";
+const stamp = new Date().toISOString().replaceAll(":", "-");
+const evidence = process.env.YUME_WORKLOG_QA_EVIDENCE_DIR ? evidenceDirectory()
+  : resolve(import.meta.dir, "../../artifacts/worklog-qa", `provider-${stamp}`);
+await mkdir(evidence, { recursive: true });
+const child = spawn(process.execPath, [resolve(import.meta.dir, "provider.js")], {
+  env: { ...process.env, YUME_WORKLOG_QA_EVIDENCE_DIR: evidence },
+  windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
+});
 let receipt;
 let checks = 0;
 const check = (condition, message) => { if (!condition) throw new Error(message); checks++; };
+const hasExited = () => child.exitCode !== null || child.signalCode !== null;
+async function waitForExit(timeoutMs) {
+  if (hasExited()) return;
+  await new Promise((resolveExit, rejectExit) => {
+    const exit = () => { clearTimeout(timeout); resolveExit(); };
+    const timeout = setTimeout(() => {
+      child.off("exit", exit);
+      rejectExit(new Error("Owned provider shutdown timed out"));
+    }, timeoutMs);
+    child.once("exit", exit);
+  });
+}
 try {
   receipt = await new Promise((resolveReady, reject) => {
     let output = "";
@@ -35,14 +55,19 @@ try {
   const stream = await (await post(`${receipt.baseUrl}/chat/completions`, { messages: [], stream: true })).text();
   check(stream.includes("[DONE]") && stream.includes("合成回读"), "SSE output incomplete");
 } finally {
-  if (child.exitCode === null) {
-    const exited = new Promise(resolveExit => child.once("exit", resolveExit));
+  let shutdownError;
+  if (!hasExited() && child.pid !== undefined) {
     child.kill();
-    await exited;
+    try { await waitForExit(5000); } catch {
+      if (!hasExited()) child.kill("SIGKILL");
+      try { await waitForExit(5000); } catch (error) { shutdownError = String(error); }
+    }
   }
   let portClosed = true;
   if (receipt) { try { await fetch(receipt.statusUrl, { signal: AbortSignal.timeout(1000) }); portClosed = false; } catch { /* A closed owned fixture port must reject the connection. */ } }
-  await writeFile(resolve(import.meta.dir, "../../.omo/evidence/work-journal-reports-qa/provider-selftest.json"), JSON.stringify({ checks, pid: child.pid, exited: child.exitCode !== null || child.signalCode !== null, portClosed, appLaunched: false }, null, 2));
+  await writeFile(resolve(evidence, "provider-selftest.json"), JSON.stringify({ checks, pid: child.pid, exited: hasExited(), portClosed, appLaunched: false, shutdownError }, null, 2));
+  if (shutdownError) throw new Error(shutdownError);
   if (!portClosed) throw new Error("Owned fixture port remains open");
 }
 console.log(`${checks} fixture assertions passed; owned provider stopped; no desktop app launched.`);
+console.log(`evidence=${evidence}`);

@@ -67,6 +67,10 @@ impl LiveHarness {
     }
 
     fn tick(&self) -> TestResult<()> {
+        self.tick_with_archive_failure(false)
+    }
+
+    fn tick_with_archive_failure(&self, fail_archive: bool) -> TestResult<()> {
         collect_once_with(
             &self.runs,
             &self.permissions,
@@ -82,6 +86,15 @@ impl LiveHarness {
                         .collect())
                 },
                 archive: |record: &RunRecord, messages: &[NativeMessage]| {
+                    if fail_archive {
+                        let blocked = self.archive.join("blocked-history");
+                        if !blocked.exists() {
+                            fs::write(&blocked, b"synthetic path obstruction")
+                                .map_err(|error| error.to_string())?;
+                        }
+                        return fs::write(blocked.join("history.json"), b"projection")
+                            .map_err(|_| "history_storage_failed".to_owned());
+                    }
                     fs::write(
                         self.archive.join(format!("{}.snapshot.txt", record.run_id)),
                         format!("{messages:#?}"),
@@ -376,3 +389,172 @@ fn live_tool_lifecycle() -> TestResult<()> {
     Ok(())
 }
 
+#[test]
+#[ignore = "requires scripts/audit-remediation/verify-native.ts isolated native runtime/provider"]
+fn live_audit_remediation() -> TestResult<()> {
+    let mut harness = LiveHarness::from_env()?;
+    // Native acceptance followed by failed host confirmation, then host state reload.
+    let session = harness.client.create_session(&harness.workspace)?;
+    let run = format!("msg_{}", uuid::Uuid::new_v4().simple());
+    harness.runs.begin(&run, &harness.workspace, "QA_SHELL QA_RECOVERY")?;
+    harness.runs.bind_session_with(&run, &session, || {
+        harness
+            .permissions
+            .register_run(&run, &session, &harness.workspace)
+    })?;
+    harness
+        .client
+        .prompt(&session, &run, "Synthetic acceptance", "QA_SHELL QA_RECOVERY")?;
+    let store = harness.runs.store.clone();
+    store.inject_write_failure(true);
+    assert_eq!(
+        harness.runs.confirm_submission(&run),
+        Err("agent_storage_unavailable".into())
+    );
+    harness.runs = AgentRunState::load(store.clone())?;
+    harness.permissions = AgentPermissionState::default();
+    let candidate = harness.runs.active_record(&run)?;
+    assert!(candidate.initial_input.is_some());
+    let native_deadline = Instant::now() + Duration::from_secs(20);
+    while !harness
+        .client
+        .snapshot(&session)?
+        .iter()
+        .any(|message| message.id == run)
+        && Instant::now() < native_deadline
+    {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(harness
+        .client
+        .snapshot(&session)?
+        .iter()
+        .any(|message| message.id == run));
+    assert!(
+        super::recovery::confirm_from_native_with(&harness.runs, &candidate, || harness
+            .client
+            .snapshot(&session))
+        .is_err()
+    );
+    assert!(harness.runs.active_record(&run)?.initial_input.is_some());
+    store.inject_write_failure(false);
+    assert!(super::recovery::confirm_from_native_with(
+        &harness.runs,
+        &candidate,
+        || harness.client.snapshot(&session)
+    )?);
+    harness
+        .permissions
+        .ensure_run_registered(&harness.runs.active_record(&run)?, &[])?;
+
+    let pending_deadline = Instant::now() + Duration::from_secs(20);
+    while harness.permissions.waiting(&run)?.is_empty() && Instant::now() < pending_deadline {
+        harness.tick_with_archive_failure(true)?;
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(harness.permissions.waiting(&run)?.len(), 1);
+    let hold = Instant::now();
+    while hold.elapsed() < Duration::from_secs(31) {
+        harness.tick_with_archive_failure(true)?;
+        assert!(harness.runs.active_record(&run)?.error_summary.is_none());
+        assert_eq!(harness.permissions.waiting(&run)?.len(), 1);
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    println!(
+        "NATIVE_AUDIT_PASS confirmation recovery without replay; archive failure held {}ms",
+        hold.elapsed().as_millis()
+    );
+    let request = harness.permissions.waiting(&run)?[0].request.clone();
+    let owned = harness.permissions.take_reply(&run, &request.id)?;
+    respond_scoped(&harness.base, &owned, Reply::Once, &harness.workspace)?;
+    wait_failed_archive_terminal(&harness, &run, RunOutcome::Completed)?;
+    assert_eq!(
+        fs::read_to_string(harness.workspace.join("command.exit"))?,
+        "0"
+    );
+    println!(
+        "NATIVE_AUDIT_PASS approved tool executes and completes while history remains blocked"
+    );
+
+    // A fresh native session avoids reusing the previous tool result.
+    for (marker, cancel) in [("QA_SHELL", false), ("QA_ABORT", true)] {
+        let session = harness.client.create_session(&harness.workspace)?;
+        let run = harness.start(&session, marker)?;
+        if cancel {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while !harness.client.is_busy(&session)? && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            assert!(harness.client.is_busy(&session)?);
+            harness
+                .client
+                .settle_tools(&session, &run, "agent_cancelled")?;
+            assert!(!harness.client.is_busy(&session)?);
+            harness.runs.request_finish(
+                &run,
+                RunOutcome::Cancelled,
+                Some("agent_cancelled".into()),
+            )?;
+            wait_failed_archive_terminal(&harness, &run, RunOutcome::Cancelled)?;
+            println!("NATIVE_AUDIT_PASS confirmed native cancel clears host ownership despite archive failure");
+        } else {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while harness.permissions.waiting(&run)?.is_empty() && Instant::now() < deadline {
+                harness.tick_with_archive_failure(true)?;
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            let request = harness.permissions.waiting(&run)?[0].request.clone();
+            let owned = harness.permissions.take_reply(&run, &request.id)?;
+            respond_scoped(&harness.base, &owned, Reply::Reject, &harness.workspace)?;
+            wait_failed_archive_terminal(&harness, &run, RunOutcome::Completed)?;
+            assert!(harness
+                .client
+                .snapshot(&session)?
+                .iter()
+                .flat_map(|message| &message.parts)
+                .any(|part| part
+                    .state
+                    .as_ref()
+                    .is_some_and(|state| state.status == "error")));
+            println!(
+                "NATIVE_AUDIT_PASS rejection produces terminal tool error and clears ownership"
+            );
+        }
+    }
+    let session = harness.client.create_session(&harness.workspace)?;
+    let run = harness.start(&session, "plain synthetic completion")?;
+    wait_failed_archive_terminal(&harness, &run, RunOutcome::Completed)?;
+    println!("NATIVE_AUDIT_PASS subsequent run can start and complete");
+    Ok(())
+}
+
+fn wait_failed_archive_terminal(
+    harness: &LiveHarness,
+    run: &str,
+    outcome: RunOutcome,
+) -> TestResult<()> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while harness.runs.read()?.active.is_some() && Instant::now() < deadline {
+        harness.tick_with_archive_failure(true)?;
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(harness.runs.read()?.active.is_none(), "host active cleared");
+    assert!(
+        harness.permissions.waiting(run).is_err(),
+        "approval ownership cleared"
+    );
+    let persisted = harness
+        .runs
+        .store
+        .load()?
+        .into_iter()
+        .find(|record| record.run_id == run)
+        .checked("durable terminal")?;
+    assert_eq!(persisted.outcome, Some(outcome));
+    assert!(harness.archive.join("blocked-history").is_file());
+    assert!(!harness
+        .archive
+        .join("blocked-history/history.json")
+        .exists());
+    Ok(())
+}

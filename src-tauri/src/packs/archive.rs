@@ -1,5 +1,4 @@
 use std::fs::{self, File};
-use std::io::{BufReader, Read};
 use std::path::Path;
 
 use sha2::{Digest, Sha256};
@@ -56,23 +55,4 @@ pub(super) fn extract_verified(archive_path: &Path, staging: &Path) -> Result<St
         return Err("角色包缺少 pack.json".into());
     }
     Ok(digest)
-}
-
-/// Streams a file's SHA-256 without holding it all in memory.
-#[allow(dead_code)]
-pub fn file_digest(path: &Path) -> Result<String, String> {
-    let file = File::open(path).map_err(|error| error.to_string())?;
-    let mut reader = BufReader::new(file);
-    let mut hasher = Sha256::new();
-    let mut buffer = [0u8; 64 * 1024];
-    loop {
-        let read = reader
-            .read(&mut buffer)
-            .map_err(|error| error.to_string())?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    Ok(format!("{:x}", hasher.finalize()))
 }

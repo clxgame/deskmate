@@ -19,4 +19,4 @@
 - `bun run typecheck`、`bun run build` 通过；相关聊天附件与 AI 设置/用量前端测试 70 项通过。
 - AI 用量 Rust 单元测试 14 项，手动模型 ID、模型目录绑定及 API 前缀识别测试 7 项通过。
 - 全量 Rust 测试有 694 项通过、49 项失败及 11 项忽略。本机沙箱拒绝多项 HTTP 测试绑定回环端口，系统钥匙串测试未获授权；另有一个现存 worklog 工具标记断言失败。未将全量 Rust 测试描述为通过。
-- 附件缩略图小窗口验收记录见 `docs/chat-attachment-preview.md`。
+- 附件缩略图小窗口验收记录见 `docs/archive/attachments/chat-attachment-preview.md`。

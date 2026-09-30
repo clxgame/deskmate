@@ -234,7 +234,6 @@ export default function ChatApp() {
   const folderLockedRef = useRef(true);
   const catalogEntryRef = useRef<UnifiedHistoryRow | null>(null);
   const viewGenerationRef = useRef(0);
-  const nativePersistedRef = useRef(false);
   const localReplySnapshotRef = useRef(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const currentDirectory = catalogEntry?.identity.kind === "native" ? catalogEntry.identity.directory : undefined;
@@ -422,7 +421,6 @@ export default function ChatApp() {
   const dragDepthRef = useRef(0);
   /** mirror of `messages` for persisting history outside render. */
   const messagesRef = useRef<ChatMessage[]>([]);
-  const createdRef = useRef<number>(Date.now());
   const fixedReplySequenceRef = useRef(0);
   const replyPacingRef = useRef<ReplyPacing | null>(null);
   const replyPacingSequenceRef = useRef(0);
@@ -719,7 +717,6 @@ export default function ChatApp() {
     catalogEntryRef.current = ready;
     setCatalogEntry(ready);
     setMemoryNotice(statusUnavailable ? tRef.current.sessionStateUnknown : null);
-    nativePersistedRef.current = false;
     localReplySnapshotRef.current = false;
     setHistoryLoading(false);
     sessionRef.current = session.id;
@@ -730,7 +727,6 @@ export default function ChatApp() {
     ccSwitchToolTrackerRef.current = createCcSwitchToolResultTracker();
     setCcSwitchDraft(null);
     setCcSwitchSetupOpen(false);
-    createdRef.current = Date.now();
     setMessages([]);
     if (!preserveComposer) setInput("");
     setView("chat");
@@ -1350,7 +1346,6 @@ export default function ChatApp() {
         providerId: roundModel.sidecarId, modelId: roundModel.modelId,
       } }).catch(() => { /* The managed plugin also registers the native turn. */ });
       promptStarted = true;
-      nativePersistedRef.current = true;
       await promptAsync(sessionID, promptText, {
         directory: identity.directory,
         messageID: userMessageId,
@@ -1358,15 +1353,13 @@ export default function ChatApp() {
         attachments: [...prepared.fileParts, ...resourceParts],
         model: { providerID: roundModel.sidecarId, modelID: roundModel.modelId },
       });
-      nativePersistedRef.current = true;
       return true;
     } catch (error: unknown) {
       if (!petActivity.isCurrent(petScope)) return false;
       if (promptStarted) {
         const submission = await confirmPromptSubmission(sessionID, userMessageId, identity.directory);
-        if (submission === "confirmed") { nativePersistedRef.current = true; return true; }
+        if (submission === "confirmed") return true;
         if (submission === "unknown") {
-          nativePersistedRef.current = true;
           setMemoryNotice(tRef.current.chatSubmissionUnknown);
           broadcastMood("thinking");
           return true;
@@ -1531,7 +1524,6 @@ export default function ChatApp() {
         setCatalogEntry(entry);
         sessionRef.current = agentId;
         setCurrentSessionId(agentId);
-        nativePersistedRef.current = true;
         setView("chat");
         setStatus("ready");
         return;
@@ -1545,11 +1537,9 @@ export default function ChatApp() {
       sessionRef.current = id;
       catalogEntryRef.current = entry;
       setCatalogEntry(entry);
-      nativePersistedRef.current = true;
       setCurrentSessionId(id);
       if (id) resetAttachmentSession(id);
       rolesRef.current.clear();
-      createdRef.current = entry.created;
       setMessages(loaded.messages.map((message, index) => ({
         id: message.messageId ?? message.partId ?? "history-" + index, role: message.role, text: message.text,
         localOnly: message.localOnly, time: message.time,

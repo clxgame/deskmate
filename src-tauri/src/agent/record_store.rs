@@ -78,11 +78,23 @@ pub(crate) struct NativeMessage {
 }
 
 #[derive(Clone)]
-pub(crate) struct RunStore(PathBuf);
+pub(crate) struct RunStore(
+    PathBuf,
+    #[cfg(test)] std::sync::Arc<std::sync::atomic::AtomicBool>,
+);
 
 impl RunStore {
     pub(crate) fn new(root: PathBuf) -> Self {
-        Self(root)
+        Self(
+            root,
+            #[cfg(test)]
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inject_write_failure(&self, fail: bool) {
+        self.1.store(fail, std::sync::atomic::Ordering::SeqCst);
     }
 
     pub(crate) fn load(&self) -> Result<Vec<RunRecord>, String> {
@@ -103,6 +115,10 @@ impl RunStore {
     }
 
     pub(crate) fn write(&self, record: &RunRecord) -> Result<(), String> {
+        #[cfg(test)]
+        if self.1.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err("agent_storage_unavailable".into());
+        }
         fs::create_dir_all(&self.0).map_err(|_| "agent_storage_unavailable")?;
         let bytes = serde_json::to_vec_pretty(record).map_err(|_| "agent_record_invalid")?;
         let pending = self

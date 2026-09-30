@@ -18,7 +18,7 @@ Per the project's minimal-patch discipline, the embedded app is **not** modified
 | `packages/app/vite.workbench.config.ts` | Vite config for the workbench bundle (`base: "./"`, theme-preload pre-order fix, separate output dir) |
 | `packages/app/node_modules/ghostty-web/ghostty-vt.wasm` → staged into the bundle root by `scripts/prepare-workbench.ts` | Terminal renderer WASM kernel (not emitted by vite's asset pipeline; staged next to index.html so ghostty-web's loader finds it) |
 
-The build pipeline for the embedded bundle is `scripts/prepare-workbench.ts` (see `docs/migrations/opencode-native/baseline.md` for the pinned commit, binary fingerprint, and build commands).
+The build pipeline for the embedded bundle is `scripts/prepare-workbench.ts` (see `docs/workbench-build.md` for the pinned commit, inputs and current build commands; historical fingerprints are in `docs/archive/migrations/opencode-native/baseline.md`).
 
 ### OpenCode license
 

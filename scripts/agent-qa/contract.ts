@@ -5,7 +5,8 @@ import { writePermissionEvidence } from "./permissions-evidence";
 import { RuntimeSetupError, startRuntime, type Runtime } from "./runtime";
 import { runMalformedRecovery, runRecovery } from "./recovery";
 import { runLifecycle } from "./lifecycle";
-import { check, ContractError, jsonObject, stringField, type Check, type CleanupReceipt, type JsonObject } from "./types";
+import { runPermissionPathContract } from "./permission-paths";
+import { check, ContractError, isJsonObject, jsonObject, stringField, type Check, type JsonObject } from "./types";
 import { writeContractEvidence, type RunEvidence } from "./contract-evidence";
 
 const permissions = [
@@ -32,7 +33,7 @@ function completedTool(envelope: JsonObject): JsonObject {
   const parts = envelope.parts;
   if (!Array.isArray(parts)) throw new ContractError("INVALID_WIRE", "terminal envelope has no parts");
   const tool = parts.filter((part): part is JsonObject => typeof part === "object" && part !== null && !Array.isArray(part))
-    .find((part) => part.type === "tool" && typeof part.state === "object" && part.state !== null && !Array.isArray(part.state) && part.state.status === "completed");
+    .find((part) => part.type === "tool" && isJsonObject(part.state) && part.state.status === "completed");
   if (tool === undefined) throw new ContractError("INVALID_WIRE", `completed tool part missing: ${JSON.stringify(envelope)}`);
   return tool;
 }
@@ -111,11 +112,11 @@ async function runContract(root: string, baseUrl: string, workspaceA: string, wo
   checks.push(check("native envelope has info and parts", recovered.every((item) => item.info !== undefined && Array.isArray(item.parts)), `validated ${recovered.length} envelopes`));
   const exactUser = recovered.some((item) => {
     const info = item.info;
-    return typeof info === "object" && info !== null && !Array.isArray(info) && info.id === exactMessageId && info.role === "user";
+    return isJsonObject(info) && info.id === exactMessageId && info.role === "user";
   });
   const exactChild = recovered.some((item) => {
     const info = item.info;
-    return typeof info === "object" && info !== null && !Array.isArray(info) && info.parentID === exactMessageId && info.role === "assistant";
+    return isJsonObject(info) && info.parentID === exactMessageId && info.role === "assistant";
   });
   checks.push(check("exact caller message ID retained", exactUser && exactChild, `${exactMessageId} retained with assistant parentID`));
 
@@ -151,6 +152,10 @@ async function main(): Promise<void> {
   const batch = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-");
   const lifecycleMode = process.argv.includes("lifecycle") || process.argv.includes("lifecycle-host-failure");
   const batchDirectory = resolve(lifecycleMode ? ".omo/evidence/workspace-chat-history" : ".omo/evidence/yume-agent-mode-sol", batch);
+  if (process.argv.includes("--case") && process.argv.includes("permission-paths")) {
+    await runPermissionPathContract(batchDirectory);
+    return;
+  }
   const permissionsMode = process.argv.includes("permissions");
   const discoveryFailureMode = process.argv.includes("--case") && process.argv.includes("discovery-failure");
   if (lifecycleMode) {
@@ -227,7 +232,7 @@ async function main(): Promise<void> {
       prompt_injection: "workspace B instruction text did not alter tool policy or expose A",
       cancel_resume: "abort produced MessageAbortedError; recovery used persisted snapshot only",
       stale_state: "each run used a new root, PID, sessions and dynamic ports",
-      dirty_worktree: "untracked docs/AGENT_HARNESS_ROADMAP_AUDIT.md remained untouched",
+      dirty_worktree: "runtime and fixtures live in a private temporary root; existing repository changes are neither reset nor stashed",
       hung_commands: "health, discovery, permissions, events and completion all have deadlines",
       flaky_tests: "single bounded run only; repeat consistency is recorded in a separate aggregate artifact",
       misleading_success_output: "expected-failure prints PASS but exits 1 without the required artifact",

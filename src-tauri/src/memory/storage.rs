@@ -4,7 +4,9 @@
 //! goes through the typed commands in [`super::commands`], which borrow the
 //! single [`MemoryStore`] guarded connection held in Tauri state.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use rusqlite::{Connection, OpenFlags};
@@ -41,15 +43,13 @@ const MIGRATIONS: &[Migration] = &[
 #[derive(Debug)]
 pub struct MemoryStore {
     connection: Mutex<Connection>,
-    path: Option<PathBuf>,
 }
 
 impl MemoryStore {
     /// Open (or create) the store at `path`, applying pending migrations.
     ///
-    /// A non-empty database is backed up next to itself before an upgrade; if
-    /// the migration fails the backup is restored and the error is returned so
-    /// the caller can run with memory disabled.
+    /// Pending migrations commit atomically. A failed upgrade leaves the old
+    /// schema and committed WAL data intact; future schemas are rejected.
     pub fn open(path: &Path) -> MemoryResult<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|error| {
@@ -59,9 +59,8 @@ impl MemoryStore {
         let connection = open_connection(path)?;
         let store = Self {
             connection: Mutex::new(connection),
-            path: Some(path.to_path_buf()),
         };
-        store.migrate_with_backup()?;
+        store.migrate()?;
         Ok(store)
     }
 
@@ -74,7 +73,6 @@ impl MemoryStore {
         configure(&connection)?;
         let store = Self {
             connection: Mutex::new(connection),
-            path: None,
         };
         store.migrate()?;
         Ok(store)
@@ -148,75 +146,43 @@ impl MemoryStore {
         self.with_connection(read_schema_version)
     }
 
-    fn migrate_with_backup(&self) -> MemoryResult<()> {
-        let current = self.with_connection(read_schema_version)?;
-        if current >= SCHEMA_VERSION {
-            return Ok(());
-        }
-        // A fresh database has nothing worth backing up.
-        let backup = if current > 0 {
-            self.path.as_deref().map(backup_path).and_then(|backup| {
-                let source = self.path.as_deref()?;
-                std::fs::copy(source, &backup).ok().map(|_| backup)
-            })
-        } else {
-            None
-        };
-        match self.migrate() {
-            Ok(()) => {
-                if let Some(backup) = backup {
-                    let _ = std::fs::remove_file(backup);
-                }
-                Ok(())
-            }
-            Err(error) => {
-                if let (Some(backup), Some(target)) = (backup.as_deref(), self.path.as_deref()) {
-                    let _ = std::fs::copy(backup, target);
-                    let _ = std::fs::remove_file(backup);
-                }
-                Err(MemoryError::migration_failed(error.message()))
-            }
-        }
+    fn migrate(&self) -> MemoryResult<()> {
+        self.migrate_steps(MIGRATIONS)
     }
 
-    fn migrate(&self) -> MemoryResult<()> {
+    fn migrate_steps(&self, migrations: &[Migration]) -> MemoryResult<()> {
         let mut guard = self
             .connection
             .lock()
             .map_err(|_| MemoryError::storage_unavailable("memory connection poisoned"))?;
-        let current = read_schema_version(&guard)?;
-        for migration in MIGRATIONS.iter().filter(|m| m.to_version > current) {
-            // IMMEDIATE for the same reason as `with_transaction`, and it matters
-            // more here: two app instances launched together would both try to
-            // migrate, and a deferred transaction would fail outright instead of
-            // waiting for the other to finish.
-            let transaction = guard
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .map_err(|error| MemoryError::migration_failed(error.to_string()))?;
-            // Re-read inside the write lock: another instance may have applied
-            // this step while we waited, and replaying it would fail on the
-            // tables it already created.
-            if read_schema_version(&transaction)? >= migration.to_version {
-                continue;
-            }
+        let transaction = guard
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| MemoryError::migration_failed(error.to_string()))?;
+        // Read only after acquiring the writer lock; a competing opener may
+        // have completed the entire upgrade while this connection waited.
+        let current = read_schema_version(&transaction)?;
+        reject_future_schema(current)?;
+        for migration in migrations.iter().filter(|m| m.to_version > current) {
             transaction
                 .execute_batch(migration.sql)
                 .map_err(|error| MemoryError::migration_failed(error.to_string()))?;
             transaction
                 .pragma_update(None, "user_version", migration.to_version)
                 .map_err(|error| MemoryError::migration_failed(error.to_string()))?;
-            transaction
-                .commit()
-                .map_err(|error| MemoryError::migration_failed(error.to_string()))?;
         }
-        Ok(())
+        transaction
+            .commit()
+            .map_err(|error| MemoryError::migration_failed(error.to_string()))
     }
 }
 
-fn backup_path(path: &Path) -> PathBuf {
-    let mut name = path.file_name().unwrap_or_default().to_os_string();
-    name.push(".backup");
-    path.with_file_name(name)
+fn reject_future_schema(version: i64) -> MemoryResult<()> {
+    if version > SCHEMA_VERSION {
+        return Err(MemoryError::migration_failed(format!(
+            "unsupported future memory schema {version}; supported {SCHEMA_VERSION}"
+        )));
+    }
+    Ok(())
 }
 
 fn open_connection(path: &Path) -> MemoryResult<Connection> {
@@ -233,14 +199,39 @@ fn open_connection(path: &Path) -> MemoryResult<Connection> {
 /// finite lock wait for the three windows, and overwritten (not just unlinked)
 /// deleted content.
 fn configure(connection: &Connection) -> MemoryResult<()> {
-    let statements = [
+    // Reject a future schema before changing persistent journal settings.
+    connection
+        .busy_timeout(std::time::Duration::from_millis(100))
+        .map_err(|error| MemoryError::storage_unavailable(error.to_string()))?;
+    reject_future_schema(read_schema_version(connection)?)?;
+    let started = std::time::Instant::now();
+    let budget = std::time::Duration::from_secs(5);
+    loop {
+        match connection.execute_batch("PRAGMA journal_mode = WAL") {
+            Ok(()) => break,
+            Err(rusqlite::Error::SqliteFailure(error, _))
+                if matches!(
+                    error.code,
+                    rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+                ) && started.elapsed() < budget =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(error) => {
+                return Err(MemoryError::storage_unavailable(format!(
+                    "journal_mode WAL: {error}"
+                )))
+            }
+        }
+    }
+    connection
+        .busy_timeout(std::time::Duration::from_secs(5))
+        .map_err(|error| MemoryError::storage_unavailable(error.to_string()))?;
+    for statement in [
         "PRAGMA foreign_keys = ON",
-        "PRAGMA journal_mode = WAL",
         "PRAGMA synchronous = NORMAL",
-        "PRAGMA busy_timeout = 5000",
         "PRAGMA secure_delete = ON",
-    ];
-    for statement in statements {
+    ] {
         connection
             .execute_batch(statement)
             .map_err(|error| MemoryError::storage_unavailable(format!("{statement}: {error}")))?;
@@ -406,43 +397,132 @@ mod tests {
     }
 
     #[test]
-    fn restores_the_backup_when_a_migration_fails() {
-        let dir = temp_dir("migration");
+    fn failed_upgrade_preserves_old_schema_and_uncheckpointed_wal() {
+        let dir = temp_dir("migration-wal");
         let path = dir.join(DB_FILE_NAME);
-        // A database claiming a version below ours, with a table name that
-        // collides with the v1 migration so the migration must fail.
-        {
-            let connection = Connection::open(&path).expect("open");
-            connection
-                .execute_batch(
-                    "CREATE TABLE memories (wrong_shape TEXT); \
-                     INSERT INTO memories (wrong_shape) VALUES ('legacy row'); \
-                     PRAGMA user_version = 0;",
-                )
-                .expect("legacy schema");
-            // user_version 0 with existing data: force a non-zero version so
-            // the store treats it as an upgrade and takes a backup.
-            connection
-                .pragma_update(None, "user_version", 0_i64)
-                .expect("version");
-        }
-        let error = MemoryStore::open(&path).expect_err("colliding schema must fail");
+        let connection = Connection::open(&path).expect("old connection");
+        connection
+            .execute_batch("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;")
+            .expect("wal");
+        connection
+            .execute_batch(MIGRATIONS[0].sql)
+            .expect("valid v1 schema");
+        connection.execute_batch("PRAGMA user_version=1; INSERT INTO memory_events(id,memory_id,action,created_at) VALUES('e1','m1','created','old'); CREATE TABLE memory_work_links(conflict TEXT);").expect("committed old data and late migration conflict");
+        assert!(path.with_extension("db-wal").exists());
+        let error = MemoryStore::open(&path).expect_err("late v2 failure");
         assert_eq!(
             error.code(),
             super::super::error::MemoryErrorCode::MigrationFailed
         );
-        // The pre-existing data is still readable: the failure left the file
-        // usable rather than half-migrated.
-        let connection = Connection::open(&path).expect("reopen");
-        let legacy: String = connection
-            .query_row("SELECT wrong_shape FROM memories", [], |row| row.get(0))
-            .expect("legacy row survived");
-        assert_eq!(legacy, "legacy row");
-        assert!(
-            !backup_path(&path).exists(),
-            "backup file must be cleaned up"
+        assert_eq!(read_schema_version(&connection).expect("old version"), 1);
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM memory_events", [], |row| row.get(0))
+            .expect("wal row survived");
+        assert_eq!(count, 1);
+        let partial: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name='memory_jobs'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("no partial migration");
+        assert_eq!(partial, 0);
+        drop(connection);
+        let reopened = Connection::open(&path).expect("reopen");
+        let integrity: String = reopened
+            .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+            .expect("integrity");
+        assert_eq!(integrity, "ok");
+        assert_eq!(
+            read_schema_version(&reopened).expect("version after reopen"),
+            1
         );
-        std::fs::remove_dir_all(&dir).ok();
+        drop(reopened);
+        std::fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    #[test]
+    fn multiple_pending_migrations_roll_back_as_one_unit() {
+        let store = MemoryStore {
+            connection: Mutex::new(Connection::open_in_memory().expect("open")),
+        };
+        let broken = [
+            Migration {
+                to_version: 1,
+                sql: MIGRATIONS[0].sql,
+            },
+            Migration {
+                to_version: 2,
+                sql: "CREATE TABLE injected(value TEXT); INVALID SQL;",
+            },
+        ];
+        assert!(store.migrate_steps(&broken).is_err());
+        assert_eq!(store.schema_version().expect("version"), 0);
+        assert!(!table_exists(&store, "memories"));
+        assert!(!table_exists(&store, "injected"));
+    }
+
+    #[test]
+    fn upgrades_each_supported_schema_and_rejects_future_without_journal_changes() {
+        for version in [0, 1, SCHEMA_VERSION, SCHEMA_VERSION + 1] {
+            let dir = temp_dir("versions");
+            let path = dir.join(DB_FILE_NAME);
+            let connection = Connection::open(&path).expect("open fixture");
+            for step in MIGRATIONS.iter().filter(|step| step.to_version <= version) {
+                connection.execute_batch(step.sql).expect("fixture schema");
+            }
+            connection
+                .pragma_update(None, "user_version", version)
+                .expect("fixture version");
+            drop(connection);
+            if version > SCHEMA_VERSION {
+                assert!(MemoryStore::open(&path)
+                    .expect_err("future rejected")
+                    .message()
+                    .contains("future memory schema"));
+                let connection = Connection::open(&path).expect("future readable");
+                assert_eq!(
+                    read_schema_version(&connection).expect("future version intact"),
+                    version
+                );
+                let journal: String = connection
+                    .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+                    .expect("journal");
+                assert_eq!(journal, "delete");
+            } else {
+                let store = MemoryStore::open(&path).expect("upgrade");
+                assert_eq!(
+                    store.schema_version().expect("current version"),
+                    SCHEMA_VERSION
+                );
+                assert!(table_exists(&store, "memory_jobs"));
+            }
+            std::fs::remove_dir_all(dir).expect("cleanup");
+        }
+    }
+
+    #[test]
+    fn wal_initialization_wait_is_bounded_and_can_retry_after_writer_releases() {
+        let dir = temp_dir("wal-busy");
+        let path = dir.join(DB_FILE_NAME);
+        let writer = Connection::open(&path).expect("writer");
+        writer
+            .execute_batch("CREATE TABLE sentinel(value TEXT); BEGIN IMMEDIATE;")
+            .expect("hold rollback-journal write lock");
+        let started = std::time::Instant::now();
+        assert!(MemoryStore::open(&path).is_err());
+        assert!(started.elapsed() < std::time::Duration::from_secs(7));
+        assert!(started.elapsed() >= std::time::Duration::from_secs(4));
+        writer.execute_batch("ROLLBACK").expect("release");
+        drop(writer);
+        assert_eq!(
+            MemoryStore::open(&path)
+                .expect("retry")
+                .schema_version()
+                .expect("version"),
+            SCHEMA_VERSION
+        );
+        std::fs::remove_dir_all(dir).expect("cleanup");
     }
 
     #[test]

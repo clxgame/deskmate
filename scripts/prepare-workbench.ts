@@ -8,7 +8,7 @@ import { buildWorkbenchThemeCss, injectWorkbenchThemeAssets } from "./workbench-
  * the Tauri `workbench` window).
  *
  * Requires the upstream clone prepared at a fixed commit (see
- * docs/migrations/opencode-native/baseline.md). Set YUME_OPENCODE_SRC when the
+ * docs/workbench-build.md). Set YUME_OPENCODE_SRC when the
  * clone is not at the default sibling location.
  *
  * Also stages `ghostty-vt.wasm` (the terminal renderer's WASM kernel) into the

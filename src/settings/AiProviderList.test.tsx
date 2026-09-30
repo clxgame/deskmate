@@ -60,6 +60,7 @@ describe("AI provider list", () => {
           label: "",
           baseUrl: "",
           apiKey: "",
+          manualModelIds: "",
         },
       ],
     });

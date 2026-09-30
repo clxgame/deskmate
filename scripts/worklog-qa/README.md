@@ -4,6 +4,8 @@ Query/record routing is now decided by the chat model. Record tool inputs requir
 
 Commands from the repository root:
 
+Desktop launcher/capture/purge require Windows PowerShell. Provider self-tests work on macOS and Windows with Bun. All participants share `.omo/evidence/worklog-natural-recall-qa` by default; set `YUME_WORKLOG_QA_EVIDENCE_DIR` to one explicit directory before starting provider/launcher/readback/seed to select another run. Never mix receipts between runs. `verify-provider.js` uses a new timestamped `artifacts/worklog-qa/provider-*` directory unless this environment variable is set; it creates the output directory before starting its owned fixture.
+
 ```powershell
 bun scripts/worklog-qa/run.js preflight
 bun scripts/worklog-qa/run.js build
@@ -12,6 +14,10 @@ bun scripts/worklog-qa/run.js launch -FixtureBaseUrl http://127.0.0.1:PORT/v1
 bun scripts/worklog-qa/run.js status
 bun scripts/worklog-qa/run.js stop
 ```
+
+For fixture-only checks, run `bun scripts/worklog-qa/verify-provider.js` and `bun scripts/worklog-qa/verify-report.js`. After the QA app is stopped, `bun scripts/worklog-qa/seed-missed-week.js EXACT_QA_SCHEDULE_UUID` reads the same run receipt and mutates only that receipt's synthetic QA database.
+
+Capture a visible owned QA window with `bun scripts/worklog-qa/run.js capture -Hwnd EXACT_HANDLE -CaptureName success.png`. The screenshot helper validates the run identity, live process creation time/executable and descendant ownership against `run-receipt.json`; output must be a new PNG in that receipt directory. It refuses unrelated window handles, minimized/hidden windows and existing screenshots. [PrintWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-printwindow) renders the supplied HWND into the bitmap. Inspect the actual PNG before accepting it: WebView rendering support and visual correctness remain Windows desktop acceptance steps.
 
 `preflight` is read-only except creating the evidence directory. `build` compiles the nondefault worklog-qa feature and records binary/source SHA256. `launch` rejects stale builds, production identity, non-loopback fixture, unowned preexisting QA data, live prior QA processes, or reparse-point data roots. Never use the normal application executable directly. The feature itself rejects a production identifier before settings load. `stop` kills only recorded app descendants after checking PID creation times; it retains data for restart readback. First use of the KnownFolder QA directories requires the approved sandbox escalation. No production directories or credentials may be read.
 

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { createPetSleep } from "./petSleep";
-import { manualClock } from "./petSleepTestClock";
+import { manualClock } from "../testing/petSleepClock";
 
 const ready = { visible: true, ready: true, idle: true, identity: "a", activityKey: "" };
 test("sleeps exactly at 60000ms and remains asleep without repeated timers", () => {

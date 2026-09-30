@@ -5,6 +5,9 @@ YUME is a desktop pet application built with Tauri, React, TypeScript, and Bun.
 OpenCode is pinned as a project dependency and bundled into release builds.
 Users of the packaged app do not need to install OpenCode separately.
 
+The [documentation index](docs/README.md) lists current contracts, active work,
+verification gates and historical records.
+
 ## Daily horoscope
 
 Settings → Widgets → Daily horoscope (设置 → 小组件 → 今日星运) shows today's
@@ -16,9 +19,11 @@ network connection or AI provider.
 
 ## Work journal and reports
 
-Ask the pet to save a work entry, generate a daily report, or schedule a weekly
-report. Explicit message actions also let you save the visible text and arrange
-a Friday 17:00 weekly report. Settings → Widgets → Work journal (设置 → 小组件 → 工作日志) lets you correct dates and
+When automatic archiving is enabled, the host extracts explicit work progress
+in the background. Ordinary statements do not authorize a duplicate tool write
+or a report schedule. Ask the pet to query, correct or supplement work records,
+generate a daily report, or explicitly schedule a weekly report.
+Settings → Widgets → Work journal (设置 → 小组件 → 工作日志) lets you correct dates and
 projects, archive a complete daily report, edit report versions, copy or export
 Markdown/plain text, and change or pause schedules. Automatic reports start off.
 
@@ -29,6 +34,14 @@ reports use their own sessions and do not interrupt the current conversation.
 The computer must be running the app to execute a schedule; after restart, the
 latest missed occurrence is caught up. An empty range makes no model request.
 Receipts distinguish saved data, queued reports, pending results and failures.
+Work dates change at 03:00 local time. Recall queries return entries and reports;
+failed or incomplete queries cannot establish that a record is missing.
+
+Automatic memory and work journal processing commit independently, with source
+identities, receipts and forgetting barriers. The managed OpenCode context plugin
+uses an authenticated local host bridge for turn registration and current memory
+context; internal extraction and report sessions are excluded. Lightweight chat
+retains its per-turn system context, and the plugin deduplicates injected blocks.
 
 Manual edits are retained when a regenerated candidate arrives. Deleting an
 entry marks dependent reports and offers deletion of linked reports; report
@@ -42,6 +55,20 @@ Install dependencies:
 ```powershell
 bun install
 ```
+
+Prepare the workbench from the pinned OpenCode source before desktop development
+or packaging. Check out `anomalyco/opencode` at
+`826d9ad46a22bef0294998e08daa3c4904fea28f` (OpenCode 1.18.21), install its dependencies
+with `bun install --frozen-lockfile`, then run:
+
+```sh
+YUME_OPENCODE_SRC=/absolute/path/to/opencode-v1.18.21 bun run prepare:workbench
+```
+
+PowerShell users can set `$env:YUME_OPENCODE_SRC` before running the same command.
+`public/workbench/` is ignored build output. The desktop dev hook prepares native
+resources but does not rebuild the workbench. An ordinary frontend build also
+does not prove a complete workbench rebuild.
 
 Run the desktop app in development:
 
@@ -59,6 +86,30 @@ ignored by Git:
 
 Each download is verified against a pinned SHA-256, so a swapped or truncated
 artifact fails the build instead of shipping.
+
+Run current-source checks with `bun run check`, or individually with
+`bun run typecheck`, `bun run test:frontend`, `bun run test:rust`, and `bun run build`.
+On macOS set `DEVELOPER_DIR=/Library/Developer/CommandLineTools` first. The frontend
+runner discovers only `src/`, `scripts/`, and root Vite config tests, then runs
+each file in its own Bun process with the DOM preload. `bun run test:frontend --list`
+prints the sorted absolute paths. `YUME_TEST_TIMEOUT_MS` sets each child's budget
+(default 120000, permitted 100–600000); `YUME_TEST_BUN` can select a Bun executable.
+Logs and the machine-readable summary are saved in `output/audit-remediation/`.
+Tests with HTTP fixtures require permission to bind loopback ports. Avoid running
+a second frontend build while the suite's build fixtures are executing.
+
+For isolated native remediation acceptance on macOS, run
+`bun scripts/audit-remediation/verify-native.ts` after preparing the sidecar.
+It uses a synthetic localhost provider and temporary workspace, checks recovery
+without prompt replay and lifecycle behavior during persistent history failure,
+then verifies process, port, and temporary directory cleanup. Its Rust fixture is
+explicitly ignored in the default suite because it requires this live runtime.
+
+The Source checks workflow defines macOS and Windows jobs for pushes and PRs.
+Releases depend on the same workflow; a separate job rebuilds the pinned workbench from source. Required
+branch-protection checks must still be configured in GitHub. See the
+[remediation progress](docs/audit-remediation-progress.md) for actual validation
+and outstanding platform and host checks.
 
 ## Persona packs
 
@@ -153,9 +204,24 @@ feature, not a hidden extension of chat history.
 
 ### What is remembered
 
-Only what you save, or what you approve. Pick **记住这件事** on any message and
-you get an inline receipt with a one-click undo. Nothing about a conversation is
-stored just because it happened.
+When automatic memory is enabled, the host processes new, verified conversation
+turns in the background. It retains explicit user facts, stable preferences and
+ongoing work context; quoted material, assistant guesses and unverified completion
+claims are not sufficient evidence. The chat no longer has a fixed
+**记住这件事** action beneath every message.
+
+New installations enable automatic memory and work journal archiving by default.
+An existing explicit choice to disable automatic memory is preserved. Automatic
+extraction, **允许 AI 使用记忆**, and automatic work archiving remain separate
+settings; disabling a branch invalidates its pending writes, and re-enabling it
+does not scan all old conversations. Existing memory remains usable when only
+automatic extraction is disabled and AI memory use remains enabled.
+
+Processing failures and retries are visible in Settings. A pending extraction is
+not reported as saved. Memory and work records commit independently, using source
+identities, receipts and forgetting barriers. Real-model semantic accuracy has
+not completed full acceptance; see the [memory/work journal contract](docs/memory-and-worklog.md)
+and [verification record](docs/automatic-memory-verification.md).
 
 Memories have two scopes:
 
@@ -163,6 +229,9 @@ Memories have two scopes:
   routines, goals, and dated events. Every persona sees these.
 - **Persona-only** — shared moments and relationship notes. Only the persona
   that created them can see or use them; switching personas never leaks them.
+
+Project facts and ongoing items also carry workspace/topic applicability and
+complete source identities, so a different project cannot borrow their context.
 
 A changed stable fact replaces the old value rather than piling up, and the
 previous value stays visible under **显示已替换和已过期** so you can see what
@@ -199,12 +268,15 @@ write-ahead log is flushed so nothing lingers. Only a content-free audit record
 ### What is sent to the AI
 
 When a memory is relevant to what you are saying, it is included in the request
-to the AI provider that owns the model selected in Settings → AI. You can keep
+to the AI provider that owns the conversation's selected model, or the configured
+default when the conversation inherits it. You can keep
 multiple gateways configured; selecting a model switches the provider and model
-together, while each provider's usage card refreshes independently. At most 8
-memories and 1,200 characters are sent per message, always inside a clearly
-delimited untrusted-data block that the model is told is factual background and
-not instructions.
+together, while each provider's usage card refreshes independently. Base memory
+retrieval is limited to 8 records and 1,200 characters, inside a clearly delimited
+untrusted-data block that the model is told is factual background rather than
+instructions. An explicit continuation request can also receive bounded excerpts
+from recent, trusted user turns whose extraction is still pending; these are
+labelled as temporary source context and do not claim that memory was saved.
 
 Turn off **允许 AI 使用记忆** in Settings → 记忆 to stop sending memories
 entirely. Local memory management keeps working.
@@ -224,7 +296,10 @@ and chat keep working normally.
 
 The public updater repository is `clxgame/deskmate`. Windows and Apple Silicon
 Mac builds use its shared `latest.json` feed with separately signed updater
-payloads. On macOS, **一键更新** checks, downloads and verifies the tarball, waits
+payloads. Settings silently checks for updates and displays **下载更新** (Download update)
+only when a newer version is available for the current platform. Without an
+update it shows the local version. Clicking the button starts the existing
+install-and-restart flow; on macOS it downloads and verifies the tarball, waits
 for running tasks to finish, installs and restarts. DMG/ZIP downloads remain
 available for first installation and migration from older clients without the
 automatic installer.

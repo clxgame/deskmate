@@ -9,8 +9,12 @@ permissions:
   contents: write
 
 jobs:
+  checks:
+    uses: ./.github/workflows/check.yml
+
   draft:
     name: Prepare draft release
+    needs: checks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

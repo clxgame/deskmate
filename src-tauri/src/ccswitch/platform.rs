@@ -6,9 +6,11 @@ mod windows;
 
 #[cfg(test)]
 use windows::{
-    build_url_open_command, detect_installation_from_registry_output, parse_registered_executable,
-    trusted_system_url_open_command_from_root, CC_SWITCH_EXE, WINDOWS_FILE_PROTOCOL_HANDLER_ARG,
+    detect_installation_from_registry_output, parse_registered_executable,
+    trusted_system_url_open_command_from_root,
 };
+#[cfg(all(test, windows))]
+use windows::{build_url_open_command, CC_SWITCH_EXE, WINDOWS_FILE_PROTOCOL_HANDLER_ARG};
 #[cfg(windows)]
 use windows::{detect_system_installation, open_system_url, prepare_system_import};
 #[cfg(all(test, windows))]

@@ -4,7 +4,7 @@ use super::*;
 use crate::chat_attachments::AttachmentStore;
 
 #[test]
-#[ignore]
+#[ignore = "requires YUME_TASK6_DOWNLOAD_QA_DIR pointing to an isolated export evidence directory"]
 fn manual_qa_exports_two_files_and_keeps_artifact_after_failed_export() {
     // Given: the QA harness supplies a real writable Downloads-like directory.
     let downloads = std::env::var_os("YUME_TASK6_DOWNLOAD_QA_DIR")

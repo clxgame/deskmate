@@ -69,7 +69,6 @@ export function asWorklogError(error: unknown): WorklogError {
   if (typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" && "message" in error && typeof error.message === "string") return { code: error.code, message: error.message };
   return { code: "STORAGE_UNAVAILABLE", message: "Work journal is unavailable" };
 }
-export const worklogAvailable = (): Promise<boolean> => invoke("worklog_available");
 export const recordEntry = (request: RecordEntry): Promise<OperationReceipt> => invoke("worklog_record", { request });
 export const updateEntry = (request: UpdateEntry): Promise<OperationReceipt> => invoke("worklog_update", { request });
 export const queryEntries = (query: DateQuery): Promise<readonly Entry[]> => invoke("worklog_query", { query });

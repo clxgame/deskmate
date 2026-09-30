@@ -97,6 +97,9 @@ pub(super) fn collection_failed(
     error: &str,
 ) -> Result<(), String> {
     use tauri::Manager;
+    if error == "history_storage_failed" {
+        return Ok(());
+    }
     let state = app.state::<AgentRunState>();
     if !state.matches_active(record)? {
         return Ok(());
@@ -114,7 +117,7 @@ pub(super) fn collection_failed(
         }
         since.elapsed() >= std::time::Duration::from_secs(30)
     };
-    if !expired && matches!(error, "agent_read_failed" | "history_storage_failed") {
+    if !expired && matches!(error, "agent_read_failed") {
         return Ok(());
     }
     let _operation = state.lock_operation()?;
@@ -229,32 +232,50 @@ pub(super) fn submission_failed(
 ) -> Result<(), String> {
     use tauri::Manager;
     let state = app.state::<AgentRunState>();
+    submission_failed_with(
+        &state,
+        &app.state::<super::AgentPermissionState>(),
+        record,
+        error,
+        || settle(app, record, error),
+        |messages| {
+            crate::history::save_agent_snapshot(
+                app,
+                &record.workspace_path,
+                crate::history::AgentHistorySnapshot {
+                    session_id: record
+                        .session_id
+                        .as_deref()
+                        .ok_or("agent_session_unknown")?,
+                    messages,
+                },
+            )
+        },
+    )
+}
+
+pub(super) fn submission_failed_with(
+    state: &AgentRunState,
+    permissions: &super::AgentPermissionState,
+    record: &RunRecord,
+    error: &str,
+    settle: impl FnOnce() -> Result<Vec<NativeMessage>, String>,
+    archive: impl FnOnce(&[NativeMessage]) -> Result<(), String>,
+) -> Result<(), String> {
     eprintln!("agent submission {}: {error}", record.run_id);
     // A transport error does not establish whether the server accepted the turn.
     state.confirm_submission(&record.run_id)?;
     state.request_finish(&record.run_id, RunOutcome::Failed, Some(error.into()))?;
     state.set_collection_error(&record.run_id, Some(error))?;
-    let messages = settle(app, record, error)?;
-    crate::history::save_agent_snapshot(
-        app,
-        &record.workspace_path,
-        crate::history::AgentHistorySnapshot {
-            session_id: record
-                .session_id
-                .as_deref()
-                .ok_or("agent_session_unknown")?,
-            messages: &messages,
-        },
-    )?;
+    let messages = settle()?;
+    if let Err(archive_error) = archive(&messages) {
+        state.report_archive_error(&record.run_id, Some(&archive_error));
+    }
     state.fail_active(&record.run_id, error)?;
-    if let Err(error) = app
-        .state::<super::AgentPermissionState>()
-        .cancel_run(&record.run_id)
-    {
+    if let Err(error) = permissions.cancel_run(&record.run_id) {
         if error != "agent_run_unknown" {
             return Err(error);
         }
     }
     Ok(())
 }
-

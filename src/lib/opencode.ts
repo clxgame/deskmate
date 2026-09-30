@@ -58,12 +58,6 @@ export type ErrorToolState = ToolStateBase & {
   readonly output?: unknown;
 };
 
-export type ToolState =
-  | PendingToolState
-  | RunningToolState
-  | CompletedToolState
-  | ErrorToolState;
-
 type ToolPartBase = {
   readonly id: string;
   readonly messageID: string;
@@ -188,22 +182,6 @@ export async function waitForServer(timeoutMs = 30_000): Promise<void> {
 
 export function getToolActivityLabel(part: ToolPart): string {
   return part.state.title || part.tool || "tool";
-}
-
-export function isPendingToolPart(part: ToolPart): part is PendingToolPart {
-  return part.state.status === "pending";
-}
-
-export function isRunningToolPart(part: ToolPart): part is RunningToolPart {
-  return part.state.status === "running";
-}
-
-export function isCompletedToolPart(part: ToolPart): part is CompletedToolPart {
-  return part.state.status === "completed";
-}
-
-export function isErrorToolPart(part: ToolPart): part is ErrorToolPart {
-  return part.state.status === "error";
 }
 
 export function createSession(title: string): Promise<SessionInfo> {

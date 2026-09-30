@@ -2,7 +2,7 @@ import * as core from "@tauri-apps/api/core";
 import { afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { WorklogReceipt, worklogChatCopy } from "./WorklogReceipt";
-import { WORKLOG_SYSTEM_INSTRUCTION } from "./worklogActions";
+import { buildWorklogSystemInstruction } from "./worklogActions";
 import { worklogLabels } from "../settings/worklog/worklogLabels";
 import type { ChatWorklogOperation } from "./useWorklogChat";
 
@@ -44,10 +44,13 @@ test("uses the work journal feature name in receipt actions and authorization gu
   const feature = worklogLabels("zh-CN").featureTitle;
   // When the receipt is rendered.
   render(<WorklogReceipt operation={{ ...pending, receipt: { operationId: "request", entityId: "entry", entityKind: "entry", revision: 1, businessDate: null, status: "committed" } }} language="zh-CN" onUndo={noop} onRefresh={noop} />);
-  // Then the save guidance names the actual button and the receipt names the selected feature.
+  const instruction = buildWorklogSystemInstruction(new Date(2026, 8, 9, 12));
+  // Automatic archiving does not imply an explicit write or schedule authorization.
   expect(feature).toBe("工作日志");
   expect(`保存到${feature}`).toBe(copy.save);
-  expect(WORKLOG_SYSTEM_INSTRUCTION).toContain(copy.save);
+  expect(instruction).toContain("宿主在启用自动归档时会后台整理明确工作进展");
+  expect(instruction).toContain("普通工作陈述不要重复调用保存工具");
+  expect(instruction).toContain("变更仍然需要用户本次直接请求授权");
   expect(screen.getByRole("button", { name: `查看${feature}` })).toBeTruthy();
   expect(screen.getByRole("status").textContent).toContain(`已保存到${feature}`);
 });

@@ -22,11 +22,12 @@ export async function stageFixture(root: string, providerBaseUrl: string, includ
     ].join("\n"), "utf8"));
   await Promise.all(files);
   const config = buildSidecarConfig(providerBaseUrl);
-  config.permission = {
+  const permission = {
     "*": "deny", read: "allow", trusted_probe: "allow", edit: "ask", bash: "ask", webfetch: "ask",
     write: "deny", patch: "deny", task: "deny", external_directory: "deny",
   };
-  if (flowTools) config.permission.write = "ask";
+  if (flowTools) permission.write = "ask";
+  config.permission = permission;
   await writeFile(join(root, "opencode-config.json"), JSON.stringify(config), "utf8");
   return { workspaceA, workspaceB, configDirectory };
 }

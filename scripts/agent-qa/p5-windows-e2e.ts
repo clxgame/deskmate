@@ -177,6 +177,9 @@ async function runScenario(client: Client, scenario: Scenario, file: string, sho
   return { evidence: scenarioEvidence, pid };
 }
 
+if (process.platform !== "win32") throw new Error("P5 Windows desktop QA requires Windows");
+const executable = resolve(process.argv[3] ?? "src-tauri/resources/windows-mcp/1.3.24/Sbroenne.WindowsMcp.exe");
+await access(executable);
 const root = await mkdtemp(join(tmpdir(), "yume-p5-windows-"));
 const successFile = join(root, "yume-p5-success.txt");
 const rejectFile = join(root, "yume-p5-reject.txt");
@@ -186,8 +189,6 @@ const stopFile = join(root, "yume-p5-stop.txt");
 await Promise.all([successFile, rejectFile, disappearFile, stopFile].map((path) => writeFile(path, "")));
 await writeFile(failureFile, "READ_ONLY_ORIGINAL");
 if (scenarios.includes("save_failure")) await setReadOnly(failureFile, true);
-const executable = resolve(process.argv[3] ?? ".tmp/sbroenne-windows-mcp-1.3.24/expanded/Sbroenne.WindowsMcp.exe");
-await access(executable);
 const mcp = {
   yume_windows: {
     type: "local",

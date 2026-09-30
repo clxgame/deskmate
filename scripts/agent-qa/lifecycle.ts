@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createSession, discoverTools, messages, prompt, readTextMessages, request, waitForTerminal, type Client, type TextMessage } from "./client";
 import { startRuntime } from "./runtime";
-import { check, ContractError, jsonObject, stringField, type Check } from "./types";
+import { check, ContractError, isJsonObject, jsonObject, stringField, type Check } from "./types";
 
 const permission = [{ permission: "*", pattern: "*", action: "deny" }] as const;
 
@@ -111,7 +111,7 @@ export async function runLifecycle(batchDirectory: string, injectHostFailure = f
     const reload = await messages(client, sessionId);
     checks.push(check("reload retains host run identity", reload.some((item) => {
       const info = item.info;
-      return typeof info === "object" && info !== null && !Array.isArray(info) && (info.id === runId || info.parentID === runId);
+      return isJsonObject(info) && (info.id === runId || info.parentID === runId);
     }), runId));
 
     const ids = new Set<string>();

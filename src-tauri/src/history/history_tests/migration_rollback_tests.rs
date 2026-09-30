@@ -190,34 +190,23 @@ fn synthetic_migration_and_separate_rollback_rehearsal_is_idempotent() -> Result
         b"partial",
     )
     .map_err(|error| error.to_string())?;
+    // Read the exact historical format rather than keeping a retired writer alive for QA.
+    fs::write(
+        &native_index_path,
+        include_bytes!("../fixtures/native-session-index-v1.json"),
+    )
+    .map_err(|error| error.to_string())?;
     let native_index = NativeSessionIndex::default();
-    native_index::upsert(
-        &native_index_path,
-        &native_index,
-        "ses_native_complete",
-        "xiaozhu",
-        workspace.to_string_lossy().as_ref(),
-        "light_chat",
-        1,
-    )?;
-    native_index::upsert(
-        &native_index_path,
-        &native_index,
-        "ses_native_complete",
-        "changli",
-        workspace.to_string_lossy().as_ref(),
-        "light_chat",
-        2,
-    )?;
-    native_index::upsert(
-        &native_index_path,
-        &native_index,
-        "ses_native_new",
-        "xiaozhu",
-        workspace.to_string_lossy().as_ref(),
-        "workbench",
-        3,
-    )?;
+    native_index::load_into(&native_index_path, &native_index)?;
+    let records = native_index
+        .0
+        .lock()
+        .map_err(|_| "native_session_index_unavailable".to_owned())?;
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].created_at, 1);
+    assert_eq!(records[0].updated_at, 2);
+    assert_eq!(records[1].source, "workbench");
+    drop(records);
     let native_index_before_ui_rollback =
         fs::read(&native_index_path).map_err(|error| error.to_string())?;
     let native_records: serde_json::Value =

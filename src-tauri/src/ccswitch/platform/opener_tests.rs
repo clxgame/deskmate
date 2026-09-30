@@ -1,9 +1,11 @@
 use std::fs;
+#[cfg(windows)]
 use std::path::{Path, PathBuf};
 
 use super::*;
 
 #[test]
+#[cfg(windows)] // Requires Windows drive/prefix and separator semantics.
 fn builds_only_trusted_system32_rundll32_opener() {
     let opener = build_url_open_command(Path::new(r"C:\Windows"))
         .expect("absolute SystemRoot resolves trusted opener");

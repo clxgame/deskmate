@@ -5,6 +5,7 @@ import { PackAuthoringError, packMetadata, parsePersonaIds } from "./pack-metada
 
 import { personaRenderType } from "./pack-figure2d";
 import { personaDefaultPosition, type DefaultPosition } from "./pack-position";
+import { personaPackageFiles } from "./persona-asset-policy";
 
 const projectRoot = resolve(import.meta.dir, "..");
 const personasRoot = resolve(projectRoot, "public/personas");
@@ -86,9 +87,11 @@ async function main(): Promise<void> {
     const personas: PersonaEntry[] = [];
     let fileCount = 0;
     for (const id of ids) {
-      const files = await personaFiles(id);
-      const renderType = await personaRenderType(resolve(personasRoot, id), files);
-      const defaultPosition = await personaDefaultPosition(resolve(personasRoot, id));
+      const personaRoot = resolve(personasRoot, id);
+      const discovered = await personaFiles(id);
+      const renderType = await personaRenderType(personaRoot, discovered);
+      const files = await personaPackageFiles(personaRoot, discovered, renderType);
+      const defaultPosition = await personaDefaultPosition(personaRoot);
       if (files.length === 0) throw new PackAuthoringError("Persona has no assets: " + id);
       for (const relative of files) {
         const target = resolve(contents, "personas", id, relative);

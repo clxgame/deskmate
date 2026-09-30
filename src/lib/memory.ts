@@ -72,21 +72,6 @@ export interface MemoryRecord extends Memory {
   linkedTaskIds: string[];
 }
 
-export interface NewMemory {
-  scope: MemoryScope;
-  personaId?: string | null;
-  type: MemoryType;
-  memoryKey?: string | null;
-  content: string;
-  importance?: number | null;
-  expiresAt?: string | null;
-  sourceKind: SourceKind;
-  conversationId?: string | null;
-  messageId?: string | null;
-  /** Set only after the user accepted the sensitive-storage disclosure. */
-  sensitiveConfirmed?: boolean;
-}
-
 export interface MemoryUpdate {
   id: string;
   content: string;
@@ -197,15 +182,6 @@ export function asMemoryError(error: unknown): MemoryErrorEnvelope {
   };
 }
 
-/** Whether the memory database opened successfully this run. */
-export function memoryAvailable(): Promise<boolean> {
-  return invoke<boolean>("memory_available");
-}
-
-export function memoryCreate(memory: NewMemory): Promise<Memory> {
-  return invoke<Memory>("memory_create", { memory });
-}
-
 export function memoryUpdate(update: MemoryUpdate): Promise<Memory> {
   return invoke<Memory>("memory_update", { update });
 }
@@ -258,39 +234,6 @@ export function memoryExport(): Promise<MemoryExport> {
   return invoke<MemoryExport>("memory_export");
 }
 
-export function memoryRelationship(
-  personaId: string,
-): Promise<RelationshipState> {
-  return invoke<RelationshipState>("memory_relationship", { personaId });
-}
-
-export function memorySetRelationshipSummary(options: {
-  personaId: string;
-  summary: string;
-  expectedRevision: number;
-}): Promise<RelationshipState> {
-  return invoke<RelationshipState>("memory_set_relationship_summary", options);
-}
-
-export function memoryLinkTask(
-  memoryId: string,
-  taskId: string,
-): Promise<void> {
-  return invoke<void>("memory_link_task", { memoryId, taskId });
-}
-
-export function memoryUnlinkTask(
-  memoryId: string,
-  taskId: string,
-): Promise<void> {
-  return invoke<void>("memory_unlink_task", { memoryId, taskId });
-}
-
-/** Called when a scheduled task is deleted: drops links, never a memory. */
-export function memoryUnlinkDeletedTask(taskId: string): Promise<number> {
-  return invoke<number>("memory_unlink_deleted_task", { taskId });
-}
-
 /**
  * Reject a payload we do not understand instead of feeding a half-typed object
  * to the UI. An unknown action or version means an older window received a
@@ -334,7 +277,6 @@ export function onMemoryChanged(
     if (change) callback(change);
   });
 }
-
 
 export interface AutomationStatus { pending: number; failed: number }
 export const memoryAutomationStatus = () => invoke<AutomationStatus>("memory_automation_status");

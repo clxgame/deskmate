@@ -1,7 +1,8 @@
 import { Database } from "bun:sqlite";
 import { readFile, writeFile, lstat, realpath } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
-const evidence = resolve(import.meta.dir, "../../.omo/evidence/work-journal-reports-qa");
+import { evidenceDirectory } from "./evidence.js";
+const evidence = evidenceDirectory();
 const receipt = JSON.parse((await readFile(join(evidence, "run-receipt.json"), "utf8")).replace(/^\uFEFF/, ""));
 const id = process.argv[2];
 if (!/^[0-9a-f-]{36}$/i.test(id ?? "") || receipt.identity !== "com.deskmate.worklogqa") throw new Error("Supply the exact existing QA schedule UUID");

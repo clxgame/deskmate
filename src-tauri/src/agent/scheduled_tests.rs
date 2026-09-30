@@ -127,6 +127,57 @@ fn host_submission_runs_once_without_a_chat_observer() -> TestResult<()> {
 }
 
 #[test]
+fn confirmation_failure_keeps_the_submitted_schedule_owned_and_never_replays() -> TestResult<()> {
+    let (root, workspace) = fixture()?;
+    let store = RunStore::new(root.join("agent-runs"));
+    let state = AgentRunState::new(store.clone());
+    let permissions = AgentPermissionState::default();
+    let prompts = std::cell::Cell::new(0);
+    let result = submit_with(
+        &state,
+        "msg_confirm_schedule",
+        &workspace,
+        "once",
+        |state, id| {
+            state.bind_session_with(id, "ses_confirm_schedule", || {
+                permissions.register_run(id, "ses_confirm_schedule", &workspace)
+            })?;
+            prompts.set(prompts.get() + 1);
+            store.inject_write_failure(true);
+            let result = state.confirm_submission(id);
+            store.inject_write_failure(false);
+            result
+        },
+    );
+    assert!(result.is_err());
+    let candidate = state.active_record("msg_confirm_schedule")?;
+    assert!(candidate.initial_input.is_some());
+    assert!(candidate.outcome.is_none());
+    assert!(permissions.waiting("msg_confirm_schedule").is_ok());
+    assert!(matches!(
+        submit_with(
+            &state,
+            "msg_confirm_schedule",
+            &workspace,
+            "once",
+            |_, _| {
+                prompts.set(prompts.get() + 1);
+                Ok(())
+            }
+        )?,
+        ScheduledAdmission::Duplicate
+    ));
+    assert_eq!(prompts.get(), 1);
+    state.confirm_submission("msg_confirm_schedule")?;
+    assert!(state
+        .active_record("msg_confirm_schedule")?
+        .initial_input
+        .is_none());
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
 fn transport_failure_is_persisted_and_not_retried() -> TestResult<()> {
     let (root, workspace) = fixture()?;
     let state = AgentRunState::new(RunStore::new(root.join("agent-runs")));

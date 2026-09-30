@@ -32,8 +32,6 @@ export function worklogOutput(output: unknown): { readonly requestId: string; re
   return { requestId: id, error: code };
 }
 
-export function worklogRequestId(output: unknown): string | null { return worklogOutput(output)?.requestId ?? null; }
-
 export async function verifyWorklogReceipt(requestId: string, lookup = getOperation): Promise<OperationReceipt | null> {
   const receipt = await lookup(requestId);
   return receipt?.operationId === requestId ? receipt : null;
@@ -57,5 +55,3 @@ export function buildWorklogSystemInstruction(now = new Date()): string {
     "工具返回 pending/unknown 不能称为保存成功，需按 requestId 查询结果。生成工具只会创建后台任务，不能说报告已生成。宿主在启用自动归档时会后台整理明确工作进展；普通工作陈述不要重复调用保存工具。查询结果才是已归档的依据，尚无结果不能声称已保存。用户主动请求补记时先核对现有记录，避免与自动归档重复。记忆仅保存持续事项背景，不另建工作流水。",
   ].join(" ");
 }
-
-export const WORKLOG_SYSTEM_INSTRUCTION = buildWorklogSystemInstruction();

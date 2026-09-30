@@ -6,7 +6,7 @@ import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { restoreTauriModuleFixture } from "../testing/tauriModuleFixture";
 import { usePetActivityState } from "./useGifState";
 import { usePetSleep } from "./usePetSleep";
-import { manualClock } from "./petSleepTestClock";
+import { manualClock } from "../testing/petSleepClock";
 import type { SleepClock } from "./petSleep";
 
 beforeEach(() => { restoreTauriModuleFixture(); mockIPC(() => undefined, { shouldMockEvents: true }); });

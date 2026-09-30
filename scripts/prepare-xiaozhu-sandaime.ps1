@@ -2,6 +2,7 @@ param([Parameter(Mandatory)][string]$SourceDirectory)
 $ErrorActionPreference = 'Stop'
 $states = @('等待', '思考', '打招呼', '跳舞', '哭', '开心', '争辩')
 $outputDirectory = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\public\personas\xiaozhu-sandaime'))
+$provenancePath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\docs\assets\xiaozhu-sandaime.provenance.json'))
 $tables = @{}
 foreach ($table in @('nodes','animations','materials','meshes','textures','images','skins','accessors','bufferViews','samplers')) {
     $tables[$table] = [Collections.Generic.List[object]]::new()
@@ -128,6 +129,7 @@ try {
         [IO.File]::WriteAllBytes((Join-Path $outputDirectory 'figure.glb'), $output.ToArray())
     } finally { $writer.Dispose(); $output.Dispose() }
     $receipt = [ordered]@{description='Seven independent authored rigs, meshes, materials and clips. Runtime selects one clip root. Only byte-identical buffer views, images, textures and samplers are shared.';sourceFiles=$provenance.ToArray();images=$tables.images.Count;meshes=$tables.meshes.Count;outputBytes=(Get-Item -LiteralPath (Join-Path $outputDirectory 'figure.glb')).Length}
-    [IO.File]::WriteAllText((Join-Path $outputDirectory 'provenance.json'), ($receipt|ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+    [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($provenancePath))
+    [IO.File]::WriteAllText($provenancePath, ($receipt|ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
     $receipt | ConvertTo-Json -Depth 8
 } finally { $binary.Dispose() }

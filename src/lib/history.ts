@@ -29,33 +29,6 @@ export interface AgentHistoryDetails {
   availability: "ready" | "retryable" | "missing" | "workspace_missing";
 }
 
-/** Lightweight listing entry. */
-export interface HistorySummary {
-  id: string;
-  title: string;
-  created: number;
-  updated: number;
-  count: number;
-  agentDetails?: AgentHistoryDetails;
-  /** True when the session lives only on the managed OpenCode sidecar (e.g.
-   * created in the native workbench), not in YUME's history.json projection —
-   * continue it in the workbench, not here. */
-  native?: boolean;
-}
-
-export function historyList(): Promise<HistorySummary[]> {
-  return invoke<HistorySummary[]>("history_list");
-}
-
 export function historyLoad(id: string): Promise<HistorySession | null> {
   return invoke<HistorySession | null>("history_load", { id });
 }
-
-export function historySave(session: HistorySession): Promise<void> {
-  return invoke<void>("history_save", { session });
-}
-
-export function historyDelete(id: string): Promise<void> {
-  return invoke<void>("history_delete", { id });
-}
-

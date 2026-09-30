@@ -43,7 +43,7 @@ fn start_settings_snapshot_cannot_mix_identity_after_concurrent_mutation() -> Te
 }
 
 #[test]
-fn history_failure_releases_slot_and_permission_but_preserves_input() -> TestResult<()> {
+fn catalog_failure_releases_slot_and_permission_but_preserves_input() -> TestResult<()> {
     let root = std::env::temp_dir().join(format!("yume-history-run-{}", uuid::Uuid::new_v4()));
     let workspace = root.join("workspace");
     std::fs::create_dir_all(&workspace)?;
@@ -54,20 +54,50 @@ fn history_failure_releases_slot_and_permission_but_preserves_input() -> TestRes
         permissions.register_run("msg_history", "ses_history", &workspace)
     })?;
     let result: Result<(), String> =
-        super::run_commands::fail_history_start(&state, &permissions, "msg_history");
-    assert_eq!(result, Err("history_storage_failed".to_owned()));
+        super::run_commands::fail_catalog_start(&state, &permissions, "msg_history");
+    assert_eq!(result, Err("catalog_storage_failed".to_owned()));
     let listing = state.read()?;
     assert!(listing.active.is_none());
     assert_eq!(listing.recent.len(), 1);
     assert_eq!(listing.recent[0].initial_input.as_deref(), Some("retry me"));
     assert_eq!(
         listing.recent[0].error_summary.as_deref(),
-        Some("history_storage_failed")
+        Some("catalog_storage_failed")
     );
     assert_eq!(
         permissions.cancel_run("msg_history"),
         Err("agent_run_unknown".to_owned())
     );
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
+fn failed_bind_keeps_unbound_record_and_caller_releases_registered_permissions() -> TestResult<()> {
+    let root = std::env::temp_dir().join(format!("yume-bind-failure-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root)?;
+    let store = RunStore::new(root.join("runs"));
+    let state = AgentRunState::new(store.clone());
+    let permissions = AgentPermissionState::default();
+    state.begin("msg_bind", &root, "input")?;
+    store.inject_write_failure(true);
+    assert!(state
+        .bind_session_with("msg_bind", "ses_bind", || permissions
+            .register_run("msg_bind", "ses_bind", &root))
+        .is_err());
+    assert!(permissions.waiting("msg_bind").is_ok());
+    permissions.cancel_run("msg_bind")?;
+    assert!(state.active_record("msg_bind")?.session_id.is_none());
+    assert!(AgentRunState::load(store.clone())?
+        .active_record("msg_bind")?
+        .session_id
+        .is_none());
+    assert_eq!(
+        permissions.waiting("msg_bind").err().as_deref(),
+        Some("agent_run_unknown")
+    );
+    store.inject_write_failure(false);
+    state.fail_active("msg_bind", "agent_storage_unavailable")?;
     std::fs::remove_dir_all(root)?;
     Ok(())
 }
@@ -144,4 +174,3 @@ fn history_start_uses_only_the_persisted_session_workspace_pair() -> TestResult<
     std::fs::remove_dir_all(root)?;
     Ok(())
 }
-

@@ -6,7 +6,7 @@ import { emit } from "@tauri-apps/api/event";
 import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { restoreTauriModuleFixture } from "../testing/tauriModuleFixture";
 import { legacySettingsFixture } from "../testing/settingsFixtures";
-import { manualClock } from "./petSleepTestClock";
+import { manualClock } from "../testing/petSleepClock";
 import PetApp from "./PetApp";
 import { parseFigure2dConfig } from "./figure2d";
 import type { LoadedGifPersona } from "./gifAssets";

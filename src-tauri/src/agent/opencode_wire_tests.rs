@@ -107,9 +107,16 @@ fn workspace_directory_scopes_every_session_request() -> Result<(), String> {
     server.join().map_err(|_| "server join".to_owned())??;
     let requests = requests.lock().map_err(|_| "requests lock".to_owned())?;
     assert_eq!(requests.len(), 4);
-    let prompt_body = requests[1].split_once("\r\n\r\n").map(|(_, body)| body).ok_or("missing prompt body")?;
-    let prompt: serde_json::Value = serde_json::from_str(prompt_body).map_err(|error| error.to_string())?;
-    assert_eq!(prompt["model"], serde_json::json!({"providerID":"provider","modelID":"selected-model-b"}));
+    let prompt_body = requests[1]
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body)
+        .ok_or("missing prompt body")?;
+    let prompt: serde_json::Value =
+        serde_json::from_str(prompt_body).map_err(|error| error.to_string())?;
+    assert_eq!(
+        prompt["model"],
+        serde_json::json!({"providerID":"provider","modelID":"selected-model-b"})
+    );
     let create_body = requests[0]
         .split_once("\r\n\r\n")
         .map(|(_, body)| body)
@@ -169,5 +176,66 @@ fn recovery_snapshot_is_one_get_and_never_posts() -> Result<(), String> {
     let workspace = Path::new("E:\\synthetic-old-workspace");
     assert!(client_for(port, workspace).snapshot("ses_old")?.is_empty());
     server.join().map_err(|_| "server join".to_owned())??;
+    Ok(())
+}
+
+#[test]
+fn accepted_prompt_confirmation_recovers_from_native_facts_without_replay() -> Result<(), String> {
+    use super::{AgentPermissionState, AgentRunState, RunStore};
+    let root = std::env::temp_dir().join(format!("yume-confirm-http-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    let store = RunStore::new(root.join("runs"));
+    let state = AgentRunState::new(store.clone());
+    state.begin("msg_confirm", &root, "once")?;
+    state.bind_session("msg_confirm", "ses_confirm")?;
+    let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let server = std::thread::spawn(move || -> Result<usize, String> {
+        let mut prompts = 0;
+        for index in 0..3 {
+            let (mut stream, _) = listener.accept().map_err(|e| e.to_string())?;
+            let request = read_request(&mut stream)?;
+            let body = if index == 0 {
+                assert!(request.starts_with("POST /session/ses_confirm/prompt_async?"));
+                prompts += 1;
+                "{}"
+            } else {
+                assert!(request.starts_with("GET /session/ses_confirm/message?"));
+                r#"[{"info":{"id":"msg_confirm","role":"user","time":{"created":1}},"parts":[]}]"#
+            };
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}", body.len()).map_err(|e| e.to_string())?;
+        }
+        Ok(prompts)
+    });
+    let client = client_for(port, &root);
+    client.prompt("ses_confirm", "msg_confirm", "", "once")?;
+    store.inject_write_failure(true);
+    assert!(state.confirm_submission("msg_confirm").is_err());
+    let restarted = AgentRunState::load(store.clone())?;
+    let candidate = restarted.active_record("msg_confirm")?;
+    assert!(
+        super::recovery::confirm_from_native_with(&restarted, &candidate, || client
+            .snapshot("ses_confirm"))
+        .is_err()
+    );
+    assert!(restarted
+        .active_record("msg_confirm")?
+        .initial_input
+        .is_some());
+    store.inject_write_failure(false);
+    assert!(super::recovery::confirm_from_native_with(
+        &restarted,
+        &candidate,
+        || client.snapshot("ses_confirm")
+    )?);
+    assert!(restarted
+        .active_record("msg_confirm")?
+        .initial_input
+        .is_none());
+    let permissions = AgentPermissionState::default();
+    permissions.ensure_run_registered(&restarted.active_record("msg_confirm")?, &[])?;
+    assert!(permissions.waiting("msg_confirm").is_ok());
+    assert_eq!(server.join().map_err(|_| "join")??, 1);
+    std::fs::remove_dir_all(root).map_err(|e| e.to_string())?;
     Ok(())
 }

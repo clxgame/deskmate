@@ -1,6 +1,7 @@
-import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
+import { pruneRetiredPersonaMetadata } from "./persona-asset-policy";
 
 /**
  * Fetch the pinned 3D persona assets (models + textures) into public/personas.
@@ -119,6 +120,12 @@ async function unpack(archivePath: string, destination: string) {
 }
 
 async function main() {
+  // Apply the same policy to a warm cache as to a freshly unpacked archive.
+  // The pinned upstream archive/hash stay intact; retired metadata is filtered
+  // locally before download contents are copied into the authoring tree.
+  await pruneRetiredPersonaMetadata(targetDir).catch((error: unknown) => {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+  });
   if (await alreadyPrepared()) {
     console.log(`Persona assets ${PERSONAS_VERSION} already prepared`);
     return;
@@ -158,7 +165,11 @@ async function main() {
 
     const archivePath = resolve(workDir, ARCHIVE_NAME);
     await writeFile(archivePath, archive);
-    await unpack(archivePath, targetDir);
+    const unpacked = resolve(workDir, "unpacked");
+    await mkdir(unpacked);
+    await unpack(archivePath, unpacked);
+    await pruneRetiredPersonaMetadata(unpacked);
+    await cp(unpacked, targetDir, { recursive: true });
   } finally {
     await rm(workDir, { recursive: true, force: true });
   }

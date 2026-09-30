@@ -60,7 +60,8 @@ impl AgentRunState {
         }
         let mut record = data
             .active
-            .take()
+            .as_ref()
+            .cloned()
             .ok_or_else(|| "agent_run_unknown".to_owned())?;
         if finish.clear_input {
             record.initial_input = None;
@@ -70,10 +71,8 @@ impl AgentRunState {
         record.pending_outcome = None;
         record.pending_error_summary = None;
         record.ended_at = Some(chrono::Utc::now().to_rfc3339());
-        if let Err(error) = self.store.write(&record) {
-            data.active = Some(record);
-            return Err(error);
-        }
+        self.store.write(&record)?;
+        data.active = None;
         data.recent.insert(0, record);
         Ok(())
     }

@@ -1,9 +1,41 @@
-use std::fs;
-use std::path::PathBuf;
+#[cfg(windows)]
+use std::{fs, path::PathBuf};
 
 use super::*;
 
 #[test]
+fn registry_validation_uses_native_absolute_paths_and_rejects_extra_arguments() {
+    let root = std::env::temp_dir().join(format!("yume-registry-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).expect("fixture directory");
+    let executable = root.join(windows::CC_SWITCH_EXE);
+    let quoted = format!("\"{}\" \"%1\"", executable.display());
+    assert_eq!(
+        parse_registered_executable(&quoted),
+        Some(executable.clone())
+    );
+    for suffix in ["", " %1 %1", " %1 --extra", " %1suffix", "%1", "\n%1"] {
+        assert!(
+            parse_registered_executable(&format!("\"{}\"{suffix}", executable.display())).is_none()
+        );
+    }
+    let fixture = format!("(Default) REG_SZ {quoted}");
+    let installation =
+        detect_installation_from_registry_output(true, &fixture, |_| Some("3.20.0".into()))
+            .expect("native fixture");
+    assert_eq!(installation.executable, executable);
+    assert_eq!(
+        detect_installation_from_registry_output(true, &fixture, |_| None).err(),
+        Some(CcSwitchPlatformError::MalformedProtocolCommand)
+    );
+    assert_eq!(
+        detect_installation_from_registry_output(false, "", |_| None).err(),
+        Some(CcSwitchPlatformError::MissingProtocol)
+    );
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+#[cfg(windows)] // Native PathBuf must interpret Windows drives and separators.
 fn parses_only_absolute_ccswitch_registry_commands() {
     let parsed = parse_registered_executable(
         r#""C:\Users\tester\AppData\Local\Programs\CC Switch\CC-Switch.exe" "%1""#,
@@ -22,6 +54,7 @@ fn parses_only_absolute_ccswitch_registry_commands() {
 }
 
 #[test]
+#[cfg(windows)]
 fn requires_exactly_one_standalone_uri_placeholder() {
     assert_eq!(
         parse_registered_executable(r#"C:\Tools\CC-Switch.exe %1"#),
@@ -36,6 +69,7 @@ fn requires_exactly_one_standalone_uri_placeholder() {
 }
 
 #[test]
+#[cfg(windows)]
 fn fixture_detects_valid_quoted_registry_handler_without_real_registry() {
     let fixture = r#"
 HKEY_CLASSES_ROOT\ccswitch\shell\open\command
@@ -55,6 +89,7 @@ HKEY_CLASSES_ROOT\ccswitch\shell\open\command
 }
 
 #[test]
+#[cfg(windows)]
 fn fixture_detects_windows_short_path_registry_handler_without_real_registry() {
     let fixture = r#"
 HKEY_CLASSES_ROOT\ccswitch\shell\open\command
@@ -87,6 +122,7 @@ fn rejects_unrelated_or_spoofed_short_executable_names() {
 }
 
 #[test]
+#[cfg(windows)]
 fn fixture_rejects_missing_malformed_and_incompatible_registry_handlers() {
     assert_eq!(
         detect_installation_from_registry_output(false, "", |_| None).err(),

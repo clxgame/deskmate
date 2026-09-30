@@ -161,12 +161,3 @@ export function recoverCcSwitchToolResultsFromMessages(
   }
   return results;
 }
-
-export function recoverCcSwitchDraftsFromMessages(
-  messages: readonly OpenCodeMessage[],
-  tracker: CcSwitchToolResultTracker = createCcSwitchToolResultTracker(),
-): readonly CcSwitchToolResult[] {
-  return recoverCcSwitchToolResultsFromMessages(messages, tracker).filter(
-    (result) => result.kind === "draft",
-  );
-}

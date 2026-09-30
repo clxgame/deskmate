@@ -238,10 +238,6 @@ export function personaCatalog(
   );
 }
 
-
-/** Built-in personas only; used where install state is not available. */
-export const PERSONAS: readonly PersonaEntry[] = personaCatalog();
-
 /** Every persona across every known pack, whether installed or not. */
 export const ALL_PERSONAS: readonly PersonaEntry[] = personasOf(KNOWN_PACKS).sort(
   (left, right) => left.id.localeCompare(right.id),

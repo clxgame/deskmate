@@ -1,7 +1,8 @@
 # 决策记录（已验证决策、兼容补丁与移除条件）
 
-记录时间：2026-09-22 · 阶段：P0
-格式：每条决策含依据与移除/重审条件。P0 为只读调查，以下均为"路线确认"级决策，无代码改动。
+记录起点：2026-09-22 P0；随后追加 P1–P6 实施决策；整理核对：2026-09-30。每条决策含依据与移除/重审条件，各条日期和阶段限定其环境与验证范围。P0 条目是当时的只读路线核查，不能概括后续已实施状态。
+
+当前入口：[文档索引](../../README.md)、[工作台构建](../../workbench-build.md)、[记忆与日志契约](../../memory-and-worklog.md)、[统一历史契约](unified-history-contract.md)、[当前验收与待办](../../verification-backlog.md)。历史方案、进度和验证回执已归档，现行设置或后续修订优先于被标记 superseded 的原文。
 
 ## D0-1：上游固定基线采用 anomalyco/opencode @ 826d9ad4
 
@@ -53,6 +54,8 @@
 
 ## D1-12：不退役轻聊旧 system 参数注入（修订 P1 预留的"退役"计划）
 
+- **2026-09-30 superseded（部分）**：以下内容保留为 P1 的历史决策与证据，不能作为当前工作台只注入静态锚点记忆的说明。当前 `yume-context-plugin.ts` 通过 `chat.message` 注册原生 turn，并在 system transform 中经带 token 的本地 AutomationBridge 获取当前记忆上下文；内部提取/report sessions 继续排除。轻聊逐回合 system 参数和块去重仍保留。自动记忆/日志有独立提交与回执，普通工作陈述不能被当成手动写入或创建调度授权。当前使用与构建入口见根 README。
+
 - **决策**：轻聊保留逐回合 system 参数注入（persona+skills+逐回合关键词记忆）；工作台经 yume-context 插件注入（persona+skills+锚点记忆）；插件经指纹去重保证**每次模型请求全局恰好一份** Yume 上下文。
 - **依据**：§8.2 硬性要求——原生扩展链路注入、两种入口都能经过、每次请求恰好一份、幂等不 append——现行方案全部满足。轻聊的逐回合关键词记忆检索（`memory::retrieval::context_for_turn(真实用户输入)`）是 README 明示的产品契约（"相关记忆随消息注入"）；插件的 `experimental.chat.system.transform` 拿不到用户消息文本，只能提供锚点级静态记忆，强行退役旧链路会造成记忆功能真实回退。双路径经指纹去重收敛到一份，无重复注入、无双引擎。
 - **后续路径**：若日后以 `experimental.chat.messages.transform`（可访问消息内容）实现插件侧逐回合记忆检索并验证等价，再评估退役旧链路；届时双入口人设块将统一为插件独立 system 条目形态。
@@ -70,6 +73,8 @@
 - **移除条件**：上游 ghostty-web 改为内嵌 wasm 或 vite 资产化；届时从 prepare-workbench.ts 移除暂存步骤。
 
 ## D1-11：模型默认值的单一生效源——设置页写回到 sidecar 全局配置
+
+- **2026-09-30 补充**：全局配置仍是默认来源，当前轻聊/Agent 还按完整 catalog key 持久化 `inherit` 或显式模型选择。发送前必须在对应已验证 provider/model catalog 中解析，失效选择阻断发送，不静默回落。下文“轻聊总是读取 settings.model_id”的早期说明已被[当前会话模型契约](unified-history-contract.md#chat-composer-model-preference-2026-09-27)补充；调度继续使用独立快照。
 
 - **决策**：`set_settings` 保存后调用 `sync_workbench_default_model`：`provider_id/model_id` 非空且 sidecar 运行时，PATCH `/global/config {"model":"{provider_id}/{model_id}"}`（Basic 头，3s 超时，失败不阻断保存）。
 - **依据**：§3.4 要求原生模型设置与 Yume 设置页共用一个生效来源。现状三处模型相关写入各有归属：providers/权限策略=Yume 设置（`OPENCODE_CONFIG_CONTENT` 环境注入，重启重注、优先于文件）；工作台默认模型=sidecar 全局配置文件；轻聊=设置页 `settings.model_id` 逐请求显式传参。写回后，设置页与工作台默认模型收敛到同一个 sidecar `model` 字段，消除"两套值互相覆盖"。

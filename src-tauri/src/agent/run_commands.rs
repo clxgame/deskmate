@@ -193,7 +193,7 @@ pub(crate) async fn agent_run_start(
         }
         let created = u64::try_from(chrono::Utc::now().timestamp_millis())
             .map_err(|_| "history_time_invalid".to_owned())?;
-        if crate::history::save_agent_input(
+        if let Err(error) = crate::history::save_agent_input(
             &app,
             &app.state::<crate::history::HistoryState>(),
             crate::history::AgentHistoryInput {
@@ -202,10 +202,8 @@ pub(crate) async fn agent_run_start(
                 text: &request.input,
                 created,
             },
-        )
-        .is_err()
-        {
-            return fail_history_start(&state, &app.state::<AgentPermissionState>(), &run_id);
+        ) {
+            eprintln!("agent input archive {run_id}: {error}");
         }
         if request.model_selection.is_some() {
             let identity = crate::history::catalog_model::CatalogIdentity::Native {
@@ -222,13 +220,17 @@ pub(crate) async fn agent_run_start(
                     .set_model_selection(&identity.key(), &selection)
             })();
             if persistence.is_err() {
-                return fail_history_start(&state, &app.state::<AgentPermissionState>(), &run_id);
+                return fail_catalog_start(&state, &app.state::<AgentPermissionState>(), &run_id);
             }
         }
         let _operation = state.lock_operation()?;
         state.active_record(&run_id)?;
         let resources = match crate::chat_attachments::resources::prepare_for_session(
-            &app, &workspace.to_string_lossy(), &session, &request.resource_ids, Some(&run_id),
+            &app,
+            &workspace.to_string_lossy(),
+            &session,
+            &request.resource_ids,
+            Some(&run_id),
         ) {
             Ok(resources) => resources,
             Err(error) => {
@@ -238,7 +240,9 @@ pub(crate) async fn agent_run_start(
             }
         };
         let input = format!("{}{}", request.input, resources.text);
-        if let Err(error) = client.prompt_with_parts(&session, &run_id, &system, &input, &resources.parts) {
+        if let Err(error) =
+            client.prompt_with_parts(&session, &run_id, &system, &input, &resources.parts)
+        {
             super::supervision::submission_failed(&app, &state.active_record(&run_id)?, &error)?;
             return Err(error);
         }
@@ -252,14 +256,14 @@ pub(crate) async fn agent_run_start(
     .map_err(|_| "agent_worker_failed".to_owned())?
 }
 
-pub(super) fn fail_history_start<T>(
+pub(super) fn fail_catalog_start<T>(
     state: &AgentRunState,
     permissions: &AgentPermissionState,
     run_id: &str,
 ) -> Result<T, String> {
     let _ = permissions.cancel_run(run_id);
-    match state.fail_active_preserving_input(run_id, "history_storage_failed") {
-        Ok(()) => Err("history_storage_failed".to_owned()),
+    match state.fail_active_preserving_input(run_id, "catalog_storage_failed") {
+        Ok(()) => Err("catalog_storage_failed".to_owned()),
         Err(error) => Err(error),
     }
 }

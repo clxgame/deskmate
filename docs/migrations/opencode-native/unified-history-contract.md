@@ -1,6 +1,8 @@
 # Unified conversation history contract
 
-Contract version: 1. Implementation scope: isolated `codex/yume-opencode-v048` checkout. Native content remains owned by OpenCode; original legacy `history.json` remains the authority for legacy text. The catalog stores organization and cached summaries only, never native messages, parts, attachment data, or tool output.
+Current contract, reviewed 2026-09-30 for YUME 0.4.16 / OpenCode 1.18.21; host catalog SQLite schema version 2. Native execution facts remain owned by OpenCode; original legacy `history.json` owns legacy text and tagged local product replies. The catalog stores identity, organization, model preferences and cached summaries, never native messages, parts, attachment data, or tool output. The existing Agent archive still writes compatibility text projections; retiring new projections remains H1 in the [current verification backlog](../../verification-backlog.md), rather than an already completed guarantee.
+
+This is the current entry for shared history, empty-session visibility, routing and data/rollback rules. Original receipts are retained in [the archive](../../archive/README.md); historical test counts and package paths below are dated evidence, not a new acceptance run.
 
 ## Identity and discovery
 
@@ -25,9 +27,26 @@ Contract version: 1. Implementation scope: isolated `codex/yume-opencode-v048` c
 | availability | `available`, `stale`, `unavailable` |
 | ownership | `unowned`, `workbench`, `agent`; never derive ownership from title or source alone |
 | runtime | `idle`, `running`, `unknown`; absence of runtime evidence is unknown |
+| hasRecords | Optional tri-state: missing/null means unverified, true means record evidence exists, false means verified empty. This classifies visibility without deleting native context. |
 | tombstone | null or `{requestedAt,remoteDeleted}`; durable suppression precedes remote deletion |
 
 Host rows add `key`, `displayTitle` and computed `capabilities`. The metadata catalog schema is additive and independently versioned by its persistence owner. Never ask an older OpenCode binary to downgrade the native database.
+
+## Empty sessions and shared entry
+
+Opening chat, creating a context, choosing a folder/model or editing a draft does not create visible history or increase counts. Native user, attachment-only and tool messages count as records; local product replies, legacy text and Agent run evidence are also retained. Exclude verified empty entries before filtering, search, sorting and paging. An unknown entry is classified only after a successful scoped native message-existence request (`limit=1`); failed access, malformed/oversized responses, a title or an empty preview never proves emptiness. A previously populated entry stays visible when offline; activity on a verified empty entry triggers reclassification.
+
+Keep the native context and organization/model metadata needed for a first send. Empty visibility cleanup issues no native delete request or tombstone. The first actual message makes the row visible even while its response is pending. The [empty-history receipt](../../archive/history/empty-conversation-history.md) retains the isolated macOS count evidence and Windows limitation.
+
+The tray's **全部对话记录** and workbench-local **Ctrl+Alt+H** both reveal the same organizer in `chat`. The shortcut ignores repeats, text composition and added Shift/Meta. `show_history_organizer` permits only `chat`/`workbench`; the host stores a pending boolean request and emits `history://open` to chat. Chat installs its listener before consuming the request on mount or event, preserving clicks before mount. Opening the organizer neither selects, clones, creates nor sends a session and does not change ownership. Row selection routes by the complete directory/session identity and shared capabilities. Build the generated bridge through the [current workbench entry](../../workbench-build.md); the [original entry contract](../../archive/migrations/opencode-native/history-entry.md) preserves the implementation receipt.
+
+The organizer uses the existing small 420×560 and expanded 720×760 chat windows. It groups conversations, gives pinned rows precedence, keeps search/filter controls and menus within the viewport, and loads previews only for visible rows plus a small margin. Loading, failure, offline, no-result and pending-mutation states remain distinct. Composer folder changes, pending model choice and attachments are isolated by draft/session generation; late folder/model/search responses cannot overwrite a newer selection. Busy Stop and approval notices stay reachable without creating a second composer. The current visual rules live in [DESIGN.md](../../../DESIGN.md); original [organizer](../../archive/history/history-organizer-redesign-plan.md) and [composer](../../archive/chat/chat-composer-workspace-model-plan.md) plans preserve their dated receipts and unfinished native matrix.
+
+## Data ownership and rollback
+
+OpenCode owns its native database, logs, tool output and repository cache. YUME owns the catalog, legacy/local product text, RunRecord execution metadata, settings, memory/worklog databases and imported persona assets. RunRecord and summaries do not replace native execution facts. The legacy `native-session-index.json` reader remains a compatibility input; current identity must resolve to the full catalog tuple. Memory/worklog deletion and independent commit/receipt rules are maintained in the [memory contract](../../memory-and-worklog.md).
+
+UI rollback and database downgrade are separate. Hiding the workbench preserves native sessions and metadata; pure legacy text remains read-only without fabricated tool parts. Never replay old text as a native prompt, overwrite current data with an old backup, or let an older sidecar write a newer database. Format conversion requires a verified isolated copy/export; when lossless conversion is unproven, retain the current database and newer entry. Tombstones, legacy bytes, local-only tags, Agent ownership and message/part deduplication remain protected. The [original ownership and rollback receipt](../../archive/migrations/opencode-native/data-and-rollback.md) retains synthetic migration hashes and isolated installation evidence; its P0 no-auth and private configuration observations describe that baseline only. Cross-version rollback remains in the [backlog](../../verification-backlog.md).
 
 ## Capability matrix
 
@@ -48,7 +67,7 @@ The following assumes a row without a tombstone. The host recomputes runtime/own
 
 Permanent delete requires explicit UI confirmation, a fresh host safety check, an atomically durable tombstone, then remote deletion. Failed remote deletion leaves the tombstone available for retry. Tombstoned native projections and delayed agent snapshots must never recreate a visible row. Original legacy bytes remain intact for rollback; the organizer hides deleted legacy rows through metadata.
 
-## Synthetic fixtures and verification boundary
+## Synthetic fixtures and verification boundary (2026-09-24 receipt)
 
 `catalog_model_tests.rs` constructs 1,007 synthetic native summaries, a cross-project bare-ID collision, another sidecar identity, legacy text identity, ownership/runtime combinations, unavailable/archived/deleted states, and excluded malformed/child/out-of-scope records. It drives a real JSON write/reopen/read using an isolated temporary directory and removes that directory after success. A 100-row synthetic paging traversal verifies 1,008 distinct identities; the discovery adapter must independently prove network pagination and failure handling.
 

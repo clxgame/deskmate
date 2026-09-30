@@ -60,6 +60,83 @@ fn persistence_failure_never_leaves_running_state() -> TestResult<()> {
 }
 
 #[test]
+fn every_failed_commit_preserves_ram_disk_and_restart_then_can_retry() -> TestResult<()> {
+    for operation in ["bind", "confirm", "request_finish", "reconcile", "finish"] {
+        let (root, workspace) = fixture()?;
+        let store = RunStore::new(root.join("agent-runs"));
+        let state = AgentRunState::new(store.clone());
+        state.begin("msg_run", &workspace, "input")?;
+        if operation != "bind" {
+            state.bind_session("msg_run", "ses_run")?;
+        }
+        let before = serde_json::to_value(state.active_record("msg_run")?).checked("before")?;
+        let messages = [NativeMessage {
+            id: "msg_reply".into(),
+            parent_id: Some("msg_run".into()),
+            role: Some("assistant".into()),
+            created: None,
+            completed: false,
+            finish: None,
+            error: None,
+            parts: Vec::new(),
+        }];
+        let registered = std::cell::Cell::new(0);
+        let commit = || match operation {
+            "bind" => state.bind_session_with("msg_run", "ses_run", || {
+                registered.set(registered.get() + 1);
+                Ok(())
+            }),
+            "confirm" => state.confirm_submission("msg_run"),
+            "request_finish" => {
+                state.request_finish("msg_run", RunOutcome::Cancelled, Some("cancel".into()))
+            }
+            "reconcile" => state.reconcile("msg_run", &messages),
+            "finish" => state.finish("msg_run", RunOutcome::Completed, None),
+            _ => unreachable!(),
+        };
+        store.inject_write_failure(true);
+        assert_eq!(
+            commit(),
+            Err("agent_storage_unavailable".into()),
+            "{operation}"
+        );
+        assert_eq!(
+            serde_json::to_value(state.active_record("msg_run")?).checked("ram")?,
+            before,
+            "RAM {operation}"
+        );
+        assert_eq!(
+            serde_json::to_value(&store.load()?[0]).checked("disk")?,
+            before,
+            "disk {operation}"
+        );
+        let restarted = AgentRunState::load(store.clone())?;
+        assert_eq!(
+            serde_json::to_value(restarted.active_record("msg_run")?).checked("restart")?,
+            before,
+            "restart {operation}"
+        );
+        if operation == "bind" {
+            assert_eq!(registered.get(), 1);
+        }
+        store.inject_write_failure(false);
+        commit()?;
+        let listing = state.read()?;
+        let after = listing
+            .active
+            .as_ref()
+            .unwrap_or_else(|| &listing.recent[0]);
+        assert_ne!(serde_json::to_value(after).checked("changed")?, before);
+        assert_eq!(
+            serde_json::to_value(after).checked("after")?,
+            serde_json::to_value(&store.load()?[0]).checked("committed disk")?
+        );
+        fs::remove_dir_all(root).checked("cleanup")?;
+    }
+    Ok(())
+}
+
+#[test]
 fn cancel_only_commits_after_confirmed_abort() -> TestResult<()> {
     let (root, workspace) = fixture()?;
     let state = AgentRunState::new(RunStore::new(root.join("agent-runs")));

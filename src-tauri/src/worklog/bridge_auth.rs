@@ -157,7 +157,11 @@ pub fn grant(text: &str) -> WorklogResult<Grant> {
 }
 
 pub fn authorize(grant: &Grant, action: &str) -> WorklogResult<()> {
-    if grant.created.elapsed() > std::time::Duration::from_secs(1800)
+    authorize_at(grant, action, std::time::Instant::now())
+}
+
+fn authorize_at(grant: &Grant, action: &str, now: std::time::Instant) -> WorklogResult<()> {
+    if now.saturating_duration_since(grant.created) > std::time::Duration::from_secs(1800)
         || (!matches!(action, "query" | "record") && !grant.actions.contains(action))
     {
         return Err(WorklogError::new(
@@ -309,10 +313,12 @@ mod tests {
 
     #[test]
     fn expired_turn_rejects_model_routed_tools() {
-        let mut request = grant("看一下，可能没记过").expect("grant");
-        request.created -= std::time::Duration::from_secs(1801);
+        let request = grant("看一下，可能没记过").expect("grant");
+        let boundary = request.created + std::time::Duration::from_secs(1800);
+        let expired = boundary + std::time::Duration::from_secs(1);
         for action in ["query", "record"] {
-            assert!(authorize(&request, action).is_err());
+            assert!(authorize_at(&request, action, boundary).is_ok());
+            assert!(authorize_at(&request, action, expired).is_err());
         }
     }
 }

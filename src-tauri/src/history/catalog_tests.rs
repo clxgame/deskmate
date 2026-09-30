@@ -38,6 +38,7 @@ fn model_selection_uses_full_key_and_survives_metadata_refresh_without_reorderin
     let connection = rusqlite::Connection::open(&path).unwrap();
     let remaining: i64 = connection.query_row("SELECT COUNT(*) FROM model_selections", [], |row| row.get(0)).unwrap();
     assert_eq!(remaining, 0);
+    drop(connection);
     std::fs::remove_dir_all(root).unwrap();
 }
 

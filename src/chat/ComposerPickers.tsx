@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
+import type { ThemeId } from "../settings/theme";
 import { invoke } from "@tauri-apps/api/core";
 import { AppIcon } from "../ui/AppIcon";
 import { catalogModels, sameModel, selectionForModel, type ChatModelCatalog, type ChatModelChoice, type ConversationModelSelection } from "../lib/conversationModel";
@@ -7,7 +8,9 @@ import { ComposerPopover } from "./ComposerPopover";
 
 function basename(path: string) { return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path; }
 
-export function WorkspacePicker({ language, workspace, locked, onSelect, onLeave, open: controlledOpen, onOpenChange }: {
+type PopoverContext = { readonly theme: ThemeId; readonly anchor: RefObject<HTMLElement | null> };
+
+export function WorkspacePicker({ language, theme, anchor, workspace, locked, onSelect, onLeave, open: controlledOpen, onOpenChange }: PopoverContext & {
   readonly language: string; readonly workspace: string | null; readonly locked: boolean;
   readonly onSelect: (path?: string) => Promise<void>; readonly onLeave: () => Promise<void>;
   readonly open?: boolean; readonly onOpenChange?: (open: boolean) => void;
@@ -29,19 +32,20 @@ export function WorkspacePicker({ language, workspace, locked, onSelect, onLeave
     try { await onSelect(path); setError(null); setOpen(false); trigger.current?.focus(); }
     catch (cause) { setError(folderErrorCopy(language, cause)); setOpen(true); }
   };
-  return <div className="composer-picker">
-    <button ref={trigger} type="button" className="composer-tool composer-folder" aria-haspopup="menu" aria-expanded={open}
+  return <div className="composer-picker composer-folder">
+    <button ref={trigger} type="button" className="composer-tool" aria-haspopup="menu" aria-expanded={open}
       aria-label={workspace ? `${copy.folder}: ${workspace}` : copy.folder}
       title={workspace ?? (locked ? copy.folderLocked : copy.folder)}
       onClick={() => { if (!workspace && recent.length === 0 && !locked) void select(); else setOpen(!open); }}>
       <AppIcon name="folder" size={16} /><span>{workspace ? basename(workspace) : copy.folder}</span><span aria-hidden="true">⌄</span>
     </button>
-    {open && <ComposerPopover trigger={trigger} label={copy.folder} onClose={() => setOpen(false)}>
+    {open && <ComposerPopover trigger={trigger} anchor={anchor} theme={theme} label={copy.folder} onClose={() => setOpen(false)}>
       {locked ? <p className="composer-popover-note">{copy.folderLocked}</p> : <>
         {recent.length > 0 && <p className="composer-popover-heading">{copy.recentFolders}</p>}
         {recent.map(path => <button type="button" role="menuitem" key={path} title={path} onClick={() => void select(path)}>
           <span className="composer-ellipsis">{basename(path)}</span><small className="composer-ellipsis">{path}</small>
         </button>)}
+        {recent.length > 0 && <div className="composer-popover-divider" role="separator" />}
         <button type="button" role="menuitem" onClick={() => void select()}>{copy.otherFolder}</button>
         {workspace && <button type="button" role="menuitem" onClick={() => void onLeave().then(() => setOpen(false)).catch(cause => setError(folderErrorCopy(language, cause)))}>{copy.leaveFolder}</button>}
         {error && <p role="alert" className="composer-popover-error">{error}</p>}
@@ -50,7 +54,7 @@ export function WorkspacePicker({ language, workspace, locked, onSelect, onLeave
   </div>;
 }
 
-export function ModelPicker({ language, selection, resolved, locked, onSelect, onManage, open: controlledOpen, onOpenChange }: {
+export function ModelPicker({ language, theme, anchor, selection, resolved, locked, onSelect, onManage, open: controlledOpen, onOpenChange }: PopoverContext & {
   readonly language: string; readonly selection: ConversationModelSelection; readonly resolved: ChatModelChoice | null;
   readonly locked: boolean; readonly onSelect: (selection: ConversationModelSelection) => Promise<void>;
   readonly onManage: () => void;
@@ -83,27 +87,37 @@ export function ModelPicker({ language, selection, resolved, locked, onSelect, o
     if (resolved && sameModel(b, resolved)) return 1;
     return a.modelName.localeCompare(b.modelName) || a.modelId.localeCompare(b.modelId);
   }).filter(model => `${model.modelName} ${model.modelId}`.toLowerCase().includes(search.toLowerCase()));
+  const modelLabel = resolved?.modelName ?? (selection.mode === "override" ? copy.modelInvalid : copy.model);
+  const characters = Array.from(modelLabel);
+  const suffixLength = characters.length > 8 ? 8 : 0;
   return <div className="composer-picker composer-model">
     <button ref={trigger} type="button" className="composer-tool" aria-haspopup="menu" aria-expanded={open}
+      aria-label={modelLabel}
       title={resolved ? `${resolved.modelName} (${resolved.modelId})` : copy.modelInvalid}
       onClick={() => setOpen(!open)}>
-      <span className="composer-ellipsis">{resolved?.modelName ?? (selection.mode === "override" ? copy.modelInvalid : copy.model)}</span><span aria-hidden="true">⌄</span>
+      <span className="composer-model-label" aria-hidden="true">
+        <span className="composer-model-prefix">{characters.slice(0, characters.length - suffixLength).join("")}</span>
+        {suffixLength > 0 && <span className="composer-model-suffix">{characters.slice(-suffixLength).join("")}</span>}
+      </span><span className="composer-caret" aria-hidden="true">⌄</span>
     </button>
-    {open && <ComposerPopover trigger={trigger} label={copy.model} onClose={() => setOpen(false)}>
+    {open && <ComposerPopover trigger={trigger} anchor={anchor} theme={theme} align="end" label={copy.model} onClose={() => setOpen(false)}>
       {locked ? <p className="composer-popover-note">{copy.modelLocked}</p> : <>
         <button type="button" role="menuitemradio" aria-checked={selection.mode === "inherit"} onClick={() => void choose({ mode: "inherit" })}>
-          {selection.mode === "inherit" ? "✓ " : ""}{copy.inherit}{catalog?.defaultModel ? ` · ${catalog.defaultModel.modelName}` : ""}
+          <span className="composer-ellipsis">{selection.mode === "inherit" ? "✓ " : ""}{copy.inherit}</span>
+          {catalog?.defaultModel && <small className="composer-ellipsis">{catalog.defaultModel.modelName}</small>}
         </button>
+        <div className="composer-popover-divider" role="separator" />
         {catalog && catalog.models.length > 6 && <input className="composer-search" value={search} onChange={event => setSearch(event.target.value)} placeholder={copy.search} aria-label={copy.search} />}
         {ordered.map(model => <button type="button" role="menuitemradio" aria-checked={selection.mode === "override" && selection.configuredProviderId === model.configuredProviderId && selection.sidecarId === model.sidecarId && selection.modelId === model.modelId}
           key={`${model.configuredProviderId}/${model.sidecarId}/${model.modelId}`} title={model.modelId}
           onClick={() => void choose(selectionForModel(model))}>
-          <span className="composer-ellipsis">{selection.mode === "override" && selection.modelId === model.modelId ? "✓ " : ""}{model.modelName}</span>
+          <span className="composer-ellipsis">{selection.mode === "override" && selection.configuredProviderId === model.configuredProviderId && selection.sidecarId === model.sidecarId && selection.modelId === model.modelId ? "✓ " : ""}{model.modelName}</span>
           <small className="composer-ellipsis">{model.modelId}</small>
         </button>)}
         {loading && <p className="composer-popover-note" role="status">…</p>}
         {!loading && !error && catalog?.models.length === 0 && <p className="composer-popover-note">{copy.noModels}</p>}
         {error && <p className="composer-popover-error" role="alert">{error} <button type="button" onClick={refresh}>{copy.retry}</button></p>}
+        <div className="composer-popover-divider" role="separator" />
         <button type="button" role="menuitem" onClick={() => { setOpen(false); onManage(); }}>{copy.manageModels}</button>
       </>}
     </ComposerPopover>}

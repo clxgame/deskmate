@@ -53,7 +53,7 @@ QA中的固定业务日期、Windows标准系统路径和PID精度日期是合�
 | --- | --- |
 | `/scripts/history-organizer-qa/index.html` | 生产 HistoryOrganizer 的合成46行；尺寸、theme/lang见[README](history-organizer-qa/README.md) |
 | `/scripts/horoscope-qa/index.html` | 预览整个 SettingsApp，含星运；目录历史名不代表独立星运验收 |
-| `/scripts/automation-qa/chat-preview.html` | 合成聊天/自动记忆显示，配合语义案例；不连接用户数据库 |
+| `/scripts/automation-qa/chat-preview.html` | 合成聊天/自动记忆显示，配合语义案例；不连接用户数据库。`?composer=1` 提供两个 DeepSeek 显示名、短/长最近目录和主题切换；加 `&models=many` 验证搜索/滚动，`&theme=dark` 等设置初始主题。配合浏览器 viewport 检查 420×560、720×760 与 360px 压力宽度；不代替原生目录选择或真实模型调用验收 |
 
 ## 发布
 

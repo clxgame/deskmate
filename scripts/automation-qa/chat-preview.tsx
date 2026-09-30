@@ -2,8 +2,21 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { nativeHistoryFixture, registeredHistoryFixture, catalogPageFixture } from "../../src/testing/historyCatalogFixtures";
+import { normalizeThemeId } from "../../src/settings/theme";
 import "../../src/theme.css";
 const win = window as any;
+const parameters = new URLSearchParams(location.search);
+const composerPreview = parameters.has("composer");
+const models = composerPreview ? [
+ {configuredProviderId:"fixture",sidecarId:"fixture",modelId:"deepseek-flash",modelName:"DeepSeek-V4.1-Flash"},
+ {configuredProviderId:"fixture",sidecarId:"fixture",modelId:"deepseek-v4-pro",modelName:"DeepSeek-V4-Pro"},
+] : [{configuredProviderId:"fixture",sidecarId:"fixture",modelId:"fixture",modelName:"预览模型"}];
+if (parameters.get("models") === "many") {
+ for (let index = 0; index < 30; index++) models.push({configuredProviderId:"fixture",sidecarId:"fixture",modelId:`qa-${index}`,modelName:`QA-long-model-name-for-narrow-window-${index}-Flash`});
+}
+const settings = {language:"zh-CN",theme:normalizeThemeId(parameters.get("theme") ?? "lavender"),personaId:"xiaozhu",userName:"",providerId:"fixture",modelId:models[0].modelId,memoryAutoExtract:true,memoryAiUse:true,worklogAutoArchive:true,scheduledTasks:[],providers:[],mouseFollow:false};
+let selection: any = {mode:"inherit"};
+const listeners = new Map<number, {event:string;handler:number}>();
 let callback = 0;
 const session = "ses_preview";
 const messages: any[] = [];
@@ -14,11 +27,14 @@ win.__TAURI_INTERNALS__ = {
  unregisterCallback: () => {}, convertFileSrc: (path: string) => path,
  invoke: async (command: string, args: any = {}) => {
   switch(command) {
-   case "get_settings": return {language:"zh-CN",theme:"lavender",personaId:"xiaozhu",userName:"",providerId:"fixture",modelId:"fixture",memoryAutoExtract:true,memoryAiUse:true,worklogAutoArchive:true,scheduledTasks:[],providers:[],mouseFollow:false};
+   case "get_settings": return settings;
    case "load_persona": return {persona:"你是小著。",skills:null,placeholders:null};
-   case "chat_model_resolve": return {configuredProviderId:"fixture",sidecarId:"fixture",modelId:"fixture",modelName:"预览模型"};
-   case "history_model_selection_get": return {mode:"inherit"};
-   case "history_recent_workspaces":
+   case "chat_model_catalog": return {models,defaultModel:models[0]};
+   case "chat_model_resolve": return models.find(model => model.modelId === (args.selection?.mode === "override" ? args.selection.modelId : models[0].modelId)) ?? models[0];
+   case "history_model_selection_get": return selection;
+   case "history_model_selection_set": selection = args.selection; return;
+   case "history_recent_workspaces": return composerPreview ? ["/private/tmp/yume-composer-qa/Output","/private/tmp/yume-composer-qa/very-long-workspace-name-for-narrow-window"] : [];
+   case "history_validate_workspace": return args.directory;
    case "tool_permission_pending": return [];
    case "history_register_native_session": return registeredHistoryFixture(args);
    case "history_catalog_list": return catalogPageFixture([]);
@@ -27,7 +43,8 @@ win.__TAURI_INTERNALS__ = {
    case "memory_context": return {memories:[],promptBlock:""};
    case "memory_automation_status": return {pending:0,failed:0};
    case "agent_run_read": return {active:null,recent:[]};
-   case "plugin:event|listen": return ++callback;
+   case "plugin:event|listen": { const id = ++callback; listeners.set(id, args); return id; }
+   case "plugin:event|unlisten": listeners.delete(args.eventId); return;
    default:return undefined;
   }
  }
@@ -59,3 +76,15 @@ window.fetch=async(input: any,init?:RequestInit)=>{
 };
 const {default:ChatApp}=await import("../../src/chat/ChatApp");
 createRoot(document.getElementById("root")!).render(<ChatApp/>);
+if (composerPreview) {
+ const control = document.createElement("select");
+ control.setAttribute("aria-label", "预览主题");
+ control.style.cssText = "position:fixed;top:52px;right:12px;z-index:10000;font:11px system-ui";
+ for (const theme of ["dark", "mint", "peach", "lavender"]) control.add(new Option(theme, theme));
+ control.value = settings.theme;
+ control.addEventListener("change", () => {
+  settings.theme = normalizeThemeId(control.value);
+  for (const listener of listeners.values()) if (listener.event === "deskmate://settings-changed") win[`_${listener.handler}`]?.({event:listener.event,payload:{...settings}});
+ });
+ document.body.append(control);
+}

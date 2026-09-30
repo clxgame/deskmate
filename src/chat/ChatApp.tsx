@@ -231,6 +231,7 @@ export default function ChatApp() {
   const [settingsRevision, setSettingsRevision] = useState(0);
   const [pendingWorkspace, setPendingWorkspace] = useState<{ path: string; generation: number } | null>(null);
   const [openPicker, setOpenPicker] = useState<"folder" | "model" | null>(null);
+  const composerAnchor = useRef<HTMLElement>(null);
   const folderLockedRef = useRef(true);
   const catalogEntryRef = useRef<UnifiedHistoryRow | null>(null);
   const viewGenerationRef = useRef(0);
@@ -1896,7 +1897,7 @@ export default function ChatApp() {
           ) : (
             <>
               <ToolApprovalCards requests={permissions.requests} error={permissions.error} onReply={permissions.reply} t={t} />
-              <footer className="chat-input-row">
+              <footer ref={composerAnchor} className="chat-input-row">
               <LocalResourceTray resources={localResources.resources} lang={resourceLanguage} onRemove={localResources.remove}
                 disabled={isSubmitting || status === "busy" || agent.busy} />
               <AttachmentTray
@@ -1941,11 +1942,11 @@ export default function ChatApp() {
                 >
                   <AppIcon name="add" size={16} />
                 </button>
-                <WorkspacePicker language={lang} workspace={agent.workspace ?? agentHistoryArchive?.agentDetails?.workspacePath ?? null}
+                <WorkspacePicker language={lang} theme={theme} anchor={composerAnchor} workspace={agent.workspace ?? agentHistoryArchive?.agentDetails?.workspacePath ?? null}
                   locked={isSubmitting || folderLocked} onSelect={chooseFolder} onLeave={leaveFolder}
                   open={openPicker === "folder"} onOpenChange={open => setOpenPicker(open ? "folder" : null)} />
                 <div className="chat-composer-spacer" />
-                <ModelPicker language={lang} selection={modelSelection} resolved={resolvedModel}
+                <ModelPicker language={lang} theme={theme} anchor={composerAnchor} selection={modelSelection} resolved={resolvedModel}
                   locked={isSubmitting || status === "busy" || agent.busy || historyLoading || readOnlyHistory || sessionOwnedByWorkbench}
                   onSelect={selectModel} onManage={() => void invoke("open_ai_model_settings")}
                   open={openPicker === "model"} onOpenChange={open => setOpenPicker(open ? "model" : null)} />
@@ -2055,6 +2056,5 @@ function upsertAssistant(
     update({ id: messageID, role: "assistant", text: "" }),
   ];
 }
-
 
 

@@ -3,9 +3,14 @@
   box-sizing: border-box;
 }
 
+.chat-root,
+.composer-popover {
+  --r-sm: 8px;
+  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+}
+
 .chat-root {
   --r-md: 10px;
-  --r-sm: 8px;
   --r-pill: 999px;
   --ease: 140ms ease;
   --composer-input-height: 56px;
@@ -34,8 +39,6 @@
   flex-direction: column;
   height: 100vh;
   position: relative;
-  font-family:
-    "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
   background: var(--surface-acrylic);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
@@ -1322,7 +1325,7 @@
 }
 .composer-picker { position: relative; min-width: 0; }
 .composer-folder { flex: 0 1 auto; max-width: 125px; }
-.composer-model { flex: 0 0 104px; max-width: 104px; }
+.composer-model { flex: 0 1 auto; max-width: 240px; }
 .composer-tool {
   display: inline-flex;
   align-items: center;
@@ -1342,14 +1345,21 @@
 .composer-tool:hover, .composer-tool[aria-expanded="true"] { background: var(--surface-hover); color: var(--text); }
 .composer-tool:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
 .composer-tool > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.composer-tool > .app-icon { flex: 0 0 auto; }
+.composer-tool > .app-icon,
+.composer-tool > span:last-child { flex: 0 0 auto; }
+.composer-folder .composer-tool,
 .composer-model .composer-tool { width: 100%; }
+.composer-tool > .composer-model-label { display: flex; min-width: 0; }
+.composer-model-prefix { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.composer-model-suffix { flex: 0 0 auto; }
 .chat-composer-spacer { flex: 1 1 0; min-width: 0; }
 .composer-popover {
   position: fixed;
   z-index: 9999;
   overflow-y: auto;
+  overflow-x: hidden;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: 2px;
   padding: 5px;
@@ -1358,6 +1368,7 @@
   background: var(--surface-raised);
   color: var(--text);
   box-shadow: var(--shadow-card);
+  font-size: 12px;
 }
 .composer-popover button {
   display: flex;
@@ -1365,6 +1376,7 @@
   align-items: flex-start;
   gap: 1px;
   width: 100%;
+  min-width: 0;
   padding: 6px 8px;
   border: 0;
   border-radius: 5px;
@@ -1375,7 +1387,11 @@
   text-align: left;
   cursor: pointer;
 }
-.composer-popover button:hover, .composer-popover button:focus-visible { background: var(--surface-hover); outline: none; }
+.composer-popover button:hover { background: var(--surface-hover); }
+.composer-popover button[aria-checked="true"] { background: var(--accent-soft); color: var(--accent-ink); }
+.composer-popover button:focus-visible,
+.composer-search:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
+.composer-popover-divider { height: 1px; margin: 4px 3px; background: var(--line); }
 .composer-popover small { max-width: 100%; color: var(--text-dim); font-size: 10px; }
 .composer-ellipsis { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-popover-heading, .composer-popover-note, .composer-popover-error { margin: 4px 8px; color: var(--text-dim); font-size: 11px; }
@@ -1391,7 +1407,6 @@
 .workspace-task-inline { border: 1px solid var(--line); border-radius: var(--r-sm); margin-top: 6px; }
 @media (max-width: 380px) {
   .composer-folder { max-width: 105px; }
-  .composer-model { flex-basis: 94px; max-width: 94px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
